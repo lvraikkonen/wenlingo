@@ -25,3 +25,16 @@ def test_seed_demo_data_creates_parent_and_four_children(session):
     }
     assert len(abilities) == 4
     assert all(20 <= ability.expression <= 70 for ability in abilities)
+
+
+def test_seed_demo_data_is_idempotent(session):
+    seed_demo_data(session)
+    seed_demo_data(session)
+
+    parents = session.exec(select(ParentUser)).all()
+    students = session.exec(select(StudentProfile)).all()
+    abilities = session.exec(select(AbilityProfile)).all()
+
+    assert len(parents) == 1
+    assert len(students) == 4
+    assert len(abilities) == 4

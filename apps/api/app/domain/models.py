@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import Column, JSON
+from sqlalchemy import Column, DateTime, JSON
 from sqlmodel import Field, SQLModel
 
 from app.domain.enums import BadgeCode, ReportType, StudentPersona, TaskType
@@ -16,11 +16,18 @@ def new_uuid() -> str:
     return str(uuid4())
 
 
+def timestamp_field():
+    return Field(
+        default_factory=utcnow,
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
 class ParentUser(SQLModel, table=True):
     id: str = Field(default_factory=new_uuid, primary_key=True)
     email: str = Field(index=True, unique=True)
     display_name: str
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: datetime = timestamp_field()
 
 
 class StudentProfile(SQLModel, table=True):
@@ -32,7 +39,7 @@ class StudentProfile(SQLModel, table=True):
     is_real_child: bool = False
     level: int = 1
     xp: int = 0
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: datetime = timestamp_field()
 
 
 class AbilityProfile(SQLModel, table=True):
@@ -44,8 +51,8 @@ class AbilityProfile(SQLModel, table=True):
     revision: int = 40
     comprehension: int = 40
     summarization: int = 40
-    evidence: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    updated_at: datetime = Field(default_factory=utcnow)
+    evidence: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    updated_at: datetime = timestamp_field()
 
 
 class Assessment(SQLModel, table=True):
@@ -55,7 +62,7 @@ class Assessment(SQLModel, table=True):
     sentence_after: str
     short_writing: str
     summary: str
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: datetime = timestamp_field()
 
 
 class SentenceTraining(SQLModel, table=True):
@@ -64,8 +71,8 @@ class SentenceTraining(SQLModel, table=True):
     source_sentence: str
     upgraded_sentence: str
     focus: str
-    ai_feedback: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=utcnow)
+    ai_feedback: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    created_at: datetime = timestamp_field()
 
 
 class Essay(SQLModel, table=True):
@@ -73,9 +80,9 @@ class Essay(SQLModel, table=True):
     student_id: str = Field(foreign_key="studentprofile.id", index=True)
     title: str
     status: str = "draft_feedback"
-    material_card: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    outline: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=utcnow)
+    material_card: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    outline: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    created_at: datetime = timestamp_field()
 
 
 class EssayVersion(SQLModel, table=True):
@@ -83,18 +90,18 @@ class EssayVersion(SQLModel, table=True):
     essay_id: str = Field(foreign_key="essay.id", index=True)
     version_label: str
     content: str
-    ai_feedback: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=utcnow)
+    ai_feedback: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    created_at: datetime = timestamp_field()
 
 
 class ReadingSession(SQLModel, table=True):
     id: str = Field(default_factory=new_uuid, primary_key=True)
     student_id: str = Field(foreign_key="studentprofile.id", index=True)
     article_title: str
-    answers: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    ai_feedback: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    answers: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    ai_feedback: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
     transfer_tip: str
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: datetime = timestamp_field()
 
 
 class GameEvent(SQLModel, table=True):
@@ -104,24 +111,26 @@ class GameEvent(SQLModel, table=True):
     xp_delta: int
     level_after: int
     badge_code: BadgeCode | None = None
-    problem_monsters: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
-    evidence: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=utcnow)
+    problem_monsters: list[dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSON, nullable=False)
+    )
+    evidence: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    created_at: datetime = timestamp_field()
 
 
 class Report(SQLModel, table=True):
     id: str = Field(default_factory=new_uuid, primary_key=True)
     student_id: str = Field(foreign_key="studentprofile.id", index=True)
     report_type: ReportType
-    content: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=utcnow)
+    content: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    created_at: datetime = timestamp_field()
 
 
 class LLMCallLog(SQLModel, table=True):
     id: str = Field(default_factory=new_uuid, primary_key=True)
     task_type: TaskType
     input_summary: str
-    output_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    output_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
     validation_ok: bool = False
     error_message: str = ""
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: datetime = timestamp_field()
