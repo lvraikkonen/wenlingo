@@ -2,31 +2,34 @@
   "name": "wenlingo-web",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.33.3",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "test": "vitest run --environment jsdom",
     "test:watch": "vitest --environment jsdom",
     "e2e": "playwright test",
-    "lint": "next lint"
+    "lint": "eslint ."
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "next": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "lucide-react": "latest"
+    "@vitejs/plugin-react": "6.0.1",
+    "lucide-react": "1.14.0",
+    "next": "16.2.4",
+    "react": "19.2.5",
+    "react-dom": "19.2.5"
   },
   "devDependencies": {
-    "@testing-library/jest-dom": "latest",
-    "@testing-library/react": "latest",
-    "@testing-library/user-event": "latest",
-    "@types/node": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "@playwright/test": "latest",
-    "jsdom": "latest",
-    "typescript": "latest",
-    "vitest": "latest"
+    "@playwright/test": "1.59.1",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.1",
+    "@types/node": "25.6.0",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "eslint": "9.39.2",
+    "eslint-config-next": "16.2.4",
+    "jsdom": "29.1.1",
+    "typescript": "6.0.3",
+    "vitest": "4.1.5"
   }
 }
