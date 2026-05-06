@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: wenlingo
+      POSTGRES_USER: wenlingo
+      POSTGRES_PASSWORD: wenlingo
+    ports:
+      - "5432:5432"
+    volumes:
+      - wenlingo_postgres:/var/lib/postgresql/data
+
+  postgres_test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: wenlingo_test
+      POSTGRES_USER: wenlingo
+      POSTGRES_PASSWORD: wenlingo
+    ports:
+      - "5433:5432"
+
+volumes:
+  wenlingo_postgres:
