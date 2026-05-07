@@ -35,6 +35,9 @@ def apply_ability_delta(
     if task_type == TaskType.reading:
         ability.comprehension = clamp(ability.comprehension + delta)
         ability.summarization = clamp(ability.summarization + delta)
-    ability.evidence[evidence_key] = {"quality_score": quality_score, "task_type": task_type.value}
+    ability.evidence = {
+        **ability.evidence,
+        evidence_key: {"quality_score": quality_score, "task_type": task_type.value},
+    }
     ability.updated_at = utcnow()
     return ability

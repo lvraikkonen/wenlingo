@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.domain.enums import TaskType
-from app.domain.models import AbilityProfile, StudentProfile
+from app.domain.models import AbilityProfile, ParentUser, StudentProfile
 from app.services.abilities import apply_ability_delta, to_child_abilities
 from app.services.gamification import settle_task
 from app.services.recommendations import choose_today_tasks
@@ -87,6 +87,34 @@ def test_apply_ability_delta_refreshes_updated_at():
     )
 
     assert ability.updated_at > old_updated_at
+
+
+def test_apply_ability_delta_persists_evidence(session):
+    parent = ParentUser(email="parent@example.com", display_name="Parent")
+    student = StudentProfile(parent_id=parent.id, name="小宇", persona="real_child")
+    ability = AbilityProfile(
+        student_id=student.id,
+        expression=40,
+        observation=38,
+    )
+    session.add(parent)
+    session.add(student)
+    session.add(ability)
+    session.commit()
+
+    apply_ability_delta(
+        ability,
+        task_type=TaskType.sentence,
+        evidence_key="specific_detail_added",
+        quality_score=0.8,
+    )
+    session.commit()
+    session.refresh(ability)
+
+    assert ability.evidence["specific_detail_added"] == {
+        "quality_score": 0.8,
+        "task_type": "sentence",
+    }
 
 
 def test_settle_task_rejects_unsupported_task_type():
