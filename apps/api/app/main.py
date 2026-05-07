@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 
+from app.api.routes import assessment, auth, dashboard
+
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Wenlingo API")
@@ -8,6 +10,9 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         return {"service": "wenlingo-api", "status": "ok"}
 
+    app.include_router(auth.router)
+    app.include_router(assessment.router)
+    app.include_router(dashboard.router)
     return app
 
 
