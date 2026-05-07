@@ -66,21 +66,25 @@ def test_game_event_problem_monsters_are_string_list():
 
 
 def test_essay_version_labels_are_unique_per_essay(session):
-    essay = Essay(student_id="student-1", title="我学会了骑车")
+    essay_title = "我学会了骑车"
+    first_revision = "我学会了骑车。第一次修改加了动作。"
+    duplicate_revision = "我学会了骑车。第二次修改不能重复保存。"
+
+    essay = Essay(student_id="student-1", title=essay_title)
     session.add(essay)
     session.flush()
     session.add(
         EssayVersion(
             essay_id=essay.id,
             version_label="revision",
-            content="我学会了骑车。第一次修改加了动作。",
+            content=first_revision,
         )
     )
     session.add(
         EssayVersion(
             essay_id=essay.id,
             version_label="revision",
-            content="我学会了骑车。第二次修改不能重复保存。",
+            content=duplicate_revision,
         )
     )
 
