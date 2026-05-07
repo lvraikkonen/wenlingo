@@ -28,7 +28,7 @@ def test_child_ability_mapping_uses_three_public_dimensions():
 def test_sentence_training_updates_ability_and_settlement():
     student = StudentProfile(
         parent_id="parent-1",
-        name="灏忓畤",
+        name="小宇",
         persona="real_child",
         xp=90,
         level=1,
@@ -44,8 +44,8 @@ def test_sentence_training_updates_ability_and_settlement():
     event = settle_task(
         student,
         TaskType.sentence,
-        problem_monsters=["绌烘硾琛ㄨ揪"],
-        evidence={"focus": "鍔犵粏鑺?"},
+        problem_monsters=["空泛表达"],
+        evidence={"focus": "加细节"},
     )
 
     assert ability.expression == 44
@@ -68,5 +68,8 @@ def test_recommendations_prioritize_revision_gap():
     tasks = choose_today_tasks(ability, has_completed_assessment=True)
 
     assert tasks.main.kind == "essay"
+    assert tasks.main.title == "作文城堡"
+    assert tasks.main.focus == "把选材和结构说清楚"
     assert tasks.quick.kind == "sentence"
-    assert tasks.quick.focus in {"鍔犵粏鑺?", "鍔犲姩浣滄垨绁炴€?"}
+    assert tasks.quick.title == "句子工坊"
+    assert tasks.quick.focus == "加动作或神态"
