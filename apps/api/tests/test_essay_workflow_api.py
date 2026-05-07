@@ -1,11 +1,34 @@
+import pytest
+from fastapi import HTTPException
 from sqlmodel import select
 
+from app.api.routes.essays import EssayRevisionCreate, submit_revision
 from app.domain.models import Essay, EssayVersion, GameEvent, StudentProfile
 from app.domain.seed import seed_demo_data
 
 
 def parent_students(session, parent_id: str):
     return session.exec(select(StudentProfile).where(StudentProfile.parent_id == parent_id)).all()
+
+
+class EmptyScalarResult:
+    def first(self):
+        return None
+
+
+class StaleRevisionReadSession:
+    def __init__(self, session):
+        self.session = session
+        self.exec_count = 0
+
+    def exec(self, statement):
+        self.exec_count += 1
+        if self.exec_count == 2:
+            return EmptyScalarResult()
+        return self.session.exec(statement)
+
+    def __getattr__(self, name):
+        return getattr(self.session, name)
 
 
 def test_essay_from_existing_draft_feedback_and_revision(session, client):
@@ -106,3 +129,42 @@ def test_revision_cannot_be_settled_twice(session, client):
     assert len(session.exec(select(EssayVersion)).all()) == 2
     assert len(session.exec(select(GameEvent)).all()) == 1
     assert parent_students(session, parent.id)[0].xp == xp_after_first_revision
+
+
+@pytest.mark.asyncio
+async def test_revision_integrity_conflict_returns_409_before_settlement(session):
+    parent = seed_demo_data(session)
+    student = parent_students(session, parent.id)[0]
+    essay = Essay(student_id=student.id, title="我学会了骑车", status="revision_requested")
+    session.add(essay)
+    session.flush()
+    session.add(
+        EssayVersion(
+            essay_id=essay.id,
+            version_label="first_draft",
+            content="我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+        )
+    )
+    session.add(
+        EssayVersion(
+            essay_id=essay.id,
+            version_label="revision",
+            content="我学会了骑车。第一次修改已经保存。",
+        )
+    )
+    session.commit()
+    xp_before = parent_students(session, parent.id)[0].xp
+
+    with pytest.raises(HTTPException) as exc_info:
+        await submit_revision(
+            essay.id,
+            EssayRevisionCreate(
+                content="我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。爸爸松手后，我摇摇晃晃骑过了花坛。"
+            ),
+            StaleRevisionReadSession(session),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "essay already settled"
+    assert len(session.exec(select(GameEvent)).all()) == 0
+    assert parent_students(session, parent.id)[0].xp == xp_before

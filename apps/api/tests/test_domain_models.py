@@ -1,3 +1,6 @@
+import pytest
+from sqlalchemy.exc import IntegrityError
+
 from app.domain.models import (
     AbilityProfile,
     Assessment,
@@ -60,3 +63,26 @@ def test_json_columns_are_not_nullable():
 
 def test_game_event_problem_monsters_are_string_list():
     assert GameEvent.__annotations__["problem_monsters"] == list[str]
+
+
+def test_essay_version_labels_are_unique_per_essay(session):
+    essay = Essay(student_id="student-1", title="我学会了骑车")
+    session.add(essay)
+    session.flush()
+    session.add(
+        EssayVersion(
+            essay_id=essay.id,
+            version_label="revision",
+            content="我学会了骑车。第一次修改加了动作。",
+        )
+    )
+    session.add(
+        EssayVersion(
+            essay_id=essay.id,
+            version_label="revision",
+            content="我学会了骑车。第二次修改不能重复保存。",
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        session.flush()

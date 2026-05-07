@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, JSON
+from sqlalchemy import Column, DateTime, JSON, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from app.domain.enums import BadgeCode, ReportType, StudentPersona, TaskType
@@ -86,6 +86,10 @@ class Essay(SQLModel, table=True):
 
 
 class EssayVersion(SQLModel, table=True):
+    __table_args__ = (
+        UniqueConstraint("essay_id", "version_label", name="uq_essay_version_label_per_essay"),
+    )
+
     id: str = Field(default_factory=new_uuid, primary_key=True)
     essay_id: str = Field(foreign_key="essay.id", index=True)
     version_label: str

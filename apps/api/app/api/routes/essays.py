@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.api.deps import get_db_session
@@ -94,10 +95,15 @@ async def submit_revision(
         content=request.content,
         ai_feedback=comparison.model_dump(),
     )
+    session.add(revision)
+    try:
+        session.flush()
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="essay already settled") from exc
     apply_ability_delta(ability, TaskType.essay, "essay_revision", 0.85, completed_revision=True)
     event = settle_task(student, TaskType.essay, ["细节缺口"], {"essay_id": essay_id})
     essay.status = "settled"
-    session.add(revision)
     session.add(essay)
     session.add(ability)
     session.add(student)
