@@ -1,3 +1,5 @@
+import re
+
 from app.services.llm_contracts import GhostwritingCheck, SentenceFeedback
 from app.services.llm_provider import LLMProvider
 
@@ -25,6 +27,10 @@ GHOSTWRITING_INTENT_PATTERNS = [
     "写作文",
 ]
 
+GHOSTWRITING_INTENT_REGEXES = [
+    re.compile(r"(替我|给我|帮我)?写一篇.+作文"),
+]
+
 
 def _normalize_request(text: str) -> str:
     return "".join(char for char in text.lower() if char.isalnum())
@@ -34,6 +40,7 @@ def convert_ghostwriting_request(text: str) -> GhostwritingCheck:
     normalized_text = _normalize_request(text)
     blocked = any(_normalize_request(trigger) in normalized_text for trigger in GHOSTWRITING_TRIGGERS)
     blocked = blocked or any(pattern in normalized_text for pattern in GHOSTWRITING_INTENT_PATTERNS)
+    blocked = blocked or any(pattern.search(normalized_text) for pattern in GHOSTWRITING_INTENT_REGEXES)
     if not blocked:
         return GhostwritingCheck(blocked=False, message="", next_question="")
     return GhostwritingCheck(

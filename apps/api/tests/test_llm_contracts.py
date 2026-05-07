@@ -43,6 +43,9 @@ def test_convert_ghostwriting_request_returns_coaching_message():
         "给我写作文",
         "写一篇关于春天的作文",
         "帮我生成作文",
+        "替我写一篇推荐一个好地方的作文",
+        "给我写一篇我的乐园作文",
+        "写一篇难忘的一天作文",
     ],
 )
 def test_convert_ghostwriting_request_blocks_common_variants(request_text):
