@@ -19,6 +19,13 @@ class EssayFeedback(BaseModel):
     revision_tasks: list[RevisionTask] = Field(min_length=1, max_length=3)
 
 
+class EssayRevisionComparison(BaseModel):
+    encouragement: NonBlankStr
+    improved_dimensions: list[NonBlankStr] = Field(min_length=1, max_length=3)
+    evidence: list[NonBlankStr] = Field(min_length=1, max_length=3)
+    next_step: NonBlankStr
+
+
 class SentenceFeedback(BaseModel):
     encouragement: NonBlankStr
     specific_improvement: NonBlankStr

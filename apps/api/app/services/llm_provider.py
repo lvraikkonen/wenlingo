@@ -20,10 +20,8 @@ class MockLLMProvider:
             return {
                 "strengths": ["能写清楚发生了什么", "有一处心情表达"],
                 "improvements": ["第二段缺少动作细节"],
-                "problem_monsters": ["细节缺席"],
-                "sentence_notes": [
-                    "把“我很开心”换成看到、听到、做到的细节。"
-                ],
+                "problem_monsters": ["细节缺口"],
+                "sentence_notes": ["把“我很开心”换成看到、听到、做到的细节。"],
                 "revision_tasks": [
                     {"instruction": "给第二段加一个动作描写", "target": "第二段"}
                 ],

@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.api.routes import assessment, auth, dashboard, sentences
+from app.api.routes import assessment, auth, dashboard, essays, sentences
 
 
 def create_app() -> FastAPI:
@@ -13,6 +13,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(assessment.router)
     app.include_router(dashboard.router)
+    app.include_router(essays.router)
     app.include_router(sentences.router)
     return app
 
