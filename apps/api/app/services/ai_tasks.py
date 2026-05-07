@@ -10,9 +10,30 @@ GHOSTWRITING_TRIGGERS = [
     "范文",
 ]
 
+GHOSTWRITING_INTENT_PATTERNS = [
+    "替我写作文",
+    "替我写一篇作文",
+    "给我写作文",
+    "给我写一篇作文",
+    "帮我写作文",
+    "帮我写一篇作文",
+    "帮我生成作文",
+    "生成作文",
+    "生成一篇作文",
+    "写一篇作文",
+    "写一篇关于",
+    "写作文",
+]
+
+
+def _normalize_request(text: str) -> str:
+    return "".join(char for char in text.lower() if char.isalnum())
+
 
 def convert_ghostwriting_request(text: str) -> GhostwritingCheck:
-    blocked = any(trigger in text for trigger in GHOSTWRITING_TRIGGERS)
+    normalized_text = _normalize_request(text)
+    blocked = any(_normalize_request(trigger) in normalized_text for trigger in GHOSTWRITING_TRIGGERS)
+    blocked = blocked or any(pattern in normalized_text for pattern in GHOSTWRITING_INTENT_PATTERNS)
     if not blocked:
         return GhostwritingCheck(blocked=False, message="", next_question="")
     return GhostwritingCheck(

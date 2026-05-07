@@ -28,4 +28,4 @@ class MockLLMProvider:
                     {"instruction": "给第二段加一个动作描写", "target": "第二段"}
                 ],
             }
-        return {}
+        raise ValueError(f"Unknown LLM task: {task_name}")

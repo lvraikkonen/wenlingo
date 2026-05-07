@@ -1,25 +1,30 @@
-from pydantic import BaseModel, Field, field_validator
+from typing import Annotated
+
+from pydantic import BaseModel, Field, StringConstraints, model_validator
+
+
+NonBlankStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class RevisionTask(BaseModel):
-    instruction: str
-    target: str
+    instruction: NonBlankStr
+    target: NonBlankStr
 
 
 class EssayFeedback(BaseModel):
-    strengths: list[str] = Field(min_length=2, max_length=2)
-    improvements: list[str] = Field(min_length=1, max_length=3)
-    problem_monsters: list[str] = Field(min_length=1, max_length=3)
-    sentence_notes: list[str] = Field(min_length=1, max_length=3)
+    strengths: list[NonBlankStr] = Field(min_length=2, max_length=2)
+    improvements: list[NonBlankStr] = Field(min_length=1, max_length=3)
+    problem_monsters: list[NonBlankStr] = Field(min_length=1, max_length=3)
+    sentence_notes: list[NonBlankStr] = Field(min_length=1, max_length=3)
     revision_tasks: list[RevisionTask] = Field(min_length=1, max_length=3)
 
 
 class SentenceFeedback(BaseModel):
-    encouragement: str
-    specific_improvement: str
-    next_step: str
+    encouragement: NonBlankStr
+    specific_improvement: NonBlankStr
+    next_step: NonBlankStr
     ability_delta: dict[str, int]
-    problem_monsters: list[str] = Field(min_length=1, max_length=3)
+    problem_monsters: list[NonBlankStr] = Field(min_length=1, max_length=3)
 
 
 class GhostwritingCheck(BaseModel):
@@ -27,17 +32,16 @@ class GhostwritingCheck(BaseModel):
     message: str
     next_question: str
 
+    @model_validator(mode="after")
+    def require_coaching_text_when_blocked(self) -> "GhostwritingCheck":
+        if self.blocked and (not self.message.strip() or not self.next_question.strip()):
+            raise ValueError("blocked ghostwriting checks require coaching text")
+        return self
+
 
 class ReportContent(BaseModel):
-    practice_summary: str
-    ability_changes: list[str] = Field(min_length=1, max_length=6)
-    best_revision: str
-    weak_points: list[str] = Field(min_length=1, max_length=2)
-    next_suggestions: list[str] = Field(min_length=1, max_length=3)
-
-    @field_validator("practice_summary", "best_revision")
-    @classmethod
-    def reject_empty_text(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("text must not be empty")
-        return value
+    practice_summary: NonBlankStr
+    ability_changes: list[NonBlankStr] = Field(min_length=1, max_length=6)
+    best_revision: NonBlankStr
+    weak_points: list[NonBlankStr] = Field(min_length=1, max_length=2)
+    next_suggestions: list[NonBlankStr] = Field(min_length=1, max_length=3)
