@@ -1,7 +1,11 @@
 import pytest
 from pydantic import ValidationError
 
-from app.services.ai_tasks import convert_ghostwriting_request, sentence_upgrade_feedback
+from app.services.ai_tasks import (
+    convert_ghostwriting_request,
+    essay_revision_comparison,
+    sentence_upgrade_feedback,
+)
 from app.services.llm_contracts import (
     EssayFeedback,
     GhostwritingCheck,
@@ -121,6 +125,30 @@ class MalformedSentenceProvider:
         }
 
 
+class RecordingComparisonProvider:
+    def __init__(self):
+        self.calls = []
+
+    async def complete_json(self, task_name, payload):
+        self.calls.append((task_name, payload))
+        return {
+            "encouragement": "你把修改重点抓住了。",
+            "improved_dimensions": ["情节更完整"],
+            "evidence": ["爸爸松手后"],
+            "next_step": "再补一个结尾感受。",
+        }
+
+
+class MalformedComparisonProvider:
+    async def complete_json(self, task_name, payload):
+        return {
+            "encouragement": "继续加油",
+            "improved_dimensions": [],
+            "evidence": ["爸爸松手后"],
+            "next_step": "再补一个结尾感受。",
+        }
+
+
 @pytest.mark.asyncio
 async def test_sentence_upgrade_feedback_uses_structured_mock_provider():
     provider = MockLLMProvider()
@@ -145,6 +173,39 @@ async def test_sentence_upgrade_feedback_rejects_malformed_provider_response():
             source_sentence="公园很美。",
             upgraded_sentence="清晨的公园里，荷叶上的水珠一闪一闪。",
             focus="加细节",
+        )
+
+
+@pytest.mark.asyncio
+async def test_essay_revision_comparison_uses_provider_output():
+    provider = RecordingComparisonProvider()
+
+    result = await essay_revision_comparison(
+        provider=provider,
+        first_draft="我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+        revision="我学会了骑车。爸爸松手后，我摇摇晃晃骑过了花坛。我开心得跳了起来。",
+    )
+
+    assert provider.calls == [
+        (
+            "essay_revision_comparison",
+            {
+                "first_draft": "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+                "revision": "我学会了骑车。爸爸松手后，我摇摇晃晃骑过了花坛。我开心得跳了起来。",
+            },
+        )
+    ]
+    assert result.encouragement == "你把修改重点抓住了。"
+    assert result.improved_dimensions == ["情节更完整"]
+
+
+@pytest.mark.asyncio
+async def test_essay_revision_comparison_rejects_malformed_provider_response():
+    with pytest.raises(ValidationError):
+        await essay_revision_comparison(
+            provider=MalformedComparisonProvider(),
+            first_draft="我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+            revision="我学会了骑车。爸爸松手后，我摇摇晃晃骑过了花坛。我开心得跳了起来。",
         )
 
 

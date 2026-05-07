@@ -61,12 +61,28 @@ async def submit_revision(
     essay = session.get(Essay, essay_id)
     if not essay:
         raise HTTPException(status_code=404, detail="essay not found")
+    if essay.status == "settled":
+        raise HTTPException(status_code=409, detail="essay already settled")
     first_draft = session.exec(
         select(EssayVersion).where(
             EssayVersion.essay_id == essay_id,
             EssayVersion.version_label == "first_draft",
         )
-    ).one()
+    ).first()
+    if not first_draft:
+        raise HTTPException(status_code=409, detail="first draft not found")
+    existing_revision = session.exec(
+        select(EssayVersion).where(
+            EssayVersion.essay_id == essay_id,
+            EssayVersion.version_label == "revision",
+        )
+    ).first()
+    if existing_revision:
+        raise HTTPException(status_code=409, detail="essay already settled")
+    student = session.get(StudentProfile, essay.student_id)
+    ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == essay.student_id)).first()
+    if not student or not ability:
+        raise HTTPException(status_code=404, detail="student not found")
     comparison = await essay_revision_comparison(
         MockLLMProvider(),
         first_draft.content,
@@ -78,8 +94,6 @@ async def submit_revision(
         content=request.content,
         ai_feedback=comparison.model_dump(),
     )
-    ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == essay.student_id)).one()
-    student = session.get(StudentProfile, essay.student_id)
     apply_ability_delta(ability, TaskType.essay, "essay_revision", 0.85, completed_revision=True)
     event = settle_task(student, TaskType.essay, ["细节缺口"], {"essay_id": essay_id})
     essay.status = "settled"

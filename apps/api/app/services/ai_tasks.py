@@ -85,9 +85,8 @@ async def essay_revision_comparison(
     first_draft: str,
     revision: str,
 ) -> EssayRevisionComparison:
-    return EssayRevisionComparison(
-        encouragement="你把最重要的画面写清楚了。",
-        improved_dimensions=["细节更多", "动作更具体"],
-        evidence=["手心都出汗了", "摇摇晃晃骑过花坛"],
-        next_step="下一次可以把结尾的感受写得更清楚。",
+    raw = await provider.complete_json(
+        "essay_revision_comparison",
+        {"first_draft": first_draft, "revision": revision},
     )
+    return EssayRevisionComparison.model_validate(raw)

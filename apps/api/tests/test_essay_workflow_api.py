@@ -36,3 +36,73 @@ def test_essay_from_existing_draft_feedback_and_revision(session, client):
     assert len(session.exec(select(Essay)).all()) == 1
     assert len(session.exec(select(EssayVersion)).all()) == 2
     assert session.exec(select(GameEvent)).one().xp_delta == 60
+
+
+def test_revision_without_first_draft_returns_conflict(session, client):
+    parent = seed_demo_data(session)
+    student = parent_students(session, parent.id)[0]
+    essay = Essay(student_id=student.id, title="我学会了骑车", status="revision_requested")
+    session.add(essay)
+    session.commit()
+
+    response = client.post(
+        f"/api/essays/{essay.id}/revision",
+        json={"content": "我学会了骑车。刚开始我很害怕。后来我慢慢练习，终于能稳稳骑过小路。"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "first draft not found"
+    assert len(session.exec(select(EssayVersion)).all()) == 0
+    assert len(session.exec(select(GameEvent)).all()) == 0
+
+
+def test_revision_missing_student_or_ability_returns_not_found(session, client):
+    essay = Essay(student_id="missing-student", title="我学会了骑车", status="revision_requested")
+    session.add(essay)
+    session.flush()
+    session.add(
+        EssayVersion(
+            essay_id=essay.id,
+            version_label="first_draft",
+            content="我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+        )
+    )
+    session.commit()
+
+    response = client.post(
+        f"/api/essays/{essay.id}/revision",
+        json={"content": "我学会了骑车。刚开始我很害怕。后来我慢慢练习，终于能稳稳骑过小路。"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "student not found"
+    assert len(session.exec(select(GameEvent)).all()) == 0
+
+
+def test_revision_cannot_be_settled_twice(session, client):
+    parent = seed_demo_data(session)
+    student = parent_students(session, parent.id)[0]
+
+    start = client.post(
+        f"/api/students/{student.id}/essays",
+        json={
+            "title": "我学会了骑车",
+            "draft": "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+            "entry": "existing_draft",
+        },
+    )
+    essay_id = start.json()["essay"]["id"]
+    revision_payload = {
+        "content": "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。爸爸松手后，我摇摇晃晃骑过了花坛。我开心得跳了起来。"
+    }
+
+    first_revision = client.post(f"/api/essays/{essay_id}/revision", json=revision_payload)
+    xp_after_first_revision = parent_students(session, parent.id)[0].xp
+    second_revision = client.post(f"/api/essays/{essay_id}/revision", json=revision_payload)
+
+    assert first_revision.status_code == 201
+    assert second_revision.status_code == 409
+    assert second_revision.json()["detail"] == "essay already settled"
+    assert len(session.exec(select(EssayVersion)).all()) == 2
+    assert len(session.exec(select(GameEvent)).all()) == 1
+    assert parent_students(session, parent.id)[0].xp == xp_after_first_revision

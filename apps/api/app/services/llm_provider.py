@@ -26,4 +26,11 @@ class MockLLMProvider:
                     {"instruction": "给第二段加一个动作描写", "target": "第二段"}
                 ],
             }
+        if task_name == "essay_revision_comparison":
+            return {
+                "encouragement": "你把最重要的画面写清楚了。",
+                "improved_dimensions": ["细节更多", "动作更具体"],
+                "evidence": ["手心都出汗了", "摇摇晃晃骑过花坛"],
+                "next_step": "下一次可以把结尾的感受写得更清楚。",
+            }
         raise ValueError(f"Unknown LLM task: {task_name}")
