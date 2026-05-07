@@ -1,3 +1,7 @@
+from datetime import datetime, timezone
+
+import pytest
+
 from app.domain.enums import TaskType
 from app.domain.models import AbilityProfile, StudentProfile
 from app.services.abilities import apply_ability_delta, to_child_abilities
@@ -25,7 +29,7 @@ def test_child_ability_mapping_uses_three_public_dimensions():
     }
 
 
-def test_sentence_training_updates_ability_and_settlement():
+def test_sentence_training_updates_ability_and_settlement(session):
     student = StudentProfile(
         parent_id="parent-1",
         name="小宇",
@@ -54,9 +58,45 @@ def test_sentence_training_updates_ability_and_settlement():
     assert student.level == 2
     assert event.xp_delta == 25
     assert event.badge_code == "first_sentence_upgrade"
+    assert event.problem_monsters == ["空泛表达"]
+
+    session.add(event)
+    session.commit()
+    session.refresh(event)
+
+    assert event.problem_monsters == ["空泛表达"]
+    assert all(
+        isinstance(problem_monster, str) for problem_monster in event.problem_monsters
+    )
 
 
-def test_recommendations_prioritize_revision_gap():
+def test_apply_ability_delta_refreshes_updated_at():
+    old_updated_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    ability = AbilityProfile(
+        student_id="student-1",
+        expression=40,
+        observation=38,
+        updated_at=old_updated_at,
+    )
+
+    apply_ability_delta(
+        ability,
+        task_type=TaskType.sentence,
+        evidence_key="specific_detail_added",
+        quality_score=0.8,
+    )
+
+    assert ability.updated_at > old_updated_at
+
+
+def test_settle_task_rejects_unsupported_task_type():
+    student = StudentProfile(parent_id="parent-1", name="小宇", persona="real_child")
+
+    with pytest.raises(ValueError, match="Unsupported settlement task type"):
+        settle_task(student, TaskType.report, problem_monsters=[], evidence={})
+
+
+def test_recommendations_prioritize_structure_gap():
     ability = AbilityProfile(
         student_id="student-1",
         expression=52,

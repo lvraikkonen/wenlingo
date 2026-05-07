@@ -111,7 +111,7 @@ class GameEvent(SQLModel, table=True):
     xp_delta: int
     level_after: int
     badge_code: BadgeCode | None = None
-    problem_monsters: list[dict[str, Any]] = Field(
+    problem_monsters: list[str] = Field(
         default_factory=list, sa_column=Column(JSON, nullable=False)
     )
     evidence: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))

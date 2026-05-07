@@ -20,6 +20,8 @@ def settle_task(
     problem_monsters: list[str],
     evidence: dict,
 ) -> GameEvent:
+    if task_type not in XP_BY_TASK:
+        raise ValueError(f"Unsupported settlement task type: {task_type.value}")
     xp_delta = XP_BY_TASK[task_type]
     student.xp += xp_delta
     student.level = level_for_xp(student.xp)

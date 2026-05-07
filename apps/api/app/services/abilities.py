@@ -1,5 +1,5 @@
 from app.domain.enums import TaskType
-from app.domain.models import AbilityProfile
+from app.domain.models import AbilityProfile, utcnow
 
 
 def clamp(value: int) -> int:
@@ -36,4 +36,5 @@ def apply_ability_delta(
         ability.comprehension = clamp(ability.comprehension + delta)
         ability.summarization = clamp(ability.summarization + delta)
     ability.evidence[evidence_key] = {"quality_score": quality_score, "task_type": task_type.value}
+    ability.updated_at = utcnow()
     return ability

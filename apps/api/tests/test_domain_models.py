@@ -56,3 +56,7 @@ def test_json_columns_are_not_nullable():
         column = model.__table__.c[field_name]
 
         assert column.nullable is False, f"{model.__name__}.{field_name}"
+
+
+def test_game_event_problem_monsters_are_string_list():
+    assert GameEvent.__annotations__["problem_monsters"] == list[str]
