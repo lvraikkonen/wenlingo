@@ -22,17 +22,15 @@ def build_stage_report_content(session: Session, student_id: str) -> ReportConte
         raise LookupError("report context not found")
     weak_points = []
     if ability.structure < 45:
-        weak_points.append("浣滄枃缁撴瀯杩橀渶瑕佹洿娓呮")
+        weak_points.append("作文结构还需要更清晰")
     if ability.summarization < 45:
-        weak_points.append("闃呰姒傛嫭鍙互缁х画缁?")
+        weak_points.append("阅读概括可以继续练")
     if not weak_points:
-        weak_points.append("缁х画淇濇寔缁嗚妭鍜屼慨鏀圭粌涔?")
+        weak_points.append("继续保持细节和修改练习")
     return ReportContent(
-        practice_summary=f"鏈樁娈?畬鎴愪簡 {sentence_count} 娆″彞瀛愯缁冨拰 {reading_count} 娆￠槄璇荤粌涔犮€?",
-        ability_changes=["鍐欏叿浣撳姏鏈夋柊鐨勮瘉鎹?", "浼氫慨鏀瑰姏闅忕潃浜岀鏇存柊"],
-        best_revision=revision.content
-        if revision
-        else "杩樻病鏈変簩绋匡紝涓嬩竴娆￠噸鐐瑰畬鎴愪竴娆′慨鏀归棴鐜€?",
+        practice_summary=f"本阶段完成了 {sentence_count} 次句子训练和 {reading_count} 次阅读练习。",
+        ability_changes=["写具体力有新的证据", "会修改力随着二稿更新"],
+        best_revision=revision.content if revision else "还没有二稿，下一次重点完成一次修改闭环。",
         weak_points=weak_points[:2],
-        next_suggestions=["缁х画鍋?1 娆″彞瀛愬姞缁嗚妭", "瀹屾垚 1 娆′綔鏂囦簩绋夸慨鏀?"],
+        next_suggestions=["继续做 1 次句子加细节", "完成 1 次作文二稿修改"],
     )

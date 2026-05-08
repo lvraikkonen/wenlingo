@@ -16,6 +16,17 @@
 - Current repo state: documentation-only repository with `README.md`, `.env`, `.env-sample`, `.gitignore`, `img/logo&desc.png`, and the MVP design spec.
 - Backend Python rule: use `uv sync`, `uv run pytest`, and `uv run uvicorn` for dependency installation, tests, and local server execution. Do not use direct `pip install`, `python -m pytest`, or bare `uvicorn` commands in this repo plan.
 
+## Agent Execution Guardrail: Chinese Text Encoding
+
+This plan contains historical mojibake in some Chinese snippets, for example text that looks like `鏄...`, `鍐...`, `閺...`, `锛`, `銆`, `€?`, or `�`. When using Subagent-Driven Development, do not copy those corrupted strings into implementation or tests. Before dispatching an implementer, the controller must rewrite any user-facing Chinese in the task prompt as readable UTF-8 Chinese. Implementers must preserve source files as UTF-8 and use readable Chinese literals in code, tests, fixtures, UI labels, API responses, and report content.
+
+For each task that adds or changes Chinese user-facing text:
+
+- Add or update tests with readable Chinese expectations, not mojibake expectations.
+- Run the task's focused tests after the readable Chinese expectations are in place, so corrupted output fails red before implementation is fixed.
+- Before commit, scan touched files for common mojibake markers such as `鏄`, `鍐`, `浣`, `缁`, `闃`, `灏`, `姒`, `閺`, `锛`, `銆`, `€?`, and `�`.
+- If the source plan text is corrupted, infer the intended Chinese from product context and existing readable labels, then make the implementation readable. Do not preserve plan corruption for "exact match" unless the user explicitly asks for byte-for-byte reproduction.
+
 ## Scope Check
 
 The spec spans frontend, backend, database, AI orchestration, and product flows. Keep this as one plan because the MVP acceptance criterion is an end-to-end learning loop, but implement it as independently testable vertical slices. Each task below ends with passing tests and a commit.

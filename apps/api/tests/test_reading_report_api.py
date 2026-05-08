@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 from sqlmodel import select
@@ -9,6 +10,31 @@ from app.domain.enums import BadgeCode, TaskType
 from app.domain.models import AbilityProfile, Essay, EssayVersion, GameEvent, ReadingSession, Report, StudentProfile
 from app.domain.seed import seed_demo_data
 from app.main import create_app
+
+
+TASK9_TEXT_FILES = [
+    "app/api/routes/readings.py",
+    "app/api/routes/reports.py",
+    "app/services/reports.py",
+    "tests/test_reading_report_api.py",
+]
+
+MOJIBAKE_MARKER_CODEPOINTS = [
+    0x93C4,
+    0x9350,
+    0x6D63,
+    0x7F01,
+    0x95C3,
+    0x704F,
+    0x59D2,
+    0x95BA,
+    0x951B,
+    0x9286,
+    0xFFFD,
+]
+MOJIBAKE_MARKERS = [chr(codepoint) for codepoint in MOJIBAKE_MARKER_CODEPOINTS] + [
+    "\N{EURO SIGN}?"
+]
 
 
 def parent_students(session, parent_id: str):
@@ -26,6 +52,15 @@ def client_without_server_exceptions(session):
     app.dependency_overrides.clear()
 
 
+def test_task9_user_facing_chinese_does_not_contain_mojibake():
+    api_root = Path(__file__).resolve().parents[1]
+
+    for relative_path in TASK9_TEXT_FILES:
+        content = (api_root / relative_path).read_text(encoding="utf-8")
+        for marker in MOJIBAKE_MARKERS:
+            assert marker not in content, f"{relative_path} contains mojibake marker {marker!r}"
+
+
 def test_reading_session_updates_transfer_tip_and_report(session, client):
     parent = seed_demo_data(session)
     student = parent_students(session, parent.id)[0]
@@ -40,16 +75,16 @@ def test_reading_session_updates_transfer_tip_and_report(session, client):
         json={
             "article_id": "spring-sounds",
             "answers": {
-                "main_idea": "鏄ュぉ鏉ヤ簡锛屽皬娌冲拰楦熷効閮藉緢鐑椆銆?",
-                "detail": "灏忔渤鍙戝嚭鍝楀暒鍟︾殑澹伴煶銆?",
-                "transfer": "鍐欐櫙鍙互鍐欏０闊炽€?",
+                "main_idea": "春天来了，小河和鸟儿都很热闹。",
+                "detail": "小河发出哗啦啦的声音。",
+                "transfer": "写景可以写声音。",
             },
         },
     )
 
     assert reading.status_code == 201
-    assert reading.json()["transfer_tip"] == "鍐欐櫙鏃跺彲浠ュ姞鍏ュ０闊炽€?"
-    assert session.exec(select(ReadingSession)).one().article_title == "鏄ュぉ鐨勫０闊?"
+    assert reading.json()["transfer_tip"] == "写景时可以加入声音。"
+    assert session.exec(select(ReadingSession)).one().article_title == "春天的声音"
 
     ability_after = session.exec(
         select(AbilityProfile).where(AbilityProfile.student_id == student.id)
@@ -64,7 +99,7 @@ def test_reading_session_updates_transfer_tip_and_report(session, client):
 
     assert report.status_code == 201
     payload = report.json()["content"]
-    assert "鏈樁娈?" in payload["practice_summary"]
+    assert "本阶段" in payload["practice_summary"]
     assert len(payload["weak_points"]) <= 2
     assert session.exec(select(Report)).one().report_type == "stage"
 

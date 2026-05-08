@@ -12,8 +12,8 @@ router = APIRouter(prefix="/api/students", tags=["readings"])
 
 ARTICLES = {
     "spring-sounds": {
-        "title": "鏄ュぉ鐨勫０闊?",
-        "transfer_tip": "鍐欐櫙鏃跺彲浠ュ姞鍏ュ０闊炽€?",
+        "title": "春天的声音",
+        "transfer_tip": "写景时可以加入声音。",
     }
 }
 
@@ -38,11 +38,11 @@ def create_reading(
         student_id=student_id,
         article_title=article["title"],
         answers=request.answers,
-        ai_feedback={"encouragement": "浣犳姄浣忎簡鏂囩珷閲岀殑澹伴煶缁嗚妭銆?"},
+        ai_feedback={"encouragement": "你抓住了文章里的声音细节。"},
         transfer_tip=article["transfer_tip"],
     )
     apply_ability_delta(ability, TaskType.reading, "reading_transfer", 0.75)
-    event = settle_task(student, TaskType.reading, ["姒傛嫭涓嶆竻"], {"transfer_tip": article["transfer_tip"]})
+    event = settle_task(student, TaskType.reading, ["概括不清"], {"transfer_tip": article["transfer_tip"]})
     session.add(reading)
     session.add(ability)
     session.add(student)
