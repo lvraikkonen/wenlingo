@@ -23,7 +23,12 @@ def create_report(
     student = session.get(StudentProfile, student_id)
     if not student:
         raise HTTPException(status_code=404, detail="student not found")
-    content = build_stage_report_content(session, student_id)
+    if request.report_type != ReportType.stage:
+        raise HTTPException(status_code=400, detail="only stage reports are supported")
+    try:
+        content = build_stage_report_content(session, student_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     report = Report(student_id=student_id, report_type=request.report_type, content=content.model_dump())
     session.add(report)
     report_payload = report.model_dump()
