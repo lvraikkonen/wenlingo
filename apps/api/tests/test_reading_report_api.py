@@ -1,6 +1,6 @@
 from sqlmodel import select
 
-from app.domain.models import ReadingSession, Report, StudentProfile
+from app.domain.models import Essay, EssayVersion, ReadingSession, Report, StudentProfile
 from app.domain.seed import seed_demo_data
 
 
@@ -35,3 +35,37 @@ def test_reading_session_updates_transfer_tip_and_report(session, client):
     assert "鏈樁娈?" in payload["practice_summary"]
     assert len(payload["weak_points"]) <= 2
     assert session.exec(select(Report)).one().report_type == "stage"
+
+
+def test_report_uses_only_requested_students_revision(session, client):
+    parent = seed_demo_data(session)
+    requested_student, other_student = parent_students(session, parent.id)[:2]
+
+    requested_essay = Essay(student_id=requested_student.id, title="Requested", status="settled")
+    other_essay = Essay(student_id=other_student.id, title="Other", status="settled")
+    session.add(requested_essay)
+    session.add(other_essay)
+    session.flush()
+    session.add(
+        EssayVersion(
+            essay_id=requested_essay.id,
+            version_label="revision",
+            content="REQUESTED_STUDENT_REVISION",
+        )
+    )
+    session.add(
+        EssayVersion(
+            essay_id=other_essay.id,
+            version_label="revision",
+            content="OTHER_STUDENT_REVISION",
+        )
+    )
+    session.commit()
+
+    report = client.post(
+        f"/api/students/{requested_student.id}/reports",
+        json={"report_type": "stage"},
+    )
+
+    assert report.status_code == 201
+    assert report.json()["content"]["best_revision"] == "REQUESTED_STUDENT_REVISION"

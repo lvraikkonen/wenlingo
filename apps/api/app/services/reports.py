@@ -1,6 +1,6 @@
 from sqlmodel import Session, select
 
-from app.domain.models import AbilityProfile, EssayVersion, ReadingSession, SentenceTraining
+from app.domain.models import AbilityProfile, Essay, EssayVersion, ReadingSession, SentenceTraining
 from app.services.llm_contracts import ReportContent
 
 
@@ -11,7 +11,11 @@ def build_stage_report_content(session: Session, student_id: str) -> ReportConte
     reading_count = len(
         session.exec(select(ReadingSession).where(ReadingSession.student_id == student_id)).all()
     )
-    revisions = session.exec(select(EssayVersion).where(EssayVersion.version_label == "revision")).all()
+    revisions = session.exec(
+        select(EssayVersion)
+        .join(Essay)
+        .where(Essay.student_id == student_id, EssayVersion.version_label == "revision")
+    ).all()
     ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).one()
     weak_points = []
     if ability.structure < 45:
