@@ -12,7 +12,9 @@ from app.main import create_app
 
 
 def parent_students(session, parent_id: str):
-    return session.exec(select(StudentProfile).where(StudentProfile.parent_id == parent_id)).all()
+    return session.exec(
+        select(StudentProfile).where(StudentProfile.parent_id == parent_id).order_by(StudentProfile.id)
+    ).all()
 
 
 @contextmanager
@@ -146,6 +148,41 @@ def test_report_uses_latest_requested_students_revision(session, client):
 
     assert report.status_code == 201
     assert report.json()["content"]["best_revision"] == "NEWER_REVISION"
+
+
+def test_report_breaks_revision_created_at_ties_by_revision_id(session, client):
+    parent = seed_demo_data(session)
+    student = parent_students(session, parent.id)[0]
+    same_created_at = datetime.now(timezone.utc)
+    first_essay = Essay(student_id=student.id, title="First", status="settled")
+    second_essay = Essay(student_id=student.id, title="Second", status="settled")
+    session.add(first_essay)
+    session.add(second_essay)
+    session.flush()
+    session.add(
+        EssayVersion(
+            id="00000000-0000-0000-0000-000000000001",
+            essay_id=first_essay.id,
+            version_label="revision",
+            content="LOWER_ID_REVISION",
+            created_at=same_created_at,
+        )
+    )
+    session.add(
+        EssayVersion(
+            id="ffffffff-ffff-ffff-ffff-ffffffffffff",
+            essay_id=second_essay.id,
+            version_label="revision",
+            content="HIGHER_ID_REVISION",
+            created_at=same_created_at,
+        )
+    )
+    session.commit()
+
+    report = client.post(f"/api/students/{student.id}/reports", json={"report_type": "stage"})
+
+    assert report.status_code == 201
+    assert report.json()["content"]["best_revision"] == "HIGHER_ID_REVISION"
 
 
 def test_report_rejects_weekly_report_type(session, client):

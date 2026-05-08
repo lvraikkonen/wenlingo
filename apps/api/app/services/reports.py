@@ -15,7 +15,7 @@ def build_stage_report_content(session: Session, student_id: str) -> ReportConte
         select(EssayVersion)
         .join(Essay)
         .where(Essay.student_id == student_id, EssayVersion.version_label == "revision")
-        .order_by(EssayVersion.created_at.desc())
+        .order_by(EssayVersion.created_at.desc(), EssayVersion.id.desc())
     ).first()
     ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
     if not ability:
