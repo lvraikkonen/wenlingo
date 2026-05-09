@@ -1,19 +1,25 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import AssessmentPage from "../src/app/children/[studentId]/assessment/page";
 import SentencePage from "../src/app/children/[studentId]/sentence/page";
 
-afterEach(() => {
-  cleanup();
-});
+const apiMocks = vi.hoisted(() => ({
+  createAssessment: vi.fn(),
+  createSentenceTraining: vi.fn(),
+}));
 
 vi.mock("../src/lib/api", () => ({
-  createAssessment: async () => ({
+  createAssessment: apiMocks.createAssessment,
+  createSentenceTraining: apiMocks.createSentenceTraining,
+}));
+
+beforeEach(() => {
+  apiMocks.createAssessment.mockResolvedValue({
     assessment: { summary: "完成入门小试炼，生成第一张能力草图。" },
-  }),
-  createSentenceTraining: async () => ({
+  });
+  apiMocks.createSentenceTraining.mockResolvedValue({
     feedback: {
       encouragement: "你把画面写得更清楚了。",
       specific_improvement: "加入了可看见的细节",
@@ -23,8 +29,13 @@ vi.mock("../src/lib/api", () => ({
       level_after: 2,
       badge_code: "first_sentence_upgrade",
     },
-  }),
-}));
+  });
+});
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 test("assessment page submits entry trial", async () => {
   render(<AssessmentPage params={{ studentId: "s1" }} />);
@@ -43,6 +54,12 @@ test("assessment page submits entry trial", async () => {
   expect(
     await screen.findByText("完成入门小试炼，生成第一张能力草图。"),
   ).toBeInTheDocument();
+  expect(apiMocks.createAssessment).toHaveBeenCalledWith("s1", {
+    sentence_before: "公园很美。",
+    sentence_after: "公园里的花红红的，风一吹就轻轻摇。",
+    short_writing:
+      "我学会了骑车。刚开始我很害怕，后来爸爸扶着我练，我终于能骑一小段了。",
+  });
 });
 
 test("sentence page shows ai feedback and settlement", async () => {
@@ -59,4 +76,62 @@ test("sentence page shows ai feedback and settlement", async () => {
 
   expect(await screen.findByText("加入了可看见的细节")).toBeInTheDocument();
   expect(screen.getByText("+25 XP")).toBeInTheDocument();
+  expect(apiMocks.createSentenceTraining).toHaveBeenCalledWith("s1", {
+    source_sentence: "公园很美。",
+    upgraded_sentence: "清晨的公园里，荷叶上的水珠一闪一闪，像小灯泡。",
+    focus: "加细节",
+  });
+});
+
+test("assessment page disables submit while pending and reports failures", async () => {
+  let rejectAssessment!: (reason?: unknown) => void;
+  apiMocks.createAssessment.mockReturnValueOnce(
+    new Promise((_, reject) => {
+      rejectAssessment = reject;
+    }),
+  );
+
+  render(<AssessmentPage params={{ studentId: "s1" }} />);
+
+  await userEvent.type(screen.getByLabelText("升级前的句子"), "公园很美。");
+  await userEvent.type(screen.getByLabelText("升级后的句子"), "公园的花在风里摇。");
+  await userEvent.type(screen.getByLabelText("小写作"), "我学会了骑车。");
+  const submit = screen.getByRole("button", { name: "完成小试炼" });
+
+  await userEvent.click(submit);
+
+  expect(submit).toBeDisabled();
+
+  rejectAssessment(new Error("network"));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "提交失败，请稍后再试。",
+  );
+  await waitFor(() => expect(submit).not.toBeDisabled());
+});
+
+test("sentence page disables submit while pending and reports failures", async () => {
+  let rejectSentenceTraining!: (reason?: unknown) => void;
+  apiMocks.createSentenceTraining.mockReturnValueOnce(
+    new Promise((_, reject) => {
+      rejectSentenceTraining = reject;
+    }),
+  );
+
+  render(<SentencePage params={{ studentId: "s1" }} />);
+
+  await userEvent.type(screen.getByLabelText("原句"), "公园很美。");
+  await userEvent.type(screen.getByLabelText("升级后的句子"), "公园里花香很浓。");
+  const submit = screen.getByRole("button", { name: "提交给 AI 教练" });
+
+  await userEvent.click(submit);
+
+  expect(submit).toBeDisabled();
+
+  rejectSentenceTraining(new Error("network"));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "提交失败，请稍后再试。",
+  );
+  await waitFor(() => expect(submit).not.toBeDisabled());
 });

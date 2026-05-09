@@ -17,17 +17,27 @@ export default function SentencePage({
   const [sourceSentence, setSourceSentence] = useState("");
   const [upgradedSentence, setUpgradedSentence] = useState("");
   const [result, setResult] = useState<SentenceTrainingResponse | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setIsSubmitting(true);
+    setError("");
 
-    const result = await createSentenceTraining(studentId, {
-      source_sentence: sourceSentence,
-      upgraded_sentence: upgradedSentence,
-      focus: "加细节",
-    });
+    try {
+      const result = await createSentenceTraining(studentId, {
+        source_sentence: sourceSentence,
+        upgraded_sentence: upgradedSentence,
+        focus: "加细节",
+      });
 
-    setResult(result);
+      setResult(result);
+    } catch {
+      setError("提交失败，请稍后再试。");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -48,8 +58,12 @@ export default function SentencePage({
             onChange={(event) => setUpgradedSentence(event.target.value)}
           />
         </label>
-        <button type="submit">提交给 AI 教练</button>
+        <button type="submit" disabled={isSubmitting}>
+          提交给 AI 教练
+        </button>
       </form>
+      {isSubmitting ? <p role="status">正在提交...</p> : null}
+      {error ? <p role="alert">{error}</p> : null}
       {result ? (
         <>
           <section aria-label="AI 教练反馈">

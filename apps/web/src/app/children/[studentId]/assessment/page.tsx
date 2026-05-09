@@ -14,17 +14,27 @@ export default function AssessmentPage({
   const [sentenceAfter, setSentenceAfter] = useState("");
   const [shortWriting, setShortWriting] = useState("");
   const [summary, setSummary] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setIsSubmitting(true);
+    setError("");
 
-    const result = await createAssessment(studentId, {
-      sentence_before: sentenceBefore,
-      sentence_after: sentenceAfter,
-      short_writing: shortWriting,
-    });
+    try {
+      const result = await createAssessment(studentId, {
+        sentence_before: sentenceBefore,
+        sentence_after: sentenceAfter,
+        short_writing: shortWriting,
+      });
 
-    setSummary(result.assessment.summary);
+      setSummary(result.assessment.summary);
+    } catch {
+      setError("提交失败，请稍后再试。");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -52,8 +62,12 @@ export default function AssessmentPage({
             onChange={(event) => setShortWriting(event.target.value)}
           />
         </label>
-        <button type="submit">完成小试炼</button>
+        <button type="submit" disabled={isSubmitting}>
+          完成小试炼
+        </button>
       </form>
+      {isSubmitting ? <p role="status">正在提交...</p> : null}
+      {error ? <p role="alert">{error}</p> : null}
       {summary ? <p>{summary}</p> : null}
     </main>
   );

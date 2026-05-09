@@ -1,11 +1,9 @@
+import type { Settlement } from "../lib/api";
+
 export function SettlementPanel({
   settlement,
 }: {
-  settlement: {
-    xp_delta: number;
-    level_after: number;
-    badge_code?: string;
-  };
+  settlement: Settlement;
 }) {
   return (
     <section aria-label="战斗结算">

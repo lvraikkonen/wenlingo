@@ -34,16 +34,18 @@ export type AssessmentResponse = {
   };
 };
 
+export type Settlement = {
+  xp_delta: number;
+  level_after: number;
+  badge_code?: string;
+};
+
 export type SentenceTrainingResponse = {
   feedback: {
     encouragement: string;
     specific_improvement: string;
   };
-  settlement: {
-    xp_delta: number;
-    level_after: number;
-    badge_code?: string;
-  };
+  settlement: Settlement;
 };
 
 export function createAssessment(

@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { demoLogin, getDashboard } from "../src/lib/api";
+import {
+  createAssessment,
+  createSentenceTraining,
+  demoLogin,
+  getDashboard,
+} from "../src/lib/api";
 import type { DashboardResponse, DemoLoginResponse } from "../src/lib/types";
 
 const student = {
@@ -74,6 +79,62 @@ describe("api client", () => {
     expect(fetch).toHaveBeenCalledWith(
       "http://localhost:8000/api/students/s1/dashboard",
       { cache: "no-store" },
+    );
+  });
+
+  test("createAssessment posts entry trial payload", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        assessment: { summary: "完成入门小试炼，生成第一张能力草图。" },
+      }),
+    }) as unknown as typeof fetch;
+    const payload = {
+      sentence_before: "公园很美。",
+      sentence_after: "公园里的花红红的，风一吹就轻轻摇。",
+      short_writing: "我学会了骑车。",
+    };
+
+    await createAssessment("s1", payload);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://localhost:8000/api/students/s1/assessment",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        cache: "no-store",
+      },
+    );
+  });
+
+  test("createSentenceTraining posts sentence training payload", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        feedback: {
+          encouragement: "你把画面写得更清楚了。",
+          specific_improvement: "加入了可看见的细节",
+        },
+        settlement: { xp_delta: 25, level_after: 2 },
+      }),
+    }) as unknown as typeof fetch;
+    const payload = {
+      source_sentence: "公园很美。",
+      upgraded_sentence: "清晨的公园里，荷叶上的水珠一闪一闪。",
+      focus: "加细节",
+    };
+
+    await createSentenceTraining("s1", payload);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "http://localhost:8000/api/students/s1/sentences",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        cache: "no-store",
+      },
     );
   });
 
