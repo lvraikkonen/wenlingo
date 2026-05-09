@@ -13,6 +13,7 @@ describe("api client", () => {
 
     const result = await demoLogin();
 
+    expect(result.parent.email).toBe("demo@wenlingo.local");
     expect(result.students[0].name).toBe("小宇");
   });
 
