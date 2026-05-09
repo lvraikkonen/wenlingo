@@ -1,4 +1,7 @@
+import json
 from typing import Any, Protocol
+
+import httpx
 
 
 class LLMProvider(Protocol):
@@ -34,3 +37,47 @@ class MockLLMProvider:
                 "next_step": "下一次可以把结尾的感受写得更清楚。",
             }
         raise ValueError(f"Unknown LLM task: {task_name}")
+
+
+class HttpJsonLLMProvider:
+    def __init__(self, api_key: str, model: str, base_url: str):
+        self.api_key = api_key
+        self.model = model
+        self.base_url = base_url.rstrip("/")
+
+    async def complete_json(self, task_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是一名小学中文表达教练。你必须只输出 JSON，"
+                    "不要代写完整作文，只能提供反馈、建议和局部修改方向。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {"task_name": task_name, "payload": payload},
+                    ensure_ascii=False,
+                ),
+            },
+        ]
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                f"{self.base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.model,
+                    "messages": messages,
+                    "response_format": {"type": "json_object"},
+                },
+            )
+        response.raise_for_status()
+        data = response.json()
+        content = data["choices"][0]["message"]["content"]
+        if isinstance(content, str):
+            return json.loads(content)
+        return content

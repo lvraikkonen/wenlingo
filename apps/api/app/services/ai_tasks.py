@@ -1,5 +1,9 @@
 import re
 
+from sqlmodel import Session
+
+from app.domain.enums import TaskType
+from app.domain.models import LLMCallLog
 from app.services.llm_contracts import (
     EssayFeedback,
     EssayRevisionComparison,
@@ -53,6 +57,26 @@ def convert_ghostwriting_request(text: str) -> GhostwritingCheck:
         message="我不能替你写完整作文，但可以帮你想一想这件事里最值得写的画面。",
         next_question="这件事里最值得写的一个画面是什么？",
     )
+
+
+def log_llm_result(
+    session: Session,
+    task_type: TaskType,
+    input_summary: str,
+    output_json: dict,
+    validation_ok: bool,
+    error_message: str,
+) -> LLMCallLog:
+    log = LLMCallLog(
+        task_type=task_type,
+        input_summary=input_summary,
+        output_json=output_json,
+        validation_ok=validation_ok,
+        error_message=error_message,
+    )
+    session.add(log)
+    session.commit()
+    return log
 
 
 async def sentence_upgrade_feedback(
