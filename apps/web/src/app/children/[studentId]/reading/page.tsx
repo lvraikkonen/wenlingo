@@ -25,7 +25,11 @@ export default function ReadingPage({
     setError("");
 
     try {
-      const result = await createReadingSession(studentId);
+      const result = await createReadingSession(studentId, {
+        main_idea: mainIdea,
+        detail,
+        transfer,
+      });
 
       setTransferTip(result.transfer_tip);
     } catch {

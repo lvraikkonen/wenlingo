@@ -73,6 +73,12 @@ export type ReadingSessionResponse = {
   transfer_tip: string;
 };
 
+export type ReadingAnswers = {
+  main_idea: string;
+  detail: string;
+  transfer: string;
+};
+
 export type ReportResponse = {
   content: {
     practice_summary: string;
@@ -143,6 +149,11 @@ export function submitEssayRevision(
 
 export function createReadingSession(
   studentId: string,
+  answers: ReadingAnswers = {
+    main_idea: "春天来了，小河和鸟儿都很热闹。",
+    detail: "小河发出哗啦啦的声音。",
+    transfer: "写景可以写声音。",
+  },
 ): Promise<ReadingSessionResponse> {
   return requestJson<ReadingSessionResponse>(
     `/api/students/${studentId}/readings`,
@@ -151,11 +162,7 @@ export function createReadingSession(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         article_id: "spring-sounds",
-        answers: {
-          main_idea: "春天来了，小河和鸟儿都很热闹。",
-          detail: "小河发出哗啦啦的声音。",
-          transfer: "写景可以写声音。",
-        },
+        answers,
       }),
     },
   );
