@@ -3,7 +3,10 @@ from app.db.session import create_engine_from_settings
 
 
 def test_settings_load_database_url():
-    settings = Settings(database_url="postgresql+psycopg://wenlingo:wenlingo@localhost:5432/wenlingo")
+    settings = Settings(
+        _env_file=None,
+        database_url="postgresql+psycopg://wenlingo:wenlingo@localhost:5432/wenlingo",
+    )
 
     assert settings.database_url.startswith("postgresql+psycopg://")
     assert settings.llm_provider == "mock"

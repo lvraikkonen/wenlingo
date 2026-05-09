@@ -4,6 +4,41 @@ from typing import Any, Protocol
 import httpx
 
 
+TASK_RESPONSE_CONTRACTS = {
+    "sentence_upgrade_feedback": (
+        "Return a JSON object with exactly these fields: "
+        "encouragement: non-empty string; "
+        "specific_improvement: non-empty string describing what improved; "
+        "next_step: non-empty string with one small coaching action; "
+        "ability_delta: object mapping ability names to integer deltas; "
+        "problem_monsters: array of 1 to 3 non-empty strings."
+    ),
+    "essay_feedback": (
+        "Return a JSON object with exactly these fields: "
+        "strengths: array of exactly 2 non-empty strings; "
+        "improvements: array of 1 to 3 non-empty strings; "
+        "problem_monsters: array of 1 to 3 non-empty strings; "
+        "sentence_notes: array of 1 to 3 non-empty strings; "
+        "revision_tasks: array of 1 to 3 objects, each with non-empty "
+        "instruction and target strings. Do not write a full essay."
+    ),
+    "essay_revision_comparison": (
+        "Return a JSON object with exactly these fields: "
+        "encouragement: non-empty string; "
+        "improved_dimensions: array of 1 to 3 non-empty strings; "
+        "evidence: array of 1 to 3 non-empty strings quoted or summarized from the revision; "
+        "next_step: non-empty string with one small coaching action."
+    ),
+}
+
+
+def response_contract_for_task(task_name: str) -> str:
+    return TASK_RESPONSE_CONTRACTS.get(
+        task_name,
+        "Return a JSON object only. Do not include markdown or explanatory text.",
+    )
+
+
 class LLMProvider(Protocol):
     async def complete_json(self, task_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         ...
@@ -52,12 +87,17 @@ class HttpJsonLLMProvider:
                 "content": (
                     "你是一名小学中文表达教练。你必须只输出 JSON，"
                     "不要代写完整作文，只能提供反馈、建议和局部修改方向。"
+                    "必须严格符合用户消息里的 response_contract。"
                 ),
             },
             {
                 "role": "user",
                 "content": json.dumps(
-                    {"task_name": task_name, "payload": payload},
+                    {
+                        "task_name": task_name,
+                        "payload": payload,
+                        "response_contract": response_contract_for_task(task_name),
+                    },
                     ensure_ascii=False,
                 ),
             },
