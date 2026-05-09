@@ -1,0 +1,60 @@
+"use client";
+
+import { useState } from "react";
+import type { FormEvent } from "react";
+import { createAssessment } from "../../../../lib/api";
+
+export default function AssessmentPage({
+  params,
+}: {
+  params: { studentId: string };
+}) {
+  const { studentId } = params;
+  const [sentenceBefore, setSentenceBefore] = useState("");
+  const [sentenceAfter, setSentenceAfter] = useState("");
+  const [shortWriting, setShortWriting] = useState("");
+  const [summary, setSummary] = useState("");
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const result = await createAssessment(studentId, {
+      sentence_before: sentenceBefore,
+      sentence_after: sentenceAfter,
+      short_writing: shortWriting,
+    });
+
+    setSummary(result.assessment.summary);
+  }
+
+  return (
+    <main>
+      <h1>入门小试炼</h1>
+      <form onSubmit={handleSubmit}>
+        <label>
+          升级前的句子
+          <textarea
+            value={sentenceBefore}
+            onChange={(event) => setSentenceBefore(event.target.value)}
+          />
+        </label>
+        <label>
+          升级后的句子
+          <textarea
+            value={sentenceAfter}
+            onChange={(event) => setSentenceAfter(event.target.value)}
+          />
+        </label>
+        <label>
+          小写作
+          <textarea
+            value={shortWriting}
+            onChange={(event) => setShortWriting(event.target.value)}
+          />
+        </label>
+        <button type="submit">完成小试炼</button>
+      </form>
+      {summary ? <p>{summary}</p> : null}
+    </main>
+  );
+}
