@@ -12,7 +12,11 @@ export function AbilityBars({ abilities }: { abilities: Record<AbilityKey, numbe
       {Object.entries(labels).map(([key, label]) => (
         <div key={key}>
           <span>{label}</span>
-          <progress value={abilities[key as AbilityKey]} max={100} />
+          <progress
+            aria-label={label}
+            value={abilities[key as AbilityKey]}
+            max={100}
+          />
         </div>
       ))}
     </section>

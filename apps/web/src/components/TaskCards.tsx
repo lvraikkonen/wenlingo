@@ -14,7 +14,7 @@ export function TaskCards({
         { label: "主线", task: main },
         { label: "快练", task: quick },
       ].map(({ label, task }) => (
-        <article key={`${task.kind}-${task.focus}`}>
+        <article key={`${label}-${task.kind}-${task.title}`}>
           <h3>
             {label}：{task.title}
           </h3>

@@ -2,9 +2,10 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import DashboardPage from "../src/app/children/[studentId]/page";
+import { getDashboard } from "../src/lib/api";
 
 vi.mock("../src/lib/api", () => ({
-  getDashboard: async () => ({
+  getDashboard: vi.fn(async () => ({
     student: {
       id: "s1",
       name: "小宇",
@@ -35,12 +36,13 @@ vi.mock("../src/lib/api", () => ({
     },
     map: ["句子工坊", "作文城堡", "阅读峡谷"],
     coach_message: "今天先完成推荐任务，再看看哪里变强了。",
-  }),
+  })),
 }));
 
 test("renders child dashboard as an action entry", async () => {
   render(await DashboardPage({ params: Promise.resolve({ studentId: "s1" }) }));
 
+  expect(getDashboard).toHaveBeenCalledWith("s1");
   expect(screen.getByRole("heading", { name: "小宇的小文星球" })).toBeInTheDocument();
   expect(screen.getByText("今日推荐")).toBeInTheDocument();
   expect(screen.getByText("作文城堡")).toBeInTheDocument();
