@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { use, useState } from "react";
 import type { FormEvent } from "react";
 import { SettlementPanel } from "../../../../components/SettlementPanel";
 import {
@@ -12,9 +12,9 @@ import {
 export default function EssayPage({
   params,
 }: {
-  params: { studentId: string };
+  params: Promise<{ studentId: string }>;
 }) {
-  const { studentId } = params;
+  const { studentId } = use(params);
   const [title, setTitle] = useState("");
   const [draft, setDraft] = useState("");
   const [revision, setRevision] = useState("");

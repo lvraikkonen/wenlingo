@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { Suspense } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import EssayPage from "../src/app/children/[studentId]/essay/page";
 import ReadingPage from "../src/app/children/[studentId]/reading/page";
@@ -57,9 +58,18 @@ afterEach(() => {
 });
 
 test("essay page supports draft feedback and revision settlement", async () => {
-  render(<EssayPage params={{ studentId: "s1" }} />);
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    );
+  });
 
-  await userEvent.type(screen.getByLabelText("作文题目"), "我学会了骑车");
+  await userEvent.type(
+    await screen.findByLabelText("作文题目"),
+    "我学会了骑车",
+  );
   await userEvent.type(
     screen.getByLabelText("初稿"),
     "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
@@ -84,10 +94,17 @@ test("essay page supports draft feedback and revision settlement", async () => {
 });
 
 test("reading page shows transfer tip", async () => {
-  render(<ReadingPage params={{ studentId: "s1" }} />);
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <ReadingPage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    );
+  });
 
-  await userEvent.clear(screen.getByLabelText("主要内容"));
-  await userEvent.type(screen.getByLabelText("主要内容"), "小河和小鸟都在唱春天。");
+  const mainIdeaControl = await screen.findByLabelText("主要内容");
+  await userEvent.clear(mainIdeaControl);
+  await userEvent.type(mainIdeaControl, "小河和小鸟都在唱春天。");
   await userEvent.clear(screen.getByLabelText("文中细节"));
   await userEvent.type(screen.getByLabelText("文中细节"), "小鸟在枝头叫。");
   await userEvent.clear(screen.getByLabelText("迁移练习"));

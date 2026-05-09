@@ -1,15 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { use, useState } from "react";
 import type { FormEvent } from "react";
 import { createReadingSession } from "../../../../lib/api";
 
 export default function ReadingPage({
   params,
 }: {
-  params: { studentId: string };
+  params: Promise<{ studentId: string }>;
 }) {
-  const { studentId } = params;
+  const { studentId } = use(params);
   const [mainIdea, setMainIdea] = useState(
     "春天来了，小河和鸟儿都很热闹。",
   );
