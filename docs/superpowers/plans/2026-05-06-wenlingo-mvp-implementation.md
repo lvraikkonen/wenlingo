@@ -2887,3 +2887,23 @@ Plan complete and saved to `docs/superpowers/plans/2026-05-06-wenlingo-mvp-imple
 **2. Inline Execution** - Execute tasks in this session using executing-plans, batch execution with checkpoints
 
 Which approach?
+
+## Final Verification and Completion Notes
+
+Completed on 2026-05-13 on branch `codex/wenlingo-mvp`.
+
+Latest implementation commit before final verification:
+
+- `33615de test: add mvp browser acceptance flow`
+
+Final acceptance verification was run from
+`D:\Playground\wenlingo\.worktrees\codex-wenlingo-mvp`:
+
+- Backend tests: `uv run pytest -q` from `apps/api` -> `61 passed in 1.41s`
+- Frontend unit tests: `corepack pnpm test` from `apps/web` -> `5 passed` test files, `14 passed` tests
+- Production build: `corepack pnpm build` from `apps/web` -> Next.js production build completed successfully
+- Browser MVP flow: `corepack pnpm e2e -- mvp.spec.ts` from `apps/web` -> `1 passed`, covering the family demo MVP learning loop
+
+The direct `pnpm test` command was also attempted, but this Windows shell did
+not have `pnpm` on `PATH`; the documented Windows fallback, `corepack pnpm`,
+was used for frontend verification.
