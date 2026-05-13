@@ -13,3 +13,4 @@ apps/api/playwright-e2e.db
 dist/
 build/
 *.pyc
+.pnpm-store/
