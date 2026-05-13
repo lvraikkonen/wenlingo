@@ -1,15 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { use, useState } from "react";
 import type { FormEvent } from "react";
 import { createAssessment } from "../../../../lib/api";
 
 export default function AssessmentPage({
   params,
 }: {
-  params: { studentId: string };
+  params: Promise<{ studentId: string }>;
 }) {
-  const { studentId } = params;
+  const { studentId } = use(params);
   const [sentenceBefore, setSentenceBefore] = useState("");
   const [sentenceAfter, setSentenceAfter] = useState("");
   const [shortWriting, setShortWriting] = useState("");

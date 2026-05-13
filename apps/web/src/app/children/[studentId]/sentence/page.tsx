@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { use, useState } from "react";
 import type { FormEvent } from "react";
 import { SettlementPanel } from "../../../../components/SettlementPanel";
 import {
@@ -11,9 +11,9 @@ import {
 export default function SentencePage({
   params,
 }: {
-  params: { studentId: string };
+  params: Promise<{ studentId: string }>;
 }) {
-  const { studentId } = params;
+  const { studentId } = use(params);
   const [sourceSentence, setSourceSentence] = useState("");
   const [upgradedSentence, setUpgradedSentence] = useState("");
   const [result, setResult] = useState<SentenceTrainingResponse | null>(null);

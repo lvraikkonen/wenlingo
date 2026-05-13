@@ -32,7 +32,7 @@ def create_assessment(
         sentence_before=request.sentence_before,
         sentence_after=request.sentence_after,
         short_writing=request.short_writing,
-        summary="完成入门小试点，生成第一张能力草图。",
+        summary="完成入门小试炼，生成第一张能力草图。",
     )
     apply_ability_delta(ability, TaskType.assessment, "entry_assessment", 0.6)
     event = settle_task(student, TaskType.assessment, [], {"summary": assessment.summary})
@@ -41,4 +41,14 @@ def create_assessment(
     session.add(ability)
     session.add(student)
     session.commit()
-    return {"assessment": assessment, "game_event": event}
+    return {
+        "assessment": {
+            "id": assessment.id,
+            "summary": assessment.summary,
+        },
+        "game_event": {
+            "xp_delta": event.xp_delta,
+            "level_after": event.level_after,
+            "badge_code": event.badge_code,
+        },
+    }
