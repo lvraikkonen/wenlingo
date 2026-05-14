@@ -138,6 +138,66 @@ def test_report_uses_only_requested_students_revision(session, client):
     assert report.json()["content"]["best_revision"] == "REQUESTED_STUDENT_REVISION"
 
 
+def test_stage_report_mentions_revision_task_evidence(session, client):
+    parent = seed_demo_data(session)
+    student = session.exec(select(StudentProfile).where(StudentProfile.parent_id == parent.id)).first()
+    essay = Essay(student_id=student.id, title="我学会了骑车", status="settled")
+    session.add(essay)
+    session.flush()
+    session.add(
+        EssayVersion(
+            essay_id=essay.id,
+            version_label="revision",
+            content="我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。",
+            completed_tasks=["给第二段加一个动作描写"],
+            skipped_tasks=[],
+            duration_seconds=420,
+            ai_feedback={
+                "encouragement": "你把最重要的画面写清楚了。",
+                "improved_dimensions": ["细节更多"],
+                "evidence": ["手心都出汗了"],
+                "next_step": "下一次把结尾感受写清楚。",
+            },
+        )
+    )
+    session.commit()
+
+    response = client.post(f"/api/students/{student.id}/reports", json={"report_type": "stage"})
+
+    assert response.status_code == 201
+    content = response.json()["content"]
+    assert "完成了 1 个修改任务" in content["practice_summary"]
+    assert "手心都出汗了" in content["best_revision"]
+    assert any("给第二段加一个动作描写" in change for change in content["ability_changes"])
+
+
+def test_stage_report_handles_legacy_revision_null_task_metadata(session):
+    parent = seed_demo_data(session)
+    student = parent_students(session, parent.id)[0]
+    essay = Essay(student_id=student.id, title="旧数据作文", status="settled")
+    session.add(essay)
+    session.flush()
+    session.add(
+        EssayVersion(
+            essay_id=essay.id,
+            version_label="revision",
+            content="这是一篇旧数据二稿。",
+            completed_tasks=None,
+            skipped_tasks=None,
+        )
+    )
+    session.commit()
+
+    with client_without_server_exceptions(session) as client:
+        response = client.post(f"/api/students/{student.id}/reports", json={"report_type": "stage"})
+
+    assert response.status_code == 201
+    content = response.json()["content"]
+    assert "完成了 0 个修改任务" in content["practice_summary"]
+    assert content["ability_changes"] == ["会修改力有新的练习证据"]
+    assert content["next_suggestions"] == ["继续做 1 次句子加细节", "完成 1 次作文二稿修改"]
+
+
 def test_report_returns_404_when_student_ability_is_missing(session):
     parent = seed_demo_data(session)
     student = parent_students(session, parent.id)[0]
