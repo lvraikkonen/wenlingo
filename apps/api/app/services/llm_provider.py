@@ -1,3 +1,5 @@
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
 import json
 from typing import Any, Protocol
 
@@ -32,6 +34,23 @@ TASK_RESPONSE_CONTRACTS = {
 }
 
 
+@dataclass(frozen=True)
+class LLMProviderResponse(Mapping[str, Any]):
+    parsed_json: dict[str, Any]
+    raw_response: str
+    provider: str
+    model: str
+
+    def __getitem__(self, key: str) -> Any:
+        return self.parsed_json[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.parsed_json)
+
+    def __len__(self) -> int:
+        return len(self.parsed_json)
+
+
 def response_contract_for_task(task_name: str) -> str:
     return TASK_RESPONSE_CONTRACTS.get(
         task_name,
@@ -40,22 +59,34 @@ def response_contract_for_task(task_name: str) -> str:
 
 
 class LLMProvider(Protocol):
-    async def complete_json(self, task_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    provider_name: str
+    model_name: str
+
+    async def complete_json(self, task_name: str, payload: dict[str, Any]) -> LLMProviderResponse:
         ...
 
 
 class MockLLMProvider:
-    async def complete_json(self, task_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    provider_name = "mock"
+    model_name = "mock"
+
+    async def complete_json(self, task_name: str, payload: dict[str, Any]) -> LLMProviderResponse:
         if task_name == "sentence_upgrade_feedback":
-            return {
+            payload = {
                 "encouragement": "你把画面写得更清楚了。",
                 "specific_improvement": "加入了可看见的细节",
                 "next_step": "再加一个动作，会更生动。",
                 "ability_delta": {"expression": 4, "observation": 4},
                 "problem_monsters": ["空泛表达"],
             }
+            return LLMProviderResponse(
+                parsed_json=payload,
+                raw_response=json.dumps(payload, ensure_ascii=False),
+                provider=self.provider_name,
+                model=self.model_name,
+            )
         if task_name == "essay_feedback":
-            return {
+            payload = {
                 "strengths": ["能写清楚发生了什么", "有一处心情表达"],
                 "improvements": ["第二段缺少动作细节"],
                 "problem_monsters": ["细节缺口"],
@@ -64,13 +95,25 @@ class MockLLMProvider:
                     {"instruction": "给第二段加一个动作描写", "target": "第二段"}
                 ],
             }
+            return LLMProviderResponse(
+                parsed_json=payload,
+                raw_response=json.dumps(payload, ensure_ascii=False),
+                provider=self.provider_name,
+                model=self.model_name,
+            )
         if task_name == "essay_revision_comparison":
-            return {
+            payload = {
                 "encouragement": "你把最重要的画面写清楚了。",
                 "improved_dimensions": ["细节更多", "动作更具体"],
                 "evidence": ["手心都出汗了", "摇摇晃晃骑过花坛"],
                 "next_step": "下一次可以把结尾的感受写得更清楚。",
             }
+            return LLMProviderResponse(
+                parsed_json=payload,
+                raw_response=json.dumps(payload, ensure_ascii=False),
+                provider=self.provider_name,
+                model=self.model_name,
+            )
         raise ValueError(f"Unknown LLM task: {task_name}")
 
 
@@ -79,8 +122,10 @@ class HttpJsonLLMProvider:
         self.api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/")
+        self.provider_name = "http"
+        self.model_name = model
 
-    async def complete_json(self, task_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def complete_json(self, task_name: str, payload: dict[str, Any]) -> LLMProviderResponse:
         messages = [
             {
                 "role": "system",
@@ -119,5 +164,15 @@ class HttpJsonLLMProvider:
         data = response.json()
         content = data["choices"][0]["message"]["content"]
         if isinstance(content, str):
-            return json.loads(content)
-        return content
+            return LLMProviderResponse(
+                parsed_json=json.loads(content),
+                raw_response=content,
+                provider=self.provider_name,
+                model=self.model_name,
+            )
+        return LLMProviderResponse(
+            parsed_json=content,
+            raw_response=json.dumps(content, ensure_ascii=False),
+            provider=self.provider_name,
+            model=self.model_name,
+        )

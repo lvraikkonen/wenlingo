@@ -47,7 +47,10 @@ async def test_http_json_provider_sends_sentence_response_contract(monkeypatch):
     request = FakeAsyncClient.last_request
     user_message = json.loads(request["json"]["messages"][1]["content"])
 
-    assert result == {"ok": True}
+    assert result.parsed_json == {"ok": True}
+    assert result.raw_response == '{"ok": true}'
+    assert result.provider == "http"
+    assert result.model == "test-model"
     assert request["url"] == "https://example.test/chat/completions"
     assert user_message["task_name"] == "sentence_upgrade_feedback"
     assert "response_contract" in user_message

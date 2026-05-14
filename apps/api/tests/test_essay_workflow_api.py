@@ -5,6 +5,7 @@ from sqlmodel import select
 from app.api.routes.essays import EssayRevisionCreate, submit_revision
 from app.domain.models import Essay, EssayVersion, GameEvent, StudentProfile
 from app.domain.seed import seed_demo_data
+from app.services.llm_provider import MockLLMProvider
 
 
 def parent_students(session, parent_id: str):
@@ -162,6 +163,7 @@ async def test_revision_integrity_conflict_returns_409_before_settlement(session
                 content="我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。爸爸松手后，我摇摇晃晃骑过了花坛。"
             ),
             StaleRevisionReadSession(session),
+            MockLLMProvider(),
         )
 
     assert exc_info.value.status_code == 409

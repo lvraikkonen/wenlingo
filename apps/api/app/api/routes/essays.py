@@ -3,13 +3,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.api.deps import get_db_session
+from app.api.deps import get_db_session, get_llm_provider
 from app.domain.enums import TaskType
 from app.domain.models import AbilityProfile, Essay, EssayVersion, StudentProfile
 from app.services.abilities import apply_ability_delta
 from app.services.ai_tasks import essay_feedback, essay_revision_comparison
 from app.services.gamification import settle_task
-from app.services.llm_provider import MockLLMProvider
+from app.services.llm_provider import LLMProvider
 
 router = APIRouter(tags=["essays"])
 
@@ -29,12 +29,13 @@ async def create_essay(
     student_id: str,
     request: EssayCreate,
     session: Session = Depends(get_db_session),
+    provider: LLMProvider = Depends(get_llm_provider),
 ):
     student = session.get(StudentProfile, student_id)
     if not student:
         raise HTTPException(status_code=404, detail="student not found")
     try:
-        feedback = await essay_feedback(MockLLMProvider(), request.title, request.draft)
+        feedback = await essay_feedback(provider, request.title, request.draft)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     essay = Essay(student_id=student_id, title=request.title, status="revision_requested")
@@ -58,6 +59,7 @@ async def submit_revision(
     essay_id: str,
     request: EssayRevisionCreate,
     session: Session = Depends(get_db_session),
+    provider: LLMProvider = Depends(get_llm_provider),
 ):
     essay = session.get(Essay, essay_id)
     if not essay:
@@ -85,7 +87,7 @@ async def submit_revision(
     if not student or not ability:
         raise HTTPException(status_code=404, detail="student not found")
     comparison = await essay_revision_comparison(
-        MockLLMProvider(),
+        provider,
         first_draft.content,
         request.content,
     )
