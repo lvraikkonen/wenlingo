@@ -52,6 +52,7 @@ vi.mock("../src/lib/api", () => ({
 test("renders the parent entry and demo children", async () => {
   render(<Home />);
 
+  expect(screen.getByRole("main")).toHaveClass("min-h-screen");
   expect(screen.getByRole("heading", { name: "小文星球" })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "进入家庭内测" }));
 

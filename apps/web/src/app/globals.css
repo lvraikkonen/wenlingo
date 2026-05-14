@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+:root {
+  --wen-bg: #fff8e7;
+  --wen-surface: #ffffff;
+  --wen-ink: #25313f;
+  --wen-muted: #667085;
+  --wen-sky: #4aa8ff;
+  --wen-leaf: #54c78a;
+  --wen-sun: #ffd166;
+  --wen-orange: #ff8a4c;
+  --wen-border: #f0dcc2;
+}
+
+body {
+  margin: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 209, 102, 0.25), rgba(255, 248, 231, 0) 280px),
+    var(--wen-bg);
+  color: var(--wen-ink);
+  font-family:
+    Arial,
+    "Microsoft YaHei",
+    "PingFang SC",
+    sans-serif;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+textarea {
+  min-height: 10rem;
+}
