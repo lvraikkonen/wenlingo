@@ -20,6 +20,13 @@ def upgrade() -> None:
     op.add_column("essayversion", sa.Column("completed_tasks", sa.JSON(), nullable=True))
     op.add_column("essayversion", sa.Column("skipped_tasks", sa.JSON(), nullable=True))
     op.add_column("essayversion", sa.Column("llm_call_log_id", sa.String(), nullable=True))
+    op.create_foreign_key(
+        "fk_essayversion_llm_call_log_id_llmcalllog",
+        "essayversion",
+        "llmcalllog",
+        ["llm_call_log_id"],
+        ["id"],
+    )
     op.create_index(
         "ix_essayversion_llm_call_log_id",
         "essayversion",
@@ -30,6 +37,11 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_essayversion_llm_call_log_id", table_name="essayversion")
+    op.drop_constraint(
+        "fk_essayversion_llm_call_log_id_llmcalllog",
+        "essayversion",
+        type_="foreignkey",
+    )
     op.drop_column("essayversion", "llm_call_log_id")
     op.drop_column("essayversion", "skipped_tasks")
     op.drop_column("essayversion", "completed_tasks")

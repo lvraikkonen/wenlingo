@@ -12,10 +12,13 @@ def test_essay_version_unique_constraint_has_migration():
 
 
 def test_quality_spine_logging_fields_have_migration():
-    versions_dir = Path("app/db/migrations/versions")
-    migration_text = "\n".join(path.read_text(encoding="utf-8") for path in versions_dir.glob("*.py"))
+    migration_path = Path(
+        "app/db/migrations/versions/20260514_quality_spine_logging_fields.py"
+    )
+    migration_text = migration_path.read_text(encoding="utf-8")
 
     assert "20260514_quality_spine_logging_fields" in migration_text
+    assert 'down_revision = "20260507_essay_version_uniqueness"' in migration_text
     assert "llmcalllog" in migration_text
     assert "essayversion" in migration_text
     assert "raw_response" in migration_text
@@ -24,3 +27,7 @@ def test_quality_spine_logging_fields_have_migration():
     assert "completed_tasks" in migration_text
     assert "skipped_tasks" in migration_text
     assert "duration_seconds" in migration_text
+    assert "fk_essayversion_llm_call_log_id_llmcalllog" in migration_text
+    assert "create_foreign_key" in migration_text
+    assert "drop_constraint" in migration_text
+    assert "ix_essayversion_llm_call_log_id" in migration_text
