@@ -23,6 +23,9 @@ class EssayCreate(BaseModel):
 
 class EssayRevisionCreate(BaseModel):
     content: str = Field(min_length=20)
+    completed_tasks: list[str] = Field(default_factory=list)
+    skipped_tasks: list[str] = Field(default_factory=list)
+    duration_seconds: int | None = Field(default=None, ge=0)
 
 
 @router.post("/api/students/{student_id}/essays", status_code=201)
@@ -110,6 +113,9 @@ async def submit_revision(
         version_label="revision",
         content=request.content,
         ai_feedback=comparison.model_dump(),
+        completed_tasks=request.completed_tasks,
+        skipped_tasks=request.skipped_tasks,
+        duration_seconds=request.duration_seconds,
         llm_call_log_id=comparison_result.log.id if comparison_result.log else None,
     )
     session.add(revision)

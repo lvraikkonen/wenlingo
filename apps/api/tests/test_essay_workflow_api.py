@@ -52,15 +52,28 @@ def test_essay_from_existing_draft_feedback_and_revision(session, client):
     revision = client.post(
         f"/api/essays/{essay_id}/revision",
         json={
-            "content": "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。爸爸松手后，我摇摇晃晃骑过了花坛。我开心得跳了起来。"
+            "content": "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。爸爸松手后，我摇摇晃晃骑过了花坛。我开心得跳了起来。",
+            "completed_tasks": ["给第二段加一个动作描写"],
+            "skipped_tasks": [],
+            "duration_seconds": 420,
         },
     )
 
     assert revision.status_code == 201
     assert revision.json()["comparison"]["improved_dimensions"] == ["细节更多", "动作更具体"]
+    assert revision.json()["revision"]["completed_tasks"] == ["给第二段加一个动作描写"]
+    assert revision.json()["revision"]["skipped_tasks"] == []
+    assert revision.json()["revision"]["duration_seconds"] == 420
     assert len(session.exec(select(Essay)).all()) == 1
     assert len(session.exec(select(EssayVersion)).all()) == 2
     assert session.exec(select(GameEvent)).one().xp_delta == 60
+    saved_revision = session.exec(
+        select(EssayVersion).where(EssayVersion.version_label == "revision")
+    ).one()
+    assert saved_revision.completed_tasks == ["给第二段加一个动作描写"]
+    assert saved_revision.skipped_tasks == []
+    assert saved_revision.duration_seconds == 420
+    assert saved_revision.llm_call_log_id is not None
 
 
 def test_revision_without_first_draft_returns_conflict(session, client):
