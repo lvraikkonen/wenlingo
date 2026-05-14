@@ -4,6 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.api.deps import get_db_session, get_llm_provider
+from app.core.config import Settings, get_settings
 from app.domain.enums import TaskType
 from app.domain.models import AbilityProfile, Essay, EssayVersion, StudentProfile
 from app.services.abilities import apply_ability_delta
@@ -30,12 +31,20 @@ async def create_essay(
     request: EssayCreate,
     session: Session = Depends(get_db_session),
     provider: LLMProvider = Depends(get_llm_provider),
+    settings: Settings = Depends(get_settings),
 ):
     student = session.get(StudentProfile, student_id)
     if not student:
         raise HTTPException(status_code=404, detail="student not found")
     try:
-        feedback = await essay_feedback(provider, request.title, request.draft)
+        feedback_result = await essay_feedback(
+            provider,
+            request.title,
+            request.draft,
+            session=session,
+            prompt_version=settings.llm_prompt_version,
+        )
+        feedback = feedback_result.output
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     essay = Essay(student_id=student_id, title=request.title, status="revision_requested")
@@ -46,6 +55,7 @@ async def create_essay(
         version_label="first_draft",
         content=request.draft,
         ai_feedback=feedback.model_dump(),
+        llm_call_log_id=feedback_result.log.id if feedback_result.log else None,
     )
     session.add(version)
     essay_payload = essay.model_dump()
@@ -60,6 +70,7 @@ async def submit_revision(
     request: EssayRevisionCreate,
     session: Session = Depends(get_db_session),
     provider: LLMProvider = Depends(get_llm_provider),
+    settings: Settings = Depends(get_settings),
 ):
     essay = session.get(Essay, essay_id)
     if not essay:
@@ -86,16 +97,20 @@ async def submit_revision(
     ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == essay.student_id)).first()
     if not student or not ability:
         raise HTTPException(status_code=404, detail="student not found")
-    comparison = await essay_revision_comparison(
+    comparison_result = await essay_revision_comparison(
         provider,
         first_draft.content,
         request.content,
+        session=session,
+        prompt_version=settings.llm_prompt_version,
     )
+    comparison = comparison_result.output
     revision = EssayVersion(
         essay_id=essay_id,
         version_label="revision",
         content=request.content,
         ai_feedback=comparison.model_dump(),
+        llm_call_log_id=comparison_result.log.id if comparison_result.log else None,
     )
     session.add(revision)
     try:

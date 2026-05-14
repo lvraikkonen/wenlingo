@@ -1,5 +1,8 @@
 import re
+from dataclasses import dataclass
+from typing import Generic, TypeVar
 
+from pydantic import BaseModel, ValidationError
 from sqlmodel import Session
 
 from app.domain.enums import TaskType
@@ -11,6 +14,16 @@ from app.services.llm_contracts import (
     SentenceFeedback,
 )
 from app.services.llm_provider import LLMProvider
+
+
+T = TypeVar("T", bound=BaseModel)
+MAX_LLM_ATTEMPTS = 2
+
+
+@dataclass(frozen=True)
+class LLMTaskResult(Generic[T]):
+    output: T
+    log: LLMCallLog | None
 
 
 GHOSTWRITING_TRIGGERS = [
@@ -62,21 +75,120 @@ def convert_ghostwriting_request(text: str) -> GhostwritingCheck:
 def log_llm_result(
     session: Session,
     task_type: TaskType,
+    provider: str,
+    model: str,
+    prompt_version: str,
     input_summary: str,
+    raw_response: str,
     output_json: dict,
     validation_ok: bool,
     error_message: str,
+    retry_count: int,
 ) -> LLMCallLog:
     log = LLMCallLog(
         task_type=task_type,
+        provider=provider,
+        model=model,
+        prompt_version=prompt_version,
         input_summary=input_summary,
+        raw_response=raw_response,
         output_json=output_json,
         validation_ok=validation_ok,
         error_message=error_message,
+        retry_count=retry_count,
     )
     session.add(log)
-    session.commit()
+    session.flush()
     return log
+
+
+def fallback_essay_feedback() -> EssayFeedback:
+    return EssayFeedback(
+        strengths=["你已经完成了一版初稿", "你愿意继续修改，这很重要"],
+        improvements=["先选择一段，把看到的画面或动作补清楚"],
+        problem_monsters=["细节缺口"],
+        sentence_notes=["把“很开心”“很害怕”换成看得见的动作、声音或表情。"],
+        revision_tasks=[
+            {
+                "instruction": "先给最重要的一段加一个动作或看到的细节",
+                "target": "你觉得最想改好的那一段",
+            }
+        ],
+    )
+
+
+def fallback_revision_comparison() -> EssayRevisionComparison:
+    return EssayRevisionComparison(
+        encouragement="你完成了二稿，这一步本身就很值得肯定。",
+        improved_dimensions=["完成了一次修改"],
+        evidence=["你提交了新的二稿内容"],
+        next_step="下一次可以继续挑一段，把动作、声音或心情写得更具体。",
+    )
+
+
+async def run_validated_llm_task(
+    *,
+    provider: LLMProvider,
+    session: Session | None,
+    task_type: TaskType,
+    task_name: str,
+    payload: dict,
+    output_model: type[T],
+    fallback: T,
+    input_summary: str,
+    prompt_version: str,
+) -> LLMTaskResult[T]:
+    errors: list[str] = []
+    raw_response = ""
+    provider_name = getattr(provider, "provider_name", provider.__class__.__name__)
+    model_name = getattr(provider, "model_name", "unknown")
+    latest_response_provider = provider_name
+    latest_response_model = model_name
+
+    for attempt_index in range(MAX_LLM_ATTEMPTS):
+        try:
+            response = await provider.complete_json(task_name, payload)
+            raw_response = response.raw_response
+            latest_response_provider = response.provider
+            latest_response_model = response.model
+            output = output_model.model_validate(response.parsed_json)
+            log = None
+            if session is not None:
+                log = log_llm_result(
+                    session=session,
+                    task_type=task_type,
+                    provider=response.provider,
+                    model=response.model,
+                    prompt_version=prompt_version,
+                    input_summary=input_summary,
+                    raw_response=response.raw_response,
+                    output_json=output.model_dump(),
+                    validation_ok=True,
+                    error_message="",
+                    retry_count=attempt_index,
+                )
+            return LLMTaskResult(output=output, log=log)
+        except ValidationError as exc:
+            errors.append(f"validation error: {exc}")
+        except Exception as exc:
+            errors.append(str(exc))
+
+    log = None
+    if session is not None:
+        log = log_llm_result(
+            session=session,
+            task_type=task_type,
+            provider=latest_response_provider,
+            model=latest_response_model,
+            prompt_version=prompt_version,
+            input_summary=input_summary,
+            raw_response=raw_response,
+            output_json=fallback.model_dump(),
+            validation_ok=False,
+            error_message="; ".join(errors),
+            retry_count=MAX_LLM_ATTEMPTS - 1,
+        )
+    return LLMTaskResult(output=fallback, log=log)
 
 
 async def sentence_upgrade_feedback(
@@ -85,7 +197,7 @@ async def sentence_upgrade_feedback(
     upgraded_sentence: str,
     focus: str,
 ) -> SentenceFeedback:
-    raw = await provider.complete_json(
+    response = await provider.complete_json(
         "sentence_upgrade_feedback",
         {
             "source_sentence": source_sentence,
@@ -93,24 +205,47 @@ async def sentence_upgrade_feedback(
             "focus": focus,
         },
     )
-    return SentenceFeedback.model_validate(raw)
+    return SentenceFeedback.model_validate(response.parsed_json)
 
 
-async def essay_feedback(provider: LLMProvider, title: str, draft: str) -> EssayFeedback:
+async def essay_feedback(
+    provider: LLMProvider,
+    title: str,
+    draft: str,
+    session: Session | None = None,
+    prompt_version: str = "v0.2-quality-spine-2026-05-14",
+) -> LLMTaskResult[EssayFeedback]:
     ghostwriting = convert_ghostwriting_request(draft)
     if ghostwriting.blocked:
         raise ValueError(ghostwriting.message)
-    raw = await provider.complete_json("essay_feedback", {"title": title, "draft": draft})
-    return EssayFeedback.model_validate(raw)
+    return await run_validated_llm_task(
+        provider=provider,
+        session=session,
+        task_type=TaskType.essay,
+        task_name="essay_feedback",
+        payload={"title": title, "draft": draft},
+        output_model=EssayFeedback,
+        fallback=fallback_essay_feedback(),
+        input_summary=f"作文题目：{title}；初稿长度：{len(draft)}",
+        prompt_version=prompt_version,
+    )
 
 
 async def essay_revision_comparison(
     provider: LLMProvider,
     first_draft: str,
     revision: str,
-) -> EssayRevisionComparison:
-    raw = await provider.complete_json(
-        "essay_revision_comparison",
-        {"first_draft": first_draft, "revision": revision},
+    session: Session | None = None,
+    prompt_version: str = "v0.2-quality-spine-2026-05-14",
+) -> LLMTaskResult[EssayRevisionComparison]:
+    return await run_validated_llm_task(
+        provider=provider,
+        session=session,
+        task_type=TaskType.essay,
+        task_name="essay_revision_comparison",
+        payload={"first_draft": first_draft, "revision": revision},
+        output_model=EssayRevisionComparison,
+        fallback=fallback_revision_comparison(),
+        input_summary=f"二稿对比；初稿长度：{len(first_draft)}；二稿长度：{len(revision)}",
+        prompt_version=prompt_version,
     )
-    return EssayRevisionComparison.model_validate(raw)

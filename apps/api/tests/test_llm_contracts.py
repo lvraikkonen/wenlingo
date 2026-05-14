@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -13,7 +15,7 @@ from app.services.llm_contracts import (
     RevisionTask,
     SentenceFeedback,
 )
-from app.services.llm_provider import MockLLMProvider
+from app.services.llm_provider import LLMProviderResponse, MockLLMProvider
 
 
 def test_essay_feedback_rejects_more_than_three_revision_tasks():
@@ -115,38 +117,69 @@ def test_ghostwriting_check_allows_blank_text_when_unblocked():
 
 
 class MalformedSentenceProvider:
+    provider_name = "fake"
+    model_name = "malformed-sentence"
+
     async def complete_json(self, task_name, payload):
-        return {
+        parsed = {
             "encouragement": "不错",
             "specific_improvement": "",
             "next_step": "继续练习",
             "ability_delta": {"expression": 4},
             "problem_monsters": ["空泛表达"],
         }
+        return LLMProviderResponse(
+            parsed_json=parsed,
+            raw_response=json.dumps(parsed, ensure_ascii=False),
+            provider=self.provider_name,
+            model=self.model_name,
+        )
 
 
 class RecordingComparisonProvider:
+    provider_name = "fake"
+    model_name = "recording-comparison"
+
     def __init__(self):
         self.calls = []
 
     async def complete_json(self, task_name, payload):
         self.calls.append((task_name, payload))
-        return {
+        parsed = {
             "encouragement": "你把修改重点抓住了。",
             "improved_dimensions": ["情节更完整"],
             "evidence": ["爸爸松手后"],
             "next_step": "再补一个结尾感受。",
         }
+        return LLMProviderResponse(
+            parsed_json=parsed,
+            raw_response=json.dumps(parsed, ensure_ascii=False),
+            provider=self.provider_name,
+            model=self.model_name,
+        )
 
 
 class MalformedComparisonProvider:
+    provider_name = "fake"
+    model_name = "malformed-comparison"
+
+    def __init__(self):
+        self.calls = 0
+
     async def complete_json(self, task_name, payload):
-        return {
+        self.calls += 1
+        parsed = {
             "encouragement": "继续加油",
             "improved_dimensions": [],
             "evidence": ["爸爸松手后"],
             "next_step": "再补一个结尾感受。",
         }
+        return LLMProviderResponse(
+            parsed_json=parsed,
+            raw_response=json.dumps(parsed, ensure_ascii=False),
+            provider=self.provider_name,
+            model=self.model_name,
+        )
 
 
 @pytest.mark.asyncio
@@ -195,18 +228,24 @@ async def test_essay_revision_comparison_uses_provider_output():
             },
         )
     ]
-    assert result.encouragement == "你把修改重点抓住了。"
-    assert result.improved_dimensions == ["情节更完整"]
+    assert result.output.encouragement == "你把修改重点抓住了。"
+    assert result.output.improved_dimensions == ["情节更完整"]
+    assert result.log is None
 
 
 @pytest.mark.asyncio
-async def test_essay_revision_comparison_rejects_malformed_provider_response():
-    with pytest.raises(ValidationError):
-        await essay_revision_comparison(
-            provider=MalformedComparisonProvider(),
-            first_draft="我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
-            revision="我学会了骑车。爸爸松手后，我摇摇晃晃骑过了花坛。我开心得跳了起来。",
-        )
+async def test_essay_revision_comparison_returns_fallback_for_malformed_provider_response():
+    provider = MalformedComparisonProvider()
+
+    result = await essay_revision_comparison(
+        provider=provider,
+        first_draft="我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+        revision="我学会了骑车。爸爸松手后，我摇摇晃晃骑过了花坛。我开心得跳了起来。",
+    )
+
+    assert provider.calls == 2
+    assert result.output.encouragement == "你完成了二稿，这一步本身就很值得肯定。"
+    assert result.log is None
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@ from fastapi import HTTPException
 from sqlmodel import select
 
 from app.api.routes.essays import EssayRevisionCreate, submit_revision
+from app.core.config import get_settings
 from app.domain.models import Essay, EssayVersion, GameEvent, StudentProfile
 from app.domain.seed import seed_demo_data
 from app.services.llm_provider import MockLLMProvider
@@ -164,6 +165,7 @@ async def test_revision_integrity_conflict_returns_409_before_settlement(session
             ),
             StaleRevisionReadSession(session),
             MockLLMProvider(),
+            get_settings(),
         )
 
     assert exc_info.value.status_code == 409
