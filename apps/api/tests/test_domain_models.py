@@ -107,10 +107,15 @@ def test_llm_call_log_tracks_provider_prompt_raw_response_and_retry_count():
         retry_count=1,
     )
 
+    assert log.task_type == TaskType.essay
     assert log.provider == "http"
     assert log.model == "test-model"
     assert log.prompt_version == "v0.2-quality-spine-2026-05-14"
-    assert "strengths" in log.raw_response
+    assert log.input_summary == "作文题目：我学会了骑车"
+    assert log.raw_response == '{"strengths":["清楚","有心情"]}'
+    assert log.output_json == {"strengths": ["清楚", "有心情"]}
+    assert log.validation_ok is True
+    assert log.error_message == ""
     assert log.retry_count == 1
 
 
@@ -125,6 +130,9 @@ def test_essay_version_tracks_revision_task_metadata_and_llm_log_link():
         llm_call_log_id="log-1",
     )
 
+    assert version.essay_id == "essay-1"
+    assert version.version_label == "revision"
+    assert version.content == "我学会了骑车。二稿加入了手心出汗的细节。"
     assert version.duration_seconds == 420
     assert version.completed_tasks == ["给第二段加一个动作描写"]
     assert version.skipped_tasks == ["补一个结尾感受"]
