@@ -95,6 +95,10 @@ class EssayVersion(SQLModel, table=True):
     version_label: str
     content: str
     ai_feedback: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    duration_seconds: int | None = None
+    completed_tasks: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    skipped_tasks: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    llm_call_log_id: str | None = Field(default=None, foreign_key="llmcalllog.id", index=True)
     created_at: datetime = timestamp_field()
 
 
@@ -133,8 +137,13 @@ class Report(SQLModel, table=True):
 class LLMCallLog(SQLModel, table=True):
     id: str = Field(default_factory=new_uuid, primary_key=True)
     task_type: TaskType
+    provider: str = "mock"
+    model: str = "mock"
+    prompt_version: str = "v0.2-quality-spine-2026-05-14"
     input_summary: str
+    raw_response: str = ""
     output_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
     validation_ok: bool = False
     error_message: str = ""
+    retry_count: int = 0
     created_at: datetime = timestamp_field()

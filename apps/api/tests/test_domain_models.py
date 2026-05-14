@@ -1,6 +1,7 @@
 import pytest
 from sqlalchemy.exc import IntegrityError
 
+from app.domain.enums import TaskType
 from app.domain.models import (
     AbilityProfile,
     Assessment,
@@ -90,3 +91,41 @@ def test_essay_version_labels_are_unique_per_essay(session):
 
     with pytest.raises(IntegrityError):
         session.flush()
+
+
+def test_llm_call_log_tracks_provider_prompt_raw_response_and_retry_count():
+    log = LLMCallLog(
+        task_type=TaskType.essay,
+        provider="http",
+        model="test-model",
+        prompt_version="v0.2-quality-spine-2026-05-14",
+        input_summary="作文题目：我学会了骑车",
+        raw_response='{"strengths":["清楚","有心情"]}',
+        output_json={"strengths": ["清楚", "有心情"]},
+        validation_ok=True,
+        error_message="",
+        retry_count=1,
+    )
+
+    assert log.provider == "http"
+    assert log.model == "test-model"
+    assert log.prompt_version == "v0.2-quality-spine-2026-05-14"
+    assert "strengths" in log.raw_response
+    assert log.retry_count == 1
+
+
+def test_essay_version_tracks_revision_task_metadata_and_llm_log_link():
+    version = EssayVersion(
+        essay_id="essay-1",
+        version_label="revision",
+        content="我学会了骑车。二稿加入了手心出汗的细节。",
+        duration_seconds=420,
+        completed_tasks=["给第二段加一个动作描写"],
+        skipped_tasks=["补一个结尾感受"],
+        llm_call_log_id="log-1",
+    )
+
+    assert version.duration_seconds == 420
+    assert version.completed_tasks == ["给第二段加一个动作描写"]
+    assert version.skipped_tasks == ["补一个结尾感受"]
+    assert version.llm_call_log_id == "log-1"
