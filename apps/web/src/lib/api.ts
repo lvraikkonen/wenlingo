@@ -48,23 +48,36 @@ export type SentenceTrainingResponse = {
   settlement: Settlement;
 };
 
+export type RevisionTask = {
+  instruction: string;
+  target: string;
+};
+
 export type EssayResponse = {
   essay: {
     id: string;
   };
   feedback: {
     strengths: string[];
-    revision_tasks: {
-      instruction: string;
-      target: string;
-    }[];
+    improvements: string[];
+    problem_monsters: string[];
+    sentence_notes: string[];
+    revision_tasks: RevisionTask[];
   };
 };
 
 export type EssayRevisionResponse = {
+  revision: {
+    id: string;
+    completed_tasks: string[];
+    skipped_tasks: string[];
+    duration_seconds: number | null;
+  };
   comparison: {
     encouragement: string;
     improved_dimensions: string[];
+    evidence: string[];
+    next_step: string;
   };
   settlement: Settlement;
 };
@@ -138,7 +151,12 @@ export function createEssay(
 
 export function submitEssayRevision(
   essayId: string,
-  payload: { content: string },
+  payload: {
+    content: string;
+    completed_tasks: string[];
+    skipped_tasks: string[];
+    duration_seconds: number | null;
+  },
 ): Promise<EssayRevisionResponse> {
   return requestJson<EssayRevisionResponse>(`/api/essays/${essayId}/revision`, {
     method: "POST",

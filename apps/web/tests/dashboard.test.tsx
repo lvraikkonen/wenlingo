@@ -49,4 +49,8 @@ test("renders child dashboard as an action entry", async () => {
   expect(screen.getByText("句子工坊")).toBeInTheDocument();
   expect(screen.getByText("阅读峡谷")).toBeInTheDocument();
   expect(screen.getByText("写具体力")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /去写作文/ })).toHaveAttribute(
+    "href",
+    "/children/s1/essay",
+  );
 });

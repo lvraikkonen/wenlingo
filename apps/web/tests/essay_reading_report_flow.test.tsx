@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Suspense } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -14,6 +14,16 @@ const apiMocks = vi.hoisted(() => ({
   createReport: vi.fn(),
 }));
 
+const essayFeedbackResponse = {
+  essay: { id: "e1" },
+  feedback: {
+    strengths: ["能写清楚发生了什么", "有一处心情表达"],
+    revision_tasks: [
+      { instruction: "给第二段加一个动作描写", target: "第二段" },
+    ],
+  },
+};
+
 vi.mock("../src/lib/api", () => ({
   createEssay: apiMocks.createEssay,
   submitEssayRevision: apiMocks.submitEssayRevision,
@@ -22,15 +32,7 @@ vi.mock("../src/lib/api", () => ({
 }));
 
 beforeEach(() => {
-  apiMocks.createEssay.mockResolvedValue({
-    essay: { id: "e1" },
-    feedback: {
-      strengths: ["能写清楚发生了什么", "有一处心情表达"],
-      revision_tasks: [
-        { instruction: "给第二段加一个动作描写", target: "第二段" },
-      ],
-    },
-  });
+  apiMocks.createEssay.mockResolvedValue(essayFeedbackResponse);
   apiMocks.submitEssayRevision.mockResolvedValue({
     comparison: {
       encouragement: "你把最重要的画面写清楚了。",
@@ -58,6 +60,12 @@ afterEach(() => {
 });
 
 test("essay page supports draft feedback and revision settlement", async () => {
+  let resolveFeedback: (value: typeof essayFeedbackResponse) => void = () => {};
+  const pendingFeedback = new Promise<typeof essayFeedbackResponse>((resolve) => {
+    resolveFeedback = resolve;
+  });
+  apiMocks.createEssay.mockReturnValueOnce(pendingFeedback);
+
   await act(async () => {
     render(
       <Suspense fallback={null}>
@@ -75,21 +83,51 @@ test("essay page supports draft feedback and revision settlement", async () => {
     "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
   );
   await userEvent.click(screen.getByRole("button", { name: "获得点评" }));
+  expect(screen.getByText("AI 教练正在读你的初稿")).toBeInTheDocument();
+  await act(async () => {
+    resolveFeedback(essayFeedbackResponse);
+    await pendingFeedback;
+  });
+  expect(await screen.findByText("修改小任务")).toBeInTheDocument();
   expect(await screen.findByText("给第二段加一个动作描写")).toBeInTheDocument();
+  await waitFor(() => {
+    expect(screen.queryByText("AI 教练正在读你的初稿")).not.toBeInTheDocument();
+  });
   expect(apiMocks.createEssay).toHaveBeenCalledWith("s1", {
     title: "我学会了骑车",
     draft: "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
     entry: "existing_draft",
   });
 
+  await userEvent.click(
+    screen.getByRole("checkbox", { name: "给第二段加一个动作描写" }),
+  );
   await userEvent.type(
     screen.getByLabelText("二稿"),
     "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。",
   );
   await userEvent.click(screen.getByRole("button", { name: "提交二稿" }));
+  expect(
+    await screen.findByText("你把最重要的画面写清楚了。"),
+  ).toBeInTheDocument();
   expect(await screen.findByText("细节更多")).toBeInTheDocument();
-  expect(apiMocks.submitEssayRevision).toHaveBeenCalledWith("e1", {
-    content: "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。",
+  expect(apiMocks.submitEssayRevision).toHaveBeenCalledWith(
+    "e1",
+    expect.objectContaining({
+      content: "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。",
+      completed_tasks: ["给第二段加一个动作描写"],
+      skipped_tasks: [],
+      duration_seconds: expect.any(Number),
+    }),
+  );
+  expect(screen.getByRole("button", { name: "提交二稿" })).toBeDisabled();
+  await userEvent.click(screen.getByRole("button", { name: "提交二稿" }));
+  expect(apiMocks.submitEssayRevision).toHaveBeenCalledTimes(1);
+
+  await userEvent.click(screen.getByRole("button", { name: "获得点评" }));
+  await waitFor(() => {
+    expect(apiMocks.createEssay).toHaveBeenCalledTimes(2);
+    expect(screen.getByLabelText("二稿")).toHaveValue("");
   });
 });
 
