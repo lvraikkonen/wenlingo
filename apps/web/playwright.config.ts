@@ -31,6 +31,7 @@ export default defineConfig({
       env: {
         DATABASE_URL: process.env.PLAYWRIGHT_DATABASE_URL ?? "sqlite:///./playwright-e2e.db",
         CORS_ALLOW_ORIGINS: webOrigin,
+        LLM_PROVIDER: "mock",
       },
       url: `${apiBaseURL}/health`,
       reuseExistingServer,

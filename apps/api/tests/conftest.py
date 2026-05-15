@@ -20,8 +20,13 @@ def session():
     SQLModel.metadata.drop_all(engine)
 
 
+@pytest.fixture(autouse=True)
+def force_mock_llm_provider(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+
+
 @pytest.fixture
-def client(session):
+def client(session, force_mock_llm_provider):
     app = create_app()
     app.dependency_overrides[get_db_session] = lambda: session
     with TestClient(app) as test_client:
