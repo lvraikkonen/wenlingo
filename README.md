@@ -34,6 +34,24 @@ The API allows local browser requests from `http://localhost:3000` and
 `http://127.0.0.1:3000` by default. Override `CORS_ALLOW_ORIGINS` with a
 comma-separated list if you use a different local web origin.
 
+## Local Real LLM Check
+
+The default provider is mock. To run one local real-LLM quality check with the
+Local Development API workflow, copy the repo-root `.env-sample` to
+`apps/api/.env` and fill these values:
+
+```text
+LLM_PROVIDER=http
+LLM_API_KEY=your-local-test-key
+LLM_MODEL=your-test-model
+LLM_BASE_URL=https://your-provider.example/v1
+LLM_PROMPT_VERSION=v0.2-quality-spine-2026-05-14
+```
+
+Do not commit `.env`. After running the 小宇 essay revision path, create a QA
+record under `qa/` with provider/model, prompt version, whether retry/fallback
+triggered, and the manual AI quality verdict.
+
 ## Verification
 
 ```bash

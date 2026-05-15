@@ -49,15 +49,17 @@ test("family demo completes the MVP learning loop", async ({ page }) => {
     .fill("我学会了骑车。刚开始我很害怕。后来我会了。我很开心。");
   await page.getByRole("button", { name: "获得点评" }).click();
   await expect(page.getByText("给第二段加一个动作描写")).toBeVisible();
+  await page.getByRole("checkbox", { name: "给第二段加一个动作描写" }).check();
   await page
     .getByLabel("二稿")
     .fill(
       "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。爸爸松开手后，我摇摇晃晃骑过花坛。",
     );
   await page.getByRole("button", { name: "提交二稿" }).click();
-  await expect(page.getByText("细节更多")).toBeVisible();
+  await expect(page.getByText("你把最重要的画面写清楚了。")).toBeVisible();
+  await expect(page.getByText("+60 XP")).toBeVisible();
 
   await page.goto("/parent/s1/report");
   await expect(page.getByRole("heading", { name: "阶段报告" })).toBeVisible();
-  await expect(page.getByText("继续做 1 次句子加细节")).toBeVisible();
+  await expect(page.getByText("完成了 1 个修改任务")).toBeVisible();
 });
