@@ -6,6 +6,8 @@ Wenlingo is an AI-powered Chinese literacy platform for children, designed to im
 
 ## Local Development
 
+### PostgreSQL-backed startup
+
 1. Start PostgreSQL:
 
 ```bash
@@ -33,6 +35,33 @@ pnpm dev
 The API allows local browser requests from `http://localhost:3000` and
 `http://127.0.0.1:3000` by default. Override `CORS_ALLOW_ORIGINS` with a
 comma-separated list if you use a different local web origin.
+
+### Temporary SQLite startup
+
+Use this path for quick local manual testing when PostgreSQL is unavailable or
+when you want a disposable database.
+
+Terminal 1:
+
+```powershell
+cd apps/api
+$env:DATABASE_URL = "sqlite:///./manual-test.db"
+$env:CORS_ALLOW_ORIGINS = "http://127.0.0.1:3012,http://localhost:3012"
+uv run python -m app.db.init_db
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8012
+```
+
+Terminal 2:
+
+```powershell
+cd apps/web
+$env:NEXT_PUBLIC_API_BASE_URL = "http://127.0.0.1:8012"
+corepack pnpm dev --hostname 127.0.0.1 --port 3012
+```
+
+Open `http://127.0.0.1:3012` and use the demo family entry. If you want real
+LLM feedback in this mode, configure `apps/api/.env` as described below before
+starting the API.
 
 ## Local Real LLM Check
 
