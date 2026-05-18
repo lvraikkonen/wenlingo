@@ -1,3 +1,4 @@
+import { FamilyTopbar } from "../../../../components/FamilyTopbar";
 import { createReport } from "../../../../lib/api";
 
 export default async function ReportPage({
@@ -9,7 +10,9 @@ export default async function ReportPage({
   const report = await createReport(studentId);
 
   return (
-    <main className="min-h-screen px-5 py-8 sm:px-8">
+    <>
+      <FamilyTopbar currentStudentId={studentId} />
+      <main className="min-h-screen px-5 py-8 sm:px-8">
       <section
         aria-label="阶段报告"
         className="mx-auto max-w-3xl rounded-lg border border-[var(--wen-border)] bg-white p-6 shadow-sm"
@@ -38,6 +41,7 @@ export default async function ReportPage({
           </p>
         ))}
       </section>
-    </main>
+      </main>
+    </>
   );
 }

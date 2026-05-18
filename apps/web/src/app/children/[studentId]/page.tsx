@@ -1,5 +1,6 @@
 import { AbilityBars } from "../../../components/AbilityBars";
 import { AiCoachPanel } from "../../../components/AiCoachPanel";
+import { FamilyTopbar } from "../../../components/FamilyTopbar";
 import { PlanetMap } from "../../../components/PlanetMap";
 import { TaskCards } from "../../../components/TaskCards";
 import { getDashboard } from "../../../lib/api";
@@ -13,7 +14,9 @@ export default async function DashboardPage({
   const dashboard = await getDashboard(studentId);
 
   return (
-    <main className="min-h-screen px-5 py-8 sm:px-8">
+    <>
+      <FamilyTopbar currentStudentId={studentId} />
+      <main className="min-h-screen px-5 py-8 sm:px-8">
       <div className="mx-auto max-w-5xl space-y-6">
         <section className="rounded-lg border border-[var(--wen-border)] bg-white p-6 shadow-sm">
           <h1 className="text-2xl font-bold">
@@ -32,6 +35,7 @@ export default async function DashboardPage({
         <AiCoachPanel message={dashboard.coach_message} />
         <AbilityBars abilities={dashboard.child_abilities} />
       </div>
-    </main>
+      </main>
+    </>
   );
 }

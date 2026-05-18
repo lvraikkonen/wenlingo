@@ -2,6 +2,7 @@
 
 import { use, useState } from "react";
 import type { FormEvent } from "react";
+import { FamilyTopbar } from "../../../../components/FamilyTopbar";
 import { createReadingSession } from "../../../../lib/api";
 
 export default function ReadingPage({
@@ -40,7 +41,9 @@ export default function ReadingPage({
   }
 
   return (
-    <main>
+    <>
+      <FamilyTopbar currentStudentId={studentId} />
+      <main>
       <h1>春天的声音</h1>
       <article>
         <h2>春天的声音</h2>
@@ -76,6 +79,7 @@ export default function ReadingPage({
       {transferTip ? <p>{transferTip}</p> : null}
       {isSubmitting ? <p role="status">正在提交...</p> : null}
       {error ? <p role="alert">{error}</p> : null}
-    </main>
+      </main>
+    </>
   );
 }

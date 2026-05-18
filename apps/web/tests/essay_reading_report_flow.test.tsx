@@ -12,6 +12,7 @@ const apiMocks = vi.hoisted(() => ({
   submitEssayRevision: vi.fn(),
   createReadingSession: vi.fn(),
   createReport: vi.fn(),
+  demoLogin: vi.fn(),
 }));
 
 const essayFeedbackResponse = {
@@ -29,9 +30,47 @@ vi.mock("../src/lib/api", () => ({
   submitEssayRevision: apiMocks.submitEssayRevision,
   createReadingSession: apiMocks.createReadingSession,
   createReport: apiMocks.createReport,
+  demoLogin: apiMocks.demoLogin,
 }));
 
 beforeEach(() => {
+  apiMocks.demoLogin.mockResolvedValue({
+    parent: { id: "p1", email: "demo@example.com", display_name: "演示家长" },
+    students: [
+      {
+        id: "s1",
+        name: "小宇",
+        grade_label: "四年级",
+        persona: "real_child",
+        level: 2,
+        xp: 115,
+      },
+      {
+        id: "s2",
+        name: "小晴",
+        grade_label: "三年级",
+        persona: "vague_expression",
+        level: 1,
+        xp: 40,
+      },
+      {
+        id: "s3",
+        name: "小川",
+        grade_label: "五年级",
+        persona: "weak_structure",
+        level: 1,
+        xp: 35,
+      },
+      {
+        id: "s4",
+        name: "小禾",
+        grade_label: "四年级",
+        persona: "weak_reading_summary",
+        level: 1,
+        xp: 30,
+      },
+    ],
+  });
   apiMocks.createEssay.mockResolvedValue(essayFeedbackResponse);
   apiMocks.submitEssayRevision.mockResolvedValue({
     comparison: {

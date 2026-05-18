@@ -2,6 +2,7 @@
 
 import { use, useState } from "react";
 import type { FormEvent } from "react";
+import { FamilyTopbar } from "../../../../components/FamilyTopbar";
 import { SettlementPanel } from "../../../../components/SettlementPanel";
 import {
   createSentenceTraining,
@@ -41,7 +42,9 @@ export default function SentencePage({
   }
 
   return (
-    <main>
+    <>
+      <FamilyTopbar currentStudentId={studentId} />
+      <main>
       <h1>句子工坊</h1>
       <form onSubmit={handleSubmit}>
         <label>
@@ -74,6 +77,7 @@ export default function SentencePage({
           <SettlementPanel settlement={result.settlement} />
         </>
       ) : null}
-    </main>
+      </main>
+    </>
   );
 }

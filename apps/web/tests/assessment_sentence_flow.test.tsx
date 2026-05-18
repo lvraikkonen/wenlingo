@@ -9,14 +9,53 @@ import SentencePage from "../src/app/children/[studentId]/sentence/page";
 const apiMocks = vi.hoisted(() => ({
   createAssessment: vi.fn(),
   createSentenceTraining: vi.fn(),
+  demoLogin: vi.fn(),
 }));
 
 vi.mock("../src/lib/api", () => ({
   createAssessment: apiMocks.createAssessment,
   createSentenceTraining: apiMocks.createSentenceTraining,
+  demoLogin: apiMocks.demoLogin,
 }));
 
 beforeEach(() => {
+  apiMocks.demoLogin.mockResolvedValue({
+    parent: { id: "p1", email: "demo@example.com", display_name: "演示家长" },
+    students: [
+      {
+        id: "s1",
+        name: "小宇",
+        grade_label: "四年级",
+        persona: "real_child",
+        level: 2,
+        xp: 115,
+      },
+      {
+        id: "s2",
+        name: "小晴",
+        grade_label: "三年级",
+        persona: "vague_expression",
+        level: 1,
+        xp: 40,
+      },
+      {
+        id: "s3",
+        name: "小川",
+        grade_label: "五年级",
+        persona: "weak_structure",
+        level: 1,
+        xp: 35,
+      },
+      {
+        id: "s4",
+        name: "小禾",
+        grade_label: "四年级",
+        persona: "weak_reading_summary",
+        level: 1,
+        xp: 30,
+      },
+    ],
+  });
   apiMocks.createAssessment.mockResolvedValue({
     assessment: { summary: "完成入门小试炼，生成第一张能力草图。" },
   });

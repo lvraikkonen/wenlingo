@@ -3,6 +3,7 @@
 import { use, useState } from "react";
 import type { FormEvent } from "react";
 import { CheckCircle2, Loader2, Sparkles } from "lucide-react";
+import { FamilyTopbar } from "../../../../components/FamilyTopbar";
 import { SettlementPanel } from "../../../../components/SettlementPanel";
 import {
   createEssay,
@@ -110,7 +111,9 @@ export default function EssayPage({
   }
 
   return (
-    <main className="min-h-screen px-5 py-8 sm:px-8">
+    <>
+      <FamilyTopbar currentStudentId={studentId} />
+      <main className="min-h-screen px-5 py-8 sm:px-8">
       <div className="mx-auto max-w-4xl space-y-6">
         <section className="rounded-lg border border-[var(--wen-border)] bg-white p-6 shadow-sm">
           <div className="flex items-center gap-2">
@@ -261,6 +264,7 @@ export default function EssayPage({
           </p>
         ) : null}
       </div>
-    </main>
+      </main>
+    </>
   );
 }

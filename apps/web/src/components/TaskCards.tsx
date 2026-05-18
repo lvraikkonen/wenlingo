@@ -36,7 +36,7 @@ export function TaskCards({
                 {label}
               </p>
               <h3 className="mt-1 text-lg font-bold">
-                {label}：{task.title}
+                {task.title}
               </h3>
               <p className="mt-2 text-[var(--wen-muted)]">{task.focus}</p>
               <span className="mt-3 inline-flex items-center gap-2 text-sm font-semibold">
