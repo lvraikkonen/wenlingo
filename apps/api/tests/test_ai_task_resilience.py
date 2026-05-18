@@ -74,6 +74,32 @@ class ResponseMetadataInvalidProvider:
         )
 
 
+class CountingRealProvider:
+    provider_name = "http"
+    model_name = "limit-test-model"
+
+    def __init__(self):
+        self.calls = 0
+
+    async def complete_json(self, task_name, payload):
+        self.calls += 1
+        parsed = {
+            "strengths": ["能写清楚发生了什么", "有一处心情表达"],
+            "improvements": ["第二段缺少动作细节"],
+            "problem_monsters": ["细节缺口"],
+            "sentence_notes": ["把开心换成具体画面。"],
+            "revision_tasks": [
+                {"instruction": "给第二段加一个动作描写", "target": "第二段"}
+            ],
+        }
+        return LLMProviderResponse(
+            parsed_json=parsed,
+            raw_response=json.dumps(parsed, ensure_ascii=False),
+            provider=self.provider_name,
+            model=self.model_name,
+        )
+
+
 @pytest.mark.asyncio
 async def test_invalid_then_valid_retries_and_logs_success(session):
     provider = InvalidThenValidProvider()
@@ -145,3 +171,37 @@ async def test_invalid_response_fallback_log_uses_latest_response_metadata(sessi
     assert saved.validation_ok is False
     assert saved.provider == "response-provider"
     assert saved.model == "response-model"
+
+
+@pytest.mark.asyncio
+async def test_daily_limit_returns_fallback_without_calling_real_provider_again(session):
+    provider = CountingRealProvider()
+
+    first = await essay_feedback(
+        provider=provider,
+        title="我学会了骑车",
+        draft="我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+        session=session,
+        prompt_version="test-v1",
+        student_id="s1",
+        daily_limit_enabled=True,
+        daily_limit_per_student_task=1,
+    )
+    second = await essay_feedback(
+        provider=provider,
+        title="我学会了骑车",
+        draft="我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+        session=session,
+        prompt_version="test-v1",
+        student_id="s1",
+        daily_limit_enabled=True,
+        daily_limit_per_student_task=1,
+    )
+
+    logs = session.exec(select(LLMCallLog).where(LLMCallLog.student_id == "s1")).all()
+    assert provider.calls == 1
+    assert first.output.revision_tasks[0].instruction == "给第二段加一个动作描写"
+    assert second.output.revision_tasks[0].instruction == "先给最重要的一段加一个动作或看到的细节"
+    assert len(logs) == 2
+    assert logs[-1].validation_ok is False
+    assert logs[-1].error_message == "daily limit exceeded"

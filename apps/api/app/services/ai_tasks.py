@@ -1,9 +1,11 @@
 import re
 from dataclasses import dataclass
+from datetime import datetime, time, timezone
 from typing import Generic, TypeVar
 
 from pydantic import BaseModel, ValidationError
-from sqlmodel import Session
+from sqlalchemy import func
+from sqlmodel import Session, select
 
 from app.domain.enums import TaskType
 from app.domain.models import LLMCallLog
@@ -74,7 +76,9 @@ def convert_ghostwriting_request(text: str) -> GhostwritingCheck:
 
 def log_llm_result(
     session: Session,
+    student_id: str | None,
     task_type: TaskType,
+    task_name: str,
     provider: str,
     model: str,
     prompt_version: str,
@@ -86,7 +90,9 @@ def log_llm_result(
     retry_count: int,
 ) -> LLMCallLog:
     log = LLMCallLog(
+        student_id=student_id,
         task_type=task_type,
+        task_name=task_name,
         provider=provider,
         model=model,
         prompt_version=prompt_version,
@@ -126,10 +132,32 @@ def fallback_revision_comparison() -> EssayRevisionComparison:
     )
 
 
+def _start_of_utc_day() -> datetime:
+    today = datetime.now(timezone.utc).date()
+    return datetime.combine(today, time.min, tzinfo=timezone.utc)
+
+
+def _is_real_provider(provider_name: str) -> bool:
+    return provider_name.strip().lower() not in {"", "mock"}
+
+
+def _daily_log_count(session: Session, student_id: str, task_name: str) -> int:
+    count = session.exec(
+        select(func.count(LLMCallLog.id)).where(
+            LLMCallLog.student_id == student_id,
+            LLMCallLog.task_name == task_name,
+            LLMCallLog.created_at >= _start_of_utc_day(),
+            LLMCallLog.error_message != "daily limit exceeded",
+        )
+    ).one()
+    return int(count)
+
+
 async def run_validated_llm_task(
     *,
     provider: LLMProvider,
     session: Session | None,
+    student_id: str | None = None,
     task_type: TaskType,
     task_name: str,
     payload: dict,
@@ -137,6 +165,8 @@ async def run_validated_llm_task(
     fallback: T,
     input_summary: str,
     prompt_version: str,
+    daily_limit_enabled: bool = False,
+    daily_limit_per_student_task: int = 5,
 ) -> LLMTaskResult[T]:
     errors: list[str] = []
     raw_response = ""
@@ -144,6 +174,30 @@ async def run_validated_llm_task(
     model_name = getattr(provider, "model_name", "unknown")
     latest_response_provider = provider_name
     latest_response_model = model_name
+
+    if (
+        session is not None
+        and student_id is not None
+        and daily_limit_enabled
+        and _is_real_provider(provider_name)
+        and _daily_log_count(session, student_id, task_name) >= daily_limit_per_student_task
+    ):
+        log = log_llm_result(
+            session=session,
+            student_id=student_id,
+            task_type=task_type,
+            task_name=task_name,
+            provider=provider_name,
+            model=model_name,
+            prompt_version=prompt_version,
+            input_summary=input_summary,
+            raw_response="",
+            output_json=fallback.model_dump(),
+            validation_ok=False,
+            error_message="daily limit exceeded",
+            retry_count=0,
+        )
+        return LLMTaskResult(output=fallback, log=log)
 
     for attempt_index in range(MAX_LLM_ATTEMPTS):
         try:
@@ -156,7 +210,9 @@ async def run_validated_llm_task(
             if session is not None:
                 log = log_llm_result(
                     session=session,
+                    student_id=student_id,
                     task_type=task_type,
+                    task_name=task_name,
                     provider=response.provider,
                     model=response.model,
                     prompt_version=prompt_version,
@@ -177,7 +233,9 @@ async def run_validated_llm_task(
     if session is not None:
         log = log_llm_result(
             session=session,
+            student_id=student_id,
             task_type=task_type,
+            task_name=task_name,
             provider=latest_response_provider,
             model=latest_response_model,
             prompt_version=prompt_version,
@@ -214,6 +272,9 @@ async def essay_feedback(
     draft: str,
     session: Session | None = None,
     prompt_version: str = "v0.2-quality-spine-2026-05-14",
+    student_id: str | None = None,
+    daily_limit_enabled: bool = False,
+    daily_limit_per_student_task: int = 5,
 ) -> LLMTaskResult[EssayFeedback]:
     ghostwriting = convert_ghostwriting_request(draft)
     if ghostwriting.blocked:
@@ -221,6 +282,7 @@ async def essay_feedback(
     return await run_validated_llm_task(
         provider=provider,
         session=session,
+        student_id=student_id,
         task_type=TaskType.essay,
         task_name="essay_feedback",
         payload={"title": title, "draft": draft},
@@ -228,6 +290,8 @@ async def essay_feedback(
         fallback=fallback_essay_feedback(),
         input_summary=f"作文题目：{title}；初稿长度：{len(draft)}",
         prompt_version=prompt_version,
+        daily_limit_enabled=daily_limit_enabled,
+        daily_limit_per_student_task=daily_limit_per_student_task,
     )
 
 
@@ -237,10 +301,14 @@ async def essay_revision_comparison(
     revision: str,
     session: Session | None = None,
     prompt_version: str = "v0.2-quality-spine-2026-05-14",
+    student_id: str | None = None,
+    daily_limit_enabled: bool = False,
+    daily_limit_per_student_task: int = 5,
 ) -> LLMTaskResult[EssayRevisionComparison]:
     return await run_validated_llm_task(
         provider=provider,
         session=session,
+        student_id=student_id,
         task_type=TaskType.essay,
         task_name="essay_revision_comparison",
         payload={"first_draft": first_draft, "revision": revision},
@@ -248,4 +316,6 @@ async def essay_revision_comparison(
         fallback=fallback_revision_comparison(),
         input_summary=f"二稿对比；初稿长度：{len(first_draft)}；二稿长度：{len(revision)}",
         prompt_version=prompt_version,
+        daily_limit_enabled=daily_limit_enabled,
+        daily_limit_per_student_task=daily_limit_per_student_task,
     )

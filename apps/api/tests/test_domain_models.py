@@ -119,6 +119,26 @@ def test_llm_call_log_tracks_provider_prompt_raw_response_and_retry_count():
     assert log.retry_count == 1
 
 
+def test_llm_call_log_tracks_student_and_task_name():
+    log = LLMCallLog(
+        student_id="s1",
+        task_type=TaskType.sentence,
+        task_name="sentence_upgrade_feedback",
+        provider="http",
+        model="test-model",
+        prompt_version="v0.2-family-test-2026-05-15",
+        input_summary="句子快练；原句长度：5；升级句长度：18",
+        raw_response='{"encouragement":"写清楚了"}',
+        output_json={"encouragement": "写清楚了"},
+        validation_ok=True,
+        error_message="",
+        retry_count=0,
+    )
+
+    assert log.student_id == "s1"
+    assert log.task_name == "sentence_upgrade_feedback"
+
+
 def test_essay_version_tracks_revision_task_metadata_and_llm_log_link():
     version = EssayVersion(
         essay_id="essay-1",

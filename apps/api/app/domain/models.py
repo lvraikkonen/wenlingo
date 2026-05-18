@@ -136,7 +136,9 @@ class Report(SQLModel, table=True):
 
 class LLMCallLog(SQLModel, table=True):
     id: str = Field(default_factory=new_uuid, primary_key=True)
+    student_id: str | None = Field(default=None, foreign_key="studentprofile.id", index=True)
     task_type: TaskType
+    task_name: str = Field(default="unknown", index=True)
     provider: str = "mock"
     model: str = "mock"
     prompt_version: str = "v0.2-quality-spine-2026-05-14"

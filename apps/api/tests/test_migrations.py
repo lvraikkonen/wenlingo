@@ -31,3 +31,13 @@ def test_quality_spine_logging_fields_have_migration():
     assert "create_foreign_key" in migration_text
     assert "drop_constraint" in migration_text
     assert "ix_essayversion_llm_call_log_id" in migration_text
+
+
+def test_family_test_llm_student_usage_has_migration():
+    versions_dir = Path("app/db/migrations/versions")
+    migration_text = "\n".join(path.read_text(encoding="utf-8") for path in versions_dir.glob("*.py"))
+
+    assert "20260515_family_test_llm_student_usage" in migration_text
+    assert "llmcalllog" in migration_text
+    assert "student_id" in migration_text
+    assert "task_name" in migration_text

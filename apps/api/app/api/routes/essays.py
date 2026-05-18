@@ -46,6 +46,9 @@ async def create_essay(
             request.draft,
             session=session,
             prompt_version=settings.llm_prompt_version,
+            student_id=student_id,
+            daily_limit_enabled=settings.llm_daily_limit_enabled,
+            daily_limit_per_student_task=settings.llm_daily_limit_per_student_task,
         )
         feedback = feedback_result.output
     except ValueError as exc:
@@ -106,6 +109,9 @@ async def submit_revision(
         request.content,
         session=session,
         prompt_version=settings.llm_prompt_version,
+        student_id=essay.student_id,
+        daily_limit_enabled=settings.llm_daily_limit_enabled,
+        daily_limit_per_student_task=settings.llm_daily_limit_per_student_task,
     )
     comparison = comparison_result.output
     revision = EssayVersion(

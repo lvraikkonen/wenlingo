@@ -10,7 +10,9 @@ def test_log_llm_result_persists_structured_output(session):
 
     log_llm_result(
         session=session,
+        student_id="s1",
         task_type=TaskType.sentence,
+        task_name="sentence_upgrade_feedback",
         provider="mock",
         model="mock",
         prompt_version="test-v1",
@@ -24,7 +26,9 @@ def test_log_llm_result_persists_structured_output(session):
 
     saved = session.exec(select(LLMCallLog)).one()
 
+    assert saved.student_id == "s1"
     assert saved.task_type == TaskType.sentence
+    assert saved.task_name == "sentence_upgrade_feedback"
     assert saved.provider == "mock"
     assert saved.model == "mock"
     assert saved.prompt_version == "test-v1"
