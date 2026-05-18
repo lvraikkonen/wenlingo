@@ -141,11 +141,12 @@ def _is_real_provider(provider_name: str) -> bool:
     return provider_name.strip().lower() not in {"", "mock"}
 
 
-def _daily_log_count(session: Session, student_id: str, task_name: str) -> int:
+def _daily_log_count(session: Session, student_id: str, task_name: str, provider_name: str) -> int:
     count = session.exec(
         select(func.count(LLMCallLog.id)).where(
             LLMCallLog.student_id == student_id,
             LLMCallLog.task_name == task_name,
+            LLMCallLog.provider == provider_name,
             LLMCallLog.created_at >= _start_of_utc_day(),
             LLMCallLog.error_message != "daily limit exceeded",
         )
@@ -180,7 +181,7 @@ async def run_validated_llm_task(
         and student_id is not None
         and daily_limit_enabled
         and _is_real_provider(provider_name)
-        and _daily_log_count(session, student_id, task_name) >= daily_limit_per_student_task
+        and _daily_log_count(session, student_id, task_name, provider_name) >= daily_limit_per_student_task
     ):
         log = log_llm_result(
             session=session,

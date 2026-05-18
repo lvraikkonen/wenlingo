@@ -205,3 +205,40 @@ async def test_daily_limit_returns_fallback_without_calling_real_provider_again(
     assert len(logs) == 2
     assert logs[-1].validation_ok is False
     assert logs[-1].error_message == "daily limit exceeded"
+
+
+@pytest.mark.asyncio
+async def test_daily_limit_ignores_existing_mock_logs_for_real_provider(session):
+    session.add(
+        LLMCallLog(
+            student_id="s1",
+            task_type=TaskType.essay,
+            task_name="essay_feedback",
+            provider="mock",
+            model="mock",
+            prompt_version="test-v1",
+            input_summary="mock same-day log",
+            raw_response='{"strengths":["mock"]}',
+            output_json={"strengths": ["mock"]},
+            validation_ok=True,
+            error_message="",
+            retry_count=0,
+        )
+    )
+    session.flush()
+    provider = CountingRealProvider()
+
+    result = await essay_feedback(
+        provider=provider,
+        title="我学会了骑车",
+        draft="我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+        session=session,
+        prompt_version="test-v1",
+        student_id="s1",
+        daily_limit_enabled=True,
+        daily_limit_per_student_task=1,
+    )
+
+    assert provider.calls == 1
+    assert result.output.revision_tasks[0].instruction == "给第二段加一个动作描写"
+    assert result.log.provider == "http"
