@@ -1,4 +1,22 @@
-export function PlanetMap({ places }: { places: string[] }) {
+import Link from "next/link";
+
+export function PlanetMap({
+  studentId,
+  places,
+}: {
+  studentId: string;
+  places: string[];
+}) {
+  function hrefForPlace(place: string) {
+    if (place.includes("句子")) {
+      return `/children/${studentId}/sentence`;
+    }
+    if (place.includes("作文")) {
+      return `/children/${studentId}/essay`;
+    }
+    return `/children/${studentId}/reading`;
+  }
+
   return (
     <nav
       aria-label="地图"
@@ -7,13 +25,13 @@ export function PlanetMap({ places }: { places: string[] }) {
       <h2 className="text-xl font-bold">地图</h2>
       <div className="mt-4 flex flex-wrap gap-3">
         {places.map((place) => (
-          <a
+          <Link
             key={place}
             className="rounded-lg border border-[var(--wen-border)] px-4 py-2 font-semibold"
-            href="#"
+            href={hrefForPlace(place)}
           >
             {place}
-          </a>
+          </Link>
         ))}
       </div>
     </nav>

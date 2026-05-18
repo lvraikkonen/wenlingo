@@ -176,7 +176,7 @@ test("essay page supports draft feedback and revision settlement", async () => {
   });
 });
 
-test("reading page shows transfer tip", async () => {
+test("reading page shows friendly construction state", async () => {
   await act(async () => {
     render(
       <Suspense fallback={null}>
@@ -185,21 +185,23 @@ test("reading page shows transfer tip", async () => {
     );
   });
 
-  const mainIdeaControl = await screen.findByLabelText("主要内容");
-  await userEvent.clear(mainIdeaControl);
-  await userEvent.type(mainIdeaControl, "小河和小鸟都在唱春天。");
-  await userEvent.clear(screen.getByLabelText("文中细节"));
-  await userEvent.type(screen.getByLabelText("文中细节"), "小鸟在枝头叫。");
-  await userEvent.clear(screen.getByLabelText("迁移练习"));
-  await userEvent.type(screen.getByLabelText("迁移练习"), "写校园也可以写声音。");
-  await userEvent.click(screen.getByRole("button", { name: "提交阅读答案" }));
-
-  expect(await screen.findByText("写景时可以加入声音。")).toBeInTheDocument();
-  expect(apiMocks.createReadingSession).toHaveBeenCalledWith("s1", {
-    main_idea: "小河和小鸟都在唱春天。",
-    detail: "小鸟在枝头叫。",
-    transfer: "写校园也可以写声音。",
-  });
+  expect(
+    await screen.findByRole("heading", { name: "阅读峡谷施工中" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      "这里还在建设。小文星球会先把今天推荐的作文和句子任务陪你做好。",
+    ),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "回到小文星球" })).toHaveAttribute(
+    "href",
+    "/children/s1",
+  );
+  expect(screen.getByRole("link", { name: "去完成今日推荐" })).toHaveAttribute(
+    "href",
+    "/children/s1/sentence",
+  );
+  expect(apiMocks.createReadingSession).not.toHaveBeenCalled();
 });
 
 test("report page renders parent-safe stage report", async () => {
@@ -209,5 +211,8 @@ test("report page renders parent-safe stage report", async () => {
     await screen.findByText("本阶段完成了 1 次句子训练和 1 次阅读练习。"),
   ).toBeInTheDocument();
   expect(screen.getByText("继续做 1 次句子加细节")).toBeInTheDocument();
+  expect(
+    screen.getByRole("link", { name: "回到当前孩子 Dashboard" }),
+  ).toHaveAttribute("href", "/children/s1");
   expect(apiMocks.createReport).toHaveBeenCalledWith("s1");
 });

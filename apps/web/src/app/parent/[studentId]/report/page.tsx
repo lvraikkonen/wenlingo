@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { FamilyTopbar } from "../../../../components/FamilyTopbar";
 import { createReport } from "../../../../lib/api";
 
@@ -40,6 +42,14 @@ export default async function ReportPage({
             {suggestion}
           </p>
         ))}
+        <div className="mt-6">
+          <Link
+            className="inline-flex rounded-lg bg-[var(--wen-orange)] px-4 py-2 font-semibold text-white"
+            href={`/children/${studentId}`}
+          >
+            回到当前孩子 Dashboard
+          </Link>
+        </div>
       </section>
       </main>
     </>

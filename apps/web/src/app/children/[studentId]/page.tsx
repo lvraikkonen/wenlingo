@@ -31,7 +31,7 @@ export default async function DashboardPage({
           main={dashboard.today_tasks.main}
           quick={dashboard.today_tasks.quick}
         />
-        <PlanetMap places={dashboard.map} />
+        <PlanetMap studentId={studentId} places={dashboard.map} />
         <AiCoachPanel message={dashboard.coach_message} />
         <AbilityBars abilities={dashboard.child_abilities} />
       </div>

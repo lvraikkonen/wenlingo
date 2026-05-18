@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import DashboardPage from "../src/app/children/[studentId]/page";
 import { getDashboard } from "../src/lib/api";
@@ -91,7 +91,20 @@ test("renders child dashboard as an action entry", async () => {
   expect(
     screen.getByRole("heading", { name: "句子工坊" }),
   ).toBeInTheDocument();
+  const map = within(screen.getByRole("navigation", { name: "地图" }));
+  expect(map.getByRole("link", { name: "句子工坊" })).toHaveAttribute(
+    "href",
+    "/children/s1/sentence",
+  );
+  expect(map.getByRole("link", { name: "作文城堡" })).toHaveAttribute(
+    "href",
+    "/children/s1/essay",
+  );
   expect(screen.getByText("阅读峡谷")).toBeInTheDocument();
+  expect(map.getByRole("link", { name: "阅读峡谷" })).toHaveAttribute(
+    "href",
+    "/children/s1/reading",
+  );
   expect(screen.getByText("写具体力")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: /去写作文/ })).toHaveAttribute(
     "href",
