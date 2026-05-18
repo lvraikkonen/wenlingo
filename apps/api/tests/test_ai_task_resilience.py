@@ -5,7 +5,7 @@ from sqlmodel import select
 
 from app.domain.enums import TaskType
 from app.domain.models import LLMCallLog
-from app.services.ai_tasks import essay_feedback, essay_revision_comparison
+from app.services.ai_tasks import essay_feedback, essay_revision_comparison, sentence_upgrade_feedback
 from app.services.llm_provider import LLMProviderResponse
 
 
@@ -44,6 +44,59 @@ class AlwaysInvalidProvider:
 
     async def complete_json(self, task_name, payload):
         parsed = {"strengths": ["only one"]}
+        return LLMProviderResponse(
+            parsed_json=parsed,
+            raw_response=json.dumps(parsed, ensure_ascii=False),
+            provider=self.provider_name,
+            model=self.model_name,
+        )
+
+
+class InvalidSentenceThenValidProvider:
+    provider_name = "fake"
+    model_name = "sentence-invalid-then-valid"
+
+    def __init__(self):
+        self.calls = 0
+
+    async def complete_json(self, task_name, payload):
+        self.calls += 1
+        if self.calls == 1:
+            parsed = {
+                "encouragement": "不错",
+                "specific_improvement": "",
+                "next_step": "继续练习",
+                "ability_delta": {"expression": 4},
+                "problem_monsters": ["空泛表达"],
+            }
+        else:
+            parsed = {
+                "encouragement": "你把画面写得更清楚了。",
+                "specific_improvement": "加入了可看见的细节",
+                "next_step": "再加一个动作，会更生动。",
+                "ability_delta": {"expression": 4, "observation": 4},
+                "problem_monsters": ["空泛表达"],
+            }
+        return LLMProviderResponse(
+            parsed_json=parsed,
+            raw_response=json.dumps(parsed, ensure_ascii=False),
+            provider=self.provider_name,
+            model=self.model_name,
+        )
+
+
+class AlwaysInvalidSentenceProvider:
+    provider_name = "fake"
+    model_name = "sentence-always-invalid"
+
+    async def complete_json(self, task_name, payload):
+        parsed = {
+            "encouragement": "",
+            "specific_improvement": "",
+            "next_step": "",
+            "ability_delta": {},
+            "problem_monsters": [],
+        }
         return LLMProviderResponse(
             parsed_json=parsed,
             raw_response=json.dumps(parsed, ensure_ascii=False),
@@ -137,6 +190,49 @@ async def test_always_invalid_returns_schema_valid_fallback_and_logs_failure(ses
     assert result.output.revision_tasks[0].instruction == "先给最重要的一段加一个动作或看到的细节"
     assert saved.validation_ok is False
     assert saved.retry_count == 1
+    assert "validation" in saved.error_message.lower()
+
+
+@pytest.mark.asyncio
+async def test_sentence_invalid_then_valid_retries_and_logs_success(session):
+    provider = InvalidSentenceThenValidProvider()
+
+    result = await sentence_upgrade_feedback(
+        provider=provider,
+        source_sentence="公园很美。",
+        upgraded_sentence="清晨的公园里，荷叶上的水珠一闪一闪，像小灯泡。",
+        focus="加细节",
+        session=session,
+        prompt_version="test-v1",
+        student_id="s1",
+    )
+
+    saved = session.exec(select(LLMCallLog)).one()
+    assert provider.calls == 2
+    assert result.output.specific_improvement == "加入了可看见的细节"
+    assert saved.student_id == "s1"
+    assert saved.task_name == "sentence_upgrade_feedback"
+    assert saved.validation_ok is True
+    assert saved.retry_count == 1
+
+
+@pytest.mark.asyncio
+async def test_sentence_always_invalid_returns_schema_valid_fallback(session):
+    result = await sentence_upgrade_feedback(
+        provider=AlwaysInvalidSentenceProvider(),
+        source_sentence="公园很美。",
+        upgraded_sentence="公园的花在风里轻轻摇。",
+        focus="加细节",
+        session=session,
+        prompt_version="test-v1",
+        student_id="s1",
+    )
+
+    saved = session.exec(select(LLMCallLog)).one()
+    assert result.output.encouragement == "你已经完成了一次句子升级。"
+    assert result.output.specific_improvement == "先把一个看得见的细节写清楚"
+    assert result.output.problem_monsters == ["空泛表达"]
+    assert saved.validation_ok is False
     assert "validation" in saved.error_message.lower()
 
 

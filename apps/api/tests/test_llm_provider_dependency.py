@@ -3,7 +3,7 @@ import json
 from sqlmodel import select
 
 from app.api.deps import get_llm_provider
-from app.domain.models import StudentProfile
+from app.domain.models import LLMCallLog, StudentProfile
 from app.domain.seed import seed_demo_data
 from app.services.llm_provider import LLMProviderResponse
 
@@ -44,6 +44,30 @@ class RecordingEssayProvider:
         )
 
 
+class RecordingSentenceProvider:
+    provider_name = "fake-sentence-provider"
+    model_name = "fake-sentence-model"
+
+    def __init__(self):
+        self.calls: list[str] = []
+
+    async def complete_json(self, task_name, payload):
+        self.calls.append(task_name)
+        parsed = {
+            "encouragement": "你把画面写得更清楚了。",
+            "specific_improvement": "加入了可看见的细节",
+            "next_step": "再加一个动作，会更生动。",
+            "ability_delta": {"expression": 4, "observation": 4},
+            "problem_monsters": ["空泛表达"],
+        }
+        return LLMProviderResponse(
+            parsed_json=parsed,
+            raw_response=json.dumps(parsed, ensure_ascii=False),
+            provider=self.provider_name,
+            model=self.model_name,
+        )
+
+
 def test_essay_routes_use_provider_dependency_override(session, client):
     parent = seed_demo_data(session)
     student = session.exec(
@@ -73,3 +97,27 @@ def test_essay_routes_use_provider_dependency_override(session, client):
     )
     assert revision.status_code == 201
     assert provider.calls == ["essay_feedback", "essay_revision_comparison"]
+
+
+def test_sentence_route_uses_provider_dependency_override_and_logs_student_context(session, client):
+    parent = seed_demo_data(session)
+    student = session.exec(
+        select(StudentProfile).where(StudentProfile.parent_id == parent.id)
+    ).first()
+    provider = RecordingSentenceProvider()
+    client.app.dependency_overrides[get_llm_provider] = lambda: provider
+
+    response = client.post(
+        f"/api/students/{student.id}/sentences",
+        json={
+            "source_sentence": "公园很美。",
+            "upgraded_sentence": "清晨的公园里，荷叶上的水珠一闪一闪，像小灯泡。",
+            "focus": "加细节",
+        },
+    )
+
+    logs = session.exec(select(LLMCallLog).where(LLMCallLog.student_id == student.id)).all()
+    assert response.status_code == 201
+    assert provider.calls == ["sentence_upgrade_feedback"]
+    assert logs[0].task_name == "sentence_upgrade_feedback"
+    assert logs[0].provider == "fake-sentence-provider"

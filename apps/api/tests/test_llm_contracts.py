@@ -193,20 +193,24 @@ async def test_sentence_upgrade_feedback_uses_structured_mock_provider():
         focus="加细节",
     )
 
-    assert result.specific_improvement == "加入了可看见的细节"
-    assert result.ability_delta["expression"] == 4
-    assert result.problem_monsters == ["空泛表达"]
+    assert result.output.specific_improvement == "加入了可看见的细节"
+    assert result.output.ability_delta["expression"] == 4
+    assert result.output.problem_monsters == ["空泛表达"]
+    assert result.log is None
 
 
 @pytest.mark.asyncio
-async def test_sentence_upgrade_feedback_rejects_malformed_provider_response():
-    with pytest.raises(ValidationError):
-        await sentence_upgrade_feedback(
-            provider=MalformedSentenceProvider(),
-            source_sentence="公园很美。",
-            upgraded_sentence="清晨的公园里，荷叶上的水珠一闪一闪。",
-            focus="加细节",
-        )
+async def test_sentence_upgrade_feedback_returns_fallback_for_malformed_provider_response():
+    result = await sentence_upgrade_feedback(
+        provider=MalformedSentenceProvider(),
+        source_sentence="公园很美。",
+        upgraded_sentence="清晨的公园里，荷叶上的水珠一闪一闪。",
+        focus="加细节",
+    )
+
+    assert result.output.encouragement == "你已经完成了一次句子升级。"
+    assert result.output.specific_improvement == "先把一个看得见的细节写清楚"
+    assert result.log is None
 
 
 @pytest.mark.asyncio

@@ -132,6 +132,16 @@ def fallback_revision_comparison() -> EssayRevisionComparison:
     )
 
 
+def fallback_sentence_feedback() -> SentenceFeedback:
+    return SentenceFeedback(
+        encouragement="你已经完成了一次句子升级。",
+        specific_improvement="先把一个看得见的细节写清楚",
+        next_step="再读一遍你的句子，圈出一个动作、声音或颜色细节。",
+        ability_delta={"expression": 2, "observation": 2},
+        problem_monsters=["空泛表达"],
+    )
+
+
 def _start_of_utc_day() -> datetime:
     today = datetime.now(timezone.utc).date()
     return datetime.combine(today, time.min, tzinfo=timezone.utc)
@@ -255,16 +265,33 @@ async def sentence_upgrade_feedback(
     source_sentence: str,
     upgraded_sentence: str,
     focus: str,
-) -> SentenceFeedback:
-    response = await provider.complete_json(
-        "sentence_upgrade_feedback",
-        {
+    session: Session | None = None,
+    prompt_version: str = "v0.2-quality-spine-2026-05-14",
+    student_id: str | None = None,
+    daily_limit_enabled: bool = False,
+    daily_limit_per_student_task: int = 5,
+) -> LLMTaskResult[SentenceFeedback]:
+    return await run_validated_llm_task(
+        provider=provider,
+        session=session,
+        task_type=TaskType.sentence,
+        task_name="sentence_upgrade_feedback",
+        payload={
             "source_sentence": source_sentence,
             "upgraded_sentence": upgraded_sentence,
             "focus": focus,
         },
+        output_model=SentenceFeedback,
+        fallback=fallback_sentence_feedback(),
+        input_summary=(
+            f"句子快练；原句长度：{len(source_sentence)}；"
+            f"升级句长度：{len(upgraded_sentence)}；目标：{focus}"
+        ),
+        prompt_version=prompt_version,
+        student_id=student_id,
+        daily_limit_enabled=daily_limit_enabled,
+        daily_limit_per_student_task=daily_limit_per_student_task,
     )
-    return SentenceFeedback.model_validate(response.parsed_json)
 
 
 async def essay_feedback(

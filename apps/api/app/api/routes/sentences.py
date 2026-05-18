@@ -2,13 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from app.api.deps import get_db_session
+from app.api.deps import get_db_session, get_llm_provider
+from app.core.config import Settings, get_settings
 from app.domain.enums import TaskType
 from app.domain.models import AbilityProfile, SentenceTraining, StudentProfile
 from app.services.abilities import apply_ability_delta
 from app.services.ai_tasks import sentence_upgrade_feedback
 from app.services.gamification import settle_task
-from app.services.llm_provider import MockLLMProvider
+from app.services.llm_provider import LLMProvider
 from app.services.recommendations import choose_today_tasks
 
 router = APIRouter(prefix="/api/students", tags=["sentences"])
@@ -25,17 +26,25 @@ async def create_sentence_training(
     student_id: str,
     request: SentenceTrainingCreate,
     session: Session = Depends(get_db_session),
+    provider: LLMProvider = Depends(get_llm_provider),
+    settings: Settings = Depends(get_settings),
 ):
     student = session.get(StudentProfile, student_id)
     ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
     if not student or not ability:
         raise HTTPException(status_code=404, detail="student not found")
-    feedback = await sentence_upgrade_feedback(
-        provider=MockLLMProvider(),
+    feedback_result = await sentence_upgrade_feedback(
+        provider=provider,
         source_sentence=request.source_sentence,
         upgraded_sentence=request.upgraded_sentence,
         focus=request.focus,
+        session=session,
+        prompt_version=settings.llm_prompt_version,
+        student_id=student_id,
+        daily_limit_enabled=settings.llm_daily_limit_enabled,
+        daily_limit_per_student_task=settings.llm_daily_limit_per_student_task,
     )
+    feedback = feedback_result.output
     training = SentenceTraining(
         student_id=student_id,
         source_sentence=request.source_sentence,
