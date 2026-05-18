@@ -38,7 +38,12 @@ beforeEach(() => {
       encouragement: "你把最重要的画面写清楚了。",
       improved_dimensions: ["细节更多", "动作更具体"],
     },
-    settlement: { xp_delta: 60, level_after: 2, badge_code: "first_revision" },
+    settlement: {
+      xp_delta: 60,
+      level_after: 2,
+      badge_code: "first_revision",
+      evidence: { completed_task_count: 1 },
+    },
   });
   apiMocks.createReadingSession.mockResolvedValue({
     transfer_tip: "写景时可以加入声音。",
@@ -90,6 +95,9 @@ test("essay page supports draft feedback and revision settlement", async () => {
   });
   expect(await screen.findByText("修改小任务")).toBeInTheDocument();
   expect(await screen.findByText("给第二段加一个动作描写")).toBeInTheDocument();
+  expect(
+    screen.getByRole("checkbox", { name: "给第二段加一个动作描写" }),
+  ).toBeChecked();
   await waitFor(() => {
     expect(screen.queryByText("AI 教练正在读你的初稿")).not.toBeInTheDocument();
   });
@@ -99,9 +107,6 @@ test("essay page supports draft feedback and revision settlement", async () => {
     entry: "existing_draft",
   });
 
-  await userEvent.click(
-    screen.getByRole("checkbox", { name: "给第二段加一个动作描写" }),
-  );
   await userEvent.type(
     screen.getByLabelText("二稿"),
     "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。",
@@ -111,6 +116,7 @@ test("essay page supports draft feedback and revision settlement", async () => {
     await screen.findByText("你把最重要的画面写清楚了。"),
   ).toBeInTheDocument();
   expect(await screen.findByText("细节更多")).toBeInTheDocument();
+  expect(screen.getByText("完成 1 个修改任务")).toBeInTheDocument();
   expect(apiMocks.submitEssayRevision).toHaveBeenCalledWith(
     "e1",
     expect.objectContaining({

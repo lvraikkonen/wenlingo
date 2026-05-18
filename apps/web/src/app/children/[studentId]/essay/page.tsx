@@ -59,7 +59,9 @@ export default function EssayPage({
 
       setEssayId(result.essay.id);
       setFeedback(result.feedback);
-      setSelectedTasks([]);
+      setSelectedTasks(
+        result.feedback.revision_tasks.map((task) => task.instruction),
+      );
       setRevisionStartedAt(Date.now());
       setRevision("");
       setComparison(null);

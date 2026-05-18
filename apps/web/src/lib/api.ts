@@ -38,6 +38,11 @@ export type Settlement = {
   xp_delta: number;
   level_after: number;
   badge_code?: string;
+  evidence?: {
+    completed_task_count?: number;
+    completed_tasks?: string[];
+    [key: string]: unknown;
+  };
 };
 
 export type SentenceTrainingResponse = {

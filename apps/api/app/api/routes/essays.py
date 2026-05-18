@@ -131,7 +131,16 @@ async def submit_revision(
         session.rollback()
         raise HTTPException(status_code=409, detail="essay already settled") from exc
     apply_ability_delta(ability, TaskType.essay, "essay_revision", 0.85, completed_revision=True)
-    event = settle_task(student, TaskType.essay, ["细节缺口"], {"essay_id": essay_id})
+    event = settle_task(
+        student,
+        TaskType.essay,
+        ["细节缺口"],
+        {
+            "essay_id": essay_id,
+            "completed_task_count": len(request.completed_tasks),
+            "completed_tasks": request.completed_tasks,
+        },
+    )
     essay.status = "settled"
     session.add(essay)
     session.add(ability)

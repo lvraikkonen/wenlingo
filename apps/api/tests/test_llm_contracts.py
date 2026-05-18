@@ -15,7 +15,7 @@ from app.services.llm_contracts import (
     RevisionTask,
     SentenceFeedback,
 )
-from app.services.llm_provider import LLMProviderResponse, MockLLMProvider
+from app.services.llm_provider import LLMProviderResponse, MockLLMProvider, response_contract_for_task
 
 
 def test_essay_feedback_rejects_more_than_three_revision_tasks():
@@ -32,6 +32,12 @@ def test_essay_feedback_rejects_more_than_three_revision_tasks():
                 RevisionTask(instruction="让结尾感受更清楚", target="结尾"),
             ],
         )
+
+
+def test_essay_feedback_provider_contract_prefers_exactly_one_revision_task():
+    contract = response_contract_for_task("essay_feedback")
+    assert "revision_tasks: array of exactly 1 object" in contract
+    assert "Do not write a full essay" in contract
 
 
 def test_convert_ghostwriting_request_returns_coaching_message():

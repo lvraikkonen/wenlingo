@@ -67,7 +67,10 @@ def test_essay_from_existing_draft_feedback_and_revision(session, client):
     assert revision.json()["revision"]["duration_seconds"] == 420
     assert len(session.exec(select(Essay)).all()) == 1
     assert len(session.exec(select(EssayVersion)).all()) == 2
-    assert session.exec(select(GameEvent)).one().xp_delta == 60
+    event = session.exec(select(GameEvent)).one()
+    assert event.xp_delta == 60
+    assert event.evidence["completed_task_count"] == 1
+    assert event.evidence["completed_tasks"] == ["给第二段加一个动作描写"]
     saved_revision = session.exec(
         select(EssayVersion).where(EssayVersion.version_label == "revision")
     ).one()

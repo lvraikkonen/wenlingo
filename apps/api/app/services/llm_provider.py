@@ -21,8 +21,9 @@ TASK_RESPONSE_CONTRACTS = {
         "improvements: array of 1 to 3 non-empty strings; "
         "problem_monsters: array of 1 to 3 non-empty strings; "
         "sentence_notes: array of 1 to 3 non-empty strings; "
-        "revision_tasks: array of 1 to 3 objects, each with non-empty "
-        "instruction and target strings. Do not write a full essay."
+        "revision_tasks: array of exactly 1 object with non-empty "
+        "instruction and target strings. Pick the smallest and most important revision task. "
+        "Do not write a full essay."
     ),
     "essay_revision_comparison": (
         "Return a JSON object with exactly these fields: "
