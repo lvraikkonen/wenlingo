@@ -86,6 +86,16 @@ When behavior changes:
 - Add implementation notes if needed.
 - Keep docs concise and dated.
 
+### Artifact Locations
+
+Superpowers-generated collaboration artifacts should be stored in the project-root folders, not under plugin or temporary workflow directories:
+
+- Brainstorming/design specs: `specs/`
+- Implementation plans: `plans/`
+- QA reports, release checks, and manual validation results: `qa/`
+
+If a Superpowers skill suggests a default path such as `docs/superpowers/specs/`, use the project-root folder above instead.
+
 ## Do Not Do
 
 - Do not generate final essay content for children as the main value.
