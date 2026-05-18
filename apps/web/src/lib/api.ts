@@ -49,6 +49,8 @@ export type SentenceTrainingResponse = {
   feedback: {
     encouragement: string;
     specific_improvement: string;
+    next_step: string;
+    problem_monsters: string[];
   };
   settlement: Settlement;
 };

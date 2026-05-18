@@ -63,6 +63,8 @@ beforeEach(() => {
     feedback: {
       encouragement: "你把画面写得更清楚了。",
       specific_improvement: "加入了可看见的细节",
+      next_step: "再加一个动作，会更生动。",
+      problem_monsters: ["空泛表达"],
     },
     settlement: {
       xp_delta: 25,
@@ -109,6 +111,88 @@ test("assessment page submits entry trial", async () => {
 });
 
 test("sentence page shows ai feedback and settlement", async () => {
+  const sentenceResponse = {
+    feedback: {
+      encouragement: "你把画面写得更清楚了。",
+      specific_improvement: "加入了可看见的细节",
+      next_step: "再加一个动作，会更生动。",
+      problem_monsters: ["空泛表达"],
+    },
+    settlement: {
+      xp_delta: 25,
+      level_after: 2,
+      badge_code: "first_sentence_upgrade",
+    },
+  };
+  let resolveSentenceTraining!: (value: typeof sentenceResponse) => void;
+  const pendingSentenceTraining = new Promise<typeof sentenceResponse>(
+    (resolve) => {
+      resolveSentenceTraining = resolve;
+    },
+  );
+  apiMocks.createSentenceTraining.mockReturnValueOnce(pendingSentenceTraining);
+
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <SentencePage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    );
+  });
+
+  await userEvent.type(await screen.findByLabelText("原句"), "公园很美。");
+  await userEvent.type(
+    screen.getByLabelText("升级后的句子"),
+    "清晨的公园里，荷叶上的水珠一闪一闪，像小灯泡。",
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "提交给 AI 教练" }),
+  );
+
+  expect(screen.getByText("把一句话升级成小画面")).toBeInTheDocument();
+  expect(screen.getByText("AI 教练正在看你的句子")).toBeInTheDocument();
+  await act(async () => {
+    resolveSentenceTraining(sentenceResponse);
+    await pendingSentenceTraining;
+  });
+  expect(
+    await screen.findByText("你把画面写得更清楚了。"),
+  ).toBeInTheDocument();
+  expect(screen.getByText("再加一个动作，会更生动。")).toBeInTheDocument();
+  expect(screen.getByText("空泛表达")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "回到 Dashboard" })).toHaveAttribute(
+    "href",
+    "/children/s1",
+  );
+  expect(screen.getByRole("link", { name: "给家长看报告" })).toHaveAttribute(
+    "href",
+    "/parent/s1/report",
+  );
+  expect(await screen.findByText("加入了可看见的细节")).toBeInTheDocument();
+  expect(screen.getByText("+25 XP")).toBeInTheDocument();
+  expect(apiMocks.createSentenceTraining).toHaveBeenCalledWith("s1", {
+    source_sentence: "公园很美。",
+    upgraded_sentence: "清晨的公园里，荷叶上的水珠一闪一闪，像小灯泡。",
+    focus: "加细节",
+  });
+});
+
+test("sentence page clears old feedback when retrying after success", async () => {
+  const sentenceResponse = {
+    feedback: {
+      encouragement: "你把画面写得更清楚了。",
+      specific_improvement: "加入了可看见的细节",
+      next_step: "再加一个动作，会更生动。",
+      problem_monsters: ["空泛表达"],
+    },
+    settlement: {
+      xp_delta: 25,
+      level_after: 2,
+      badge_code: "first_sentence_upgrade",
+    },
+  };
+  let rejectSecondSentenceTraining!: (reason?: unknown) => void;
+
   await act(async () => {
     render(
       <Suspense fallback={null}>
@@ -128,11 +212,32 @@ test("sentence page shows ai feedback and settlement", async () => {
 
   expect(await screen.findByText("加入了可看见的细节")).toBeInTheDocument();
   expect(screen.getByText("+25 XP")).toBeInTheDocument();
-  expect(apiMocks.createSentenceTraining).toHaveBeenCalledWith("s1", {
-    source_sentence: "公园很美。",
-    upgraded_sentence: "清晨的公园里，荷叶上的水珠一闪一闪，像小灯泡。",
-    focus: "加细节",
+
+  const secondSentenceTraining = new Promise<typeof sentenceResponse>(
+    (_, reject) => {
+      rejectSecondSentenceTraining = reject;
+    },
+  );
+  apiMocks.createSentenceTraining.mockReturnValueOnce(secondSentenceTraining);
+
+  await userEvent.click(
+    screen.getByRole("button", { name: "提交给 AI 教练" }),
+  );
+
+  expect(screen.getByText("AI 教练正在看你的句子")).toBeInTheDocument();
+  expect(screen.queryByText("加入了可看见的细节")).not.toBeInTheDocument();
+  expect(screen.queryByText("+25 XP")).not.toBeInTheDocument();
+
+  await act(async () => {
+    rejectSecondSentenceTraining(new Error("network"));
+    await secondSentenceTraining.catch(() => undefined);
   });
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "这次句子练习没有提交成功。先别急，检查一下网络后再试一次。",
+  );
+  expect(screen.queryByText("加入了可看见的细节")).not.toBeInTheDocument();
+  expect(screen.queryByText("+25 XP")).not.toBeInTheDocument();
 });
 
 test("assessment page disables submit while pending and reports failures", async () => {
@@ -195,7 +300,7 @@ test("sentence page disables submit while pending and reports failures", async (
   rejectSentenceTraining(new Error("network"));
 
   expect(await screen.findByRole("alert")).toHaveTextContent(
-    "提交失败，请稍后再试。",
+    "这次句子练习没有提交成功。先别急，检查一下网络后再试一次。",
   );
   await waitFor(() => expect(submit).not.toBeDisabled());
 });
