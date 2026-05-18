@@ -14,3 +14,6 @@ dist/
 build/
 *.pyc
 .pnpm-store/
+
+
+.superpowers/
