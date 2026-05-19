@@ -26,9 +26,11 @@ def build_stage_report_content(session: Session, student_id: str) -> ReportConte
     if not ability:
         raise LookupError("report context not found")
     weak_points = []
-    if ability.structure < 45:
+    if ability.expression < 35 or ability.observation < 35:
+        weak_points.append("表达还可以更具体")
+    if ability.structure < 40:
         weak_points.append("作文结构还需要更清晰")
-    if ability.summarization < 45:
+    if ability.summarization < 35 or ability.comprehension < 35:
         weak_points.append("阅读概括可以继续练")
     if not weak_points:
         weak_points.append("继续保持细节和修改练习")

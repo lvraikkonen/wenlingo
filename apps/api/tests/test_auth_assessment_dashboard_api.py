@@ -1,6 +1,6 @@
 from sqlmodel import select
 
-from app.domain.models import StudentProfile
+from app.domain.models import Assessment, StudentProfile
 from app.domain.seed import seed_demo_data
 
 
@@ -42,3 +42,33 @@ def test_assessment_creates_first_ability_sketch_and_dashboard(session, client):
         "specific_writing_power",
         "revision_power",
     }
+
+
+def test_four_demo_profiles_have_distinct_dashboard_shapes_and_recommendations(session, client):
+    parent = seed_demo_data(session)
+    students = sorted(parent_students(session, parent.id), key=lambda student: student.id)
+    for student in students:
+        session.add(
+            Assessment(
+                student_id=student.id,
+                sentence_before="公园很美。",
+                sentence_after="公园里的花红红的，风一吹就轻轻摇。",
+                short_writing="我学会了骑车。刚开始我很害怕，后来爸爸扶着我练。",
+                summary="完成入门小试炼，生成第一张能力草图。",
+            )
+        )
+    session.commit()
+
+    dashboards = {
+        student.id: client.get(f"/api/students/{student.id}/dashboard").json()
+        for student in students
+    }
+
+    ability_shapes = {
+        tuple(dashboard["child_abilities"].values()) for dashboard in dashboards.values()
+    }
+    assert len(ability_shapes) == 4
+    assert dashboards["s1"]["today_tasks"]["main"]["focus"] == "把细节写具体"
+    assert dashboards["s2"]["today_tasks"]["quick"]["focus"] == "加动作或神态"
+    assert dashboards["s3"]["today_tasks"]["main"]["focus"] == "把选材和结构说清楚"
+    assert dashboards["s4"]["today_tasks"]["main"]["focus"] == "先把阅读内容概括清楚"

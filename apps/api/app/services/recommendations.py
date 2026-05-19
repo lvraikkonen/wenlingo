@@ -31,7 +31,12 @@ def choose_today_tasks(ability: AbilityProfile, has_completed_assessment: bool) 
                 minutes="5-8",
             ),
         )
-    essay_focus = "把选材和结构说清楚" if ability.structure < 40 else "把细节写具体"
+    if ability.summarization < 35 or ability.comprehension < 35:
+        essay_focus = "先把阅读内容概括清楚"
+    elif ability.structure < 40:
+        essay_focus = "把选材和结构说清楚"
+    else:
+        essay_focus = "把细节写具体"
     sentence_focus = "加动作或神态" if ability.observation < ability.expression else "加细节"
     return TodayTasks(
         main=RecommendedTask(kind="essay", title="作文城堡", focus=essay_focus, minutes="10-15"),

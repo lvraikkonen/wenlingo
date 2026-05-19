@@ -288,3 +288,21 @@ def test_report_rejects_weekly_report_type(session, client):
 
     assert report.status_code == 400
     assert report.json()["detail"] == "only stage reports are supported"
+
+
+def test_four_demo_profiles_report_weak_points_match_profile(session, client):
+    parent = seed_demo_data(session)
+    students = sorted(parent_students(session, parent.id), key=lambda student: student.id)
+
+    reports = {
+        student.id: client.post(
+            f"/api/students/{student.id}/reports",
+            json={"report_type": "stage"},
+        ).json()["content"]
+        for student in students
+    }
+
+    assert "继续保持细节和修改练习" in reports["s1"]["weak_points"]
+    assert "表达还可以更具体" in reports["s2"]["weak_points"]
+    assert "作文结构还需要更清晰" in reports["s3"]["weak_points"]
+    assert "阅读概括可以继续练" in reports["s4"]["weak_points"]
