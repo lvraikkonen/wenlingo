@@ -9,7 +9,7 @@ node_modules/
 coverage/
 test-results/
 playwright-report/
-apps/api/playwright-e2e.db
+*.db
 dist/
 build/
 *.pyc
