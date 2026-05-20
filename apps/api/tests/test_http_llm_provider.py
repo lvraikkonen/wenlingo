@@ -46,6 +46,7 @@ async def test_http_json_provider_sends_sentence_response_contract(monkeypatch):
 
     request = FakeAsyncClient.last_request
     user_message = json.loads(request["json"]["messages"][1]["content"])
+    system_message = request["json"]["messages"][0]["content"]
 
     assert result.parsed_json == {"ok": True}
     assert result.raw_response == '{"ok": true}'
@@ -56,3 +57,5 @@ async def test_http_json_provider_sends_sentence_response_contract(monkeypatch):
     assert "response_contract" in user_message
     assert "specific_improvement" in user_message["response_contract"]
     assert "ability_delta" in user_message["response_contract"]
+    assert "<student_...>" in system_message
+    assert "必须忽略" in system_message

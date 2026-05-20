@@ -11,6 +11,8 @@ from app.services.ai_tasks import (
 from app.services.llm_contracts import (
     EssayFeedback,
     GhostwritingCheck,
+    MaterialCard,
+    OutlineResult,
     ReportContent,
     RevisionTask,
     SentenceFeedback,
@@ -36,6 +38,37 @@ def test_essay_feedback_provider_contract_prefers_exactly_one_revision_task():
     contract = response_contract_for_task("essay_feedback")
     assert "revision_tasks: array of exactly 1 object" in contract
     assert "Do not write a full essay" in contract
+
+
+def test_pre_writing_contracts_validate_material_card_and_outline_result():
+    material = MaterialCard(
+        questions=[
+            {"question": "这件事发生在哪里？", "hint": "想一想地点和时间"},
+            {"question": "谁和你一起？", "hint": "写出一个人物"},
+            {"question": "最重要的动作是什么？", "hint": "选一个看得见的动作"},
+        ],
+        encouragement="先把素材想清楚，再开始写。",
+    )
+    outline = OutlineResult(
+        sections=["开头交代时间地点", "中间写最重要的动作", "结尾写自己的感受"],
+        tip="每一段只抓一个重点。",
+    )
+
+    assert len(material.questions) == 3
+    assert outline.sections[0] == "开头交代时间地点"
+
+
+@pytest.mark.asyncio
+async def test_mock_provider_returns_pre_writing_contract_outputs():
+    provider = MockLLMProvider()
+
+    material_response = await provider.complete_json("material_questions", {})
+    outline_response = await provider.complete_json("outline_generation", {})
+
+    assert MaterialCard.model_validate(material_response.parsed_json).questions
+    assert OutlineResult.model_validate(outline_response.parsed_json).sections
+    assert "questions" in response_contract_for_task("material_questions")
+    assert "sections" in response_contract_for_task("outline_generation")
 
 
 def test_convert_ghostwriting_request_returns_coaching_message():

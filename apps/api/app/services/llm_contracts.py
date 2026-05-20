@@ -46,6 +46,21 @@ class GhostwritingCheck(BaseModel):
         return self
 
 
+class MaterialQuestion(BaseModel):
+    question: NonBlankStr
+    hint: NonBlankStr
+
+
+class MaterialCard(BaseModel):
+    questions: list[MaterialQuestion] = Field(min_length=3, max_length=5)
+    encouragement: NonBlankStr
+
+
+class OutlineResult(BaseModel):
+    sections: list[NonBlankStr] = Field(min_length=3, max_length=5)
+    tip: NonBlankStr
+
+
 class ReportContent(BaseModel):
     practice_summary: NonBlankStr
     ability_changes: list[NonBlankStr] = Field(min_length=1, max_length=6)

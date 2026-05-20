@@ -85,6 +85,30 @@ class InvalidSentenceThenValidProvider:
         )
 
 
+class RecordingSentenceProvider:
+    provider_name = "fake"
+    model_name = "recording-sentence"
+
+    def __init__(self):
+        self.calls = []
+
+    async def complete_json(self, task_name, payload):
+        self.calls.append((task_name, payload))
+        parsed = {
+            "encouragement": "你把画面写得更清楚了。",
+            "specific_improvement": "加入了可看见的细节",
+            "next_step": "再加一个动作，会更生动。",
+            "ability_delta": {"expression": 4, "observation": 4},
+            "problem_monsters": ["空泛表达"],
+        }
+        return LLMProviderResponse(
+            parsed_json=parsed,
+            raw_response=json.dumps(parsed, ensure_ascii=False),
+            provider=self.provider_name,
+            model=self.model_name,
+        )
+
+
 class AlwaysInvalidSentenceProvider:
     provider_name = "fake"
     model_name = "sentence-always-invalid"
@@ -96,6 +120,32 @@ class AlwaysInvalidSentenceProvider:
             "next_step": "",
             "ability_delta": {},
             "problem_monsters": [],
+        }
+        return LLMProviderResponse(
+            parsed_json=parsed,
+            raw_response=json.dumps(parsed, ensure_ascii=False),
+            provider=self.provider_name,
+            model=self.model_name,
+        )
+
+
+class RecordingEssayProvider:
+    provider_name = "fake"
+    model_name = "recording-essay"
+
+    def __init__(self):
+        self.calls = []
+
+    async def complete_json(self, task_name, payload):
+        self.calls.append((task_name, payload))
+        parsed = {
+            "strengths": ["能写清楚发生了什么", "有一处心情表达"],
+            "improvements": ["第二段缺少动作细节"],
+            "problem_monsters": ["细节缺口"],
+            "sentence_notes": ["把开心换成具体画面。"],
+            "revision_tasks": [
+                {"instruction": "给第二段加一个动作描写", "target": "第二段"}
+            ],
         }
         return LLMProviderResponse(
             parsed_json=parsed,
@@ -217,6 +267,29 @@ async def test_sentence_invalid_then_valid_retries_and_logs_success(session):
 
 
 @pytest.mark.asyncio
+async def test_sentence_upgrade_feedback_wraps_student_payload():
+    provider = RecordingSentenceProvider()
+
+    await sentence_upgrade_feedback(
+        provider=provider,
+        source_sentence="公园很美。",
+        upgraded_sentence="公园里的花在风里轻轻摇。",
+        focus="加细节",
+    )
+
+    assert provider.calls == [
+        (
+            "sentence_upgrade_feedback",
+            {
+                "source_sentence": "<student_sentence>公园很美。</student_sentence>",
+                "upgraded_sentence": "<student_sentence>公园里的花在风里轻轻摇。</student_sentence>",
+                "focus": "加细节",
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_sentence_always_invalid_returns_schema_valid_fallback(session):
     result = await sentence_upgrade_feedback(
         provider=AlwaysInvalidSentenceProvider(),
@@ -234,6 +307,29 @@ async def test_sentence_always_invalid_returns_schema_valid_fallback(session):
     assert result.output.problem_monsters == ["空泛表达"]
     assert saved.validation_ok is False
     assert "validation" in saved.error_message.lower()
+
+
+@pytest.mark.asyncio
+async def test_essay_feedback_wraps_student_payload(session):
+    provider = RecordingEssayProvider()
+
+    await essay_feedback(
+        provider=provider,
+        title="我学会了骑车",
+        draft="我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+        session=session,
+        prompt_version="test-v1",
+    )
+
+    assert provider.calls == [
+        (
+            "essay_feedback",
+            {
+                "title": "<student_title>我学会了骑车</student_title>",
+                "draft": "<student_draft>我学会了骑车。刚开始我很害怕。后来我会了。我很开心。</student_draft>",
+            },
+        )
+    ]
 
 
 @pytest.mark.asyncio

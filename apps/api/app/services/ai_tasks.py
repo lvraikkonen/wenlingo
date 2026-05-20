@@ -277,8 +277,8 @@ async def sentence_upgrade_feedback(
         task_type=TaskType.sentence,
         task_name="sentence_upgrade_feedback",
         payload={
-            "source_sentence": source_sentence,
-            "upgraded_sentence": upgraded_sentence,
+            "source_sentence": f"<student_sentence>{source_sentence}</student_sentence>",
+            "upgraded_sentence": f"<student_sentence>{upgraded_sentence}</student_sentence>",
             "focus": focus,
         },
         output_model=SentenceFeedback,
@@ -313,7 +313,10 @@ async def essay_feedback(
         student_id=student_id,
         task_type=TaskType.essay,
         task_name="essay_feedback",
-        payload={"title": title, "draft": draft},
+        payload={
+            "title": f"<student_title>{title}</student_title>",
+            "draft": f"<student_draft>{draft}</student_draft>",
+        },
         output_model=EssayFeedback,
         fallback=fallback_essay_feedback(),
         input_summary=f"作文题目：{title}；初稿长度：{len(draft)}",
