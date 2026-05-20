@@ -2,6 +2,7 @@ from sqlmodel import Session, select
 
 from app.domain.enums import StudentPersona
 from app.domain.models import (
+    AbilityHistory,
     AbilityProfile,
     Assessment,
     Essay,
@@ -49,6 +50,7 @@ DEMO_PROFILES = [
 ]
 
 STUDENT_ID_REFERENCES = [
+    AbilityHistory,
     Assessment,
     Essay,
     GameEvent,

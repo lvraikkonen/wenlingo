@@ -30,6 +30,18 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
+        "ix_abilityhistory_ability_name",
+        "abilityhistory",
+        ["ability_name"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_abilityhistory_source_id",
+        "abilityhistory",
+        ["source_id"],
+        unique=False,
+    )
+    op.create_index(
         "ix_abilityhistory_student_id",
         "abilityhistory",
         ["student_id"],
@@ -39,4 +51,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_abilityhistory_student_id", table_name="abilityhistory")
+    op.drop_index("ix_abilityhistory_source_id", table_name="abilityhistory")
+    op.drop_index("ix_abilityhistory_ability_name", table_name="abilityhistory")
     op.drop_table("abilityhistory")

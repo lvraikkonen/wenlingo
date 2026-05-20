@@ -3,6 +3,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.domain.enums import TaskType
 from app.domain.models import (
+    AbilityHistory,
     AbilityProfile,
     Assessment,
     Essay,
@@ -64,6 +65,17 @@ def test_json_columns_are_not_nullable():
 
 def test_game_event_problem_monsters_are_string_list():
     assert GameEvent.__annotations__["problem_monsters"] == list[str]
+
+
+def test_ability_history_source_fields_are_indexed():
+    index_columns = {
+        column.name
+        for index in AbilityHistory.__table__.indexes
+        for column in index.columns
+    }
+
+    assert "ability_name" in index_columns
+    assert "source_id" in index_columns
 
 
 def test_essay_version_labels_are_unique_per_essay(session):

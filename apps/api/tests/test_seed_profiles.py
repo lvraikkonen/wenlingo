@@ -2,6 +2,7 @@ from sqlmodel import select
 
 from app.domain.enums import BadgeCode, ReportType, StudentPersona, TaskType
 from app.domain.models import (
+    AbilityHistory,
     AbilityProfile,
     Assessment,
     Essay,
@@ -79,6 +80,15 @@ def test_seed_demo_data_normalizes_existing_random_demo_ids(session):
         session.add(AbilityProfile(student_id=student_id))
     session.add_all(
         [
+            AbilityHistory(
+                student_id="legacy-s1",
+                ability_name="expression",
+                old_value=40,
+                new_value=44,
+                delta=4,
+                source_type=TaskType.sentence,
+                source_id="legacy-sentence",
+            ),
             Assessment(
                 student_id="legacy-s1",
                 sentence_before="公园很美。",
@@ -124,6 +134,7 @@ def test_seed_demo_data_normalizes_existing_random_demo_ids(session):
     assert session.exec(select(Assessment)).one().student_id == "s1"
     assert session.exec(select(Essay)).one().student_id == "s1"
     assert session.exec(select(GameEvent)).one().student_id == "s1"
+    assert session.exec(select(AbilityHistory)).one().student_id == "s1"
     assert session.exec(select(ReadingSession)).one().student_id == "s1"
     assert session.exec(select(Report)).one().student_id == "s1"
     assert session.exec(select(SentenceTraining)).one().student_id == "s1"

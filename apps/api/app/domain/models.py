@@ -58,12 +58,12 @@ class AbilityProfile(SQLModel, table=True):
 class AbilityHistory(SQLModel, table=True):
     id: str = Field(default_factory=new_uuid, primary_key=True)
     student_id: str = Field(foreign_key="studentprofile.id", index=True)
-    ability_name: str
+    ability_name: str = Field(index=True)
     old_value: int
     new_value: int
     delta: int
     source_type: TaskType
-    source_id: str
+    source_id: str = Field(index=True)
     created_at: datetime = timestamp_field()
 
 

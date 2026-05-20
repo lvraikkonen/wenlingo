@@ -56,6 +56,8 @@ def test_ability_history_has_migration():
     assert "source_type" in migration_text
     assert "source_id" in migration_text
     assert "created_at" in migration_text
+    assert "ix_abilityhistory_ability_name" in migration_text
+    assert "ix_abilityhistory_source_id" in migration_text
     assert "ix_abilityhistory_student_id" in migration_text
     assert "fk_abilityhistory_student_id_studentprofile" in migration_text
     assert 'down_revision = "20260515_family_test_llm_student_usage"' in migration_text
