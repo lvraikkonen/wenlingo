@@ -64,5 +64,6 @@ def apply_ability_delta(
 
     if history_rows:
         ability.updated_at = utcnow()
+        session.add(ability)
 
     return history_rows

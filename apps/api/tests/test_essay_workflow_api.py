@@ -2,7 +2,7 @@ import pytest
 from fastapi import HTTPException
 from sqlmodel import select
 
-from app.api.routes.essays import EssayRevisionCreate, submit_revision
+from app.api.routes.essays import EssayRevisionCreate, draft_ability_deltas, submit_revision
 from app.core.config import get_settings
 from app.domain.enums import TaskType
 from app.domain.models import AbilityHistory, Essay, EssayVersion, GameEvent, LLMCallLog, StudentProfile
@@ -81,6 +81,7 @@ def test_essay_from_existing_draft_feedback_and_revision(session, client):
     assert event.xp_delta == 60
     assert event.evidence["completed_task_count"] == 1
     assert event.evidence["completed_tasks"] == ["给第二段加一个动作描写"]
+    assert event.evidence["ability_deltas"] == {"revision": 5}
     saved_revision = session.exec(
         select(EssayVersion).where(EssayVersion.version_label == "revision")
     ).one()
@@ -97,6 +98,12 @@ def test_essay_from_existing_draft_feedback_and_revision(session, client):
     logs = session.exec(select(LLMCallLog).where(LLMCallLog.student_id == student.id)).all()
     assert {log.task_name for log in logs} == {"essay_feedback", "essay_revision_comparison"}
     assert {log.task_type for log in logs} == {TaskType.essay}
+
+
+def test_draft_ability_deltas_use_five_unless_exactly_three_improvements():
+    assert draft_ability_deltas(2) == {"expression": 5, "structure": 5}
+    assert draft_ability_deltas(3) == {"expression": 3, "structure": 3}
+    assert draft_ability_deltas(4) == {"expression": 5, "structure": 5}
 
 
 def test_revision_without_first_draft_returns_conflict(session, client):

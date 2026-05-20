@@ -16,11 +16,8 @@ router = APIRouter(tags=["essays"])
 
 
 def draft_ability_deltas(improvement_count: int) -> dict[str, int]:
-    if improvement_count <= 2:
-        return {"expression": 5, "structure": 5}
-    if improvement_count == 3:
-        return {"expression": 3, "structure": 3}
-    return {}
+    delta = 3 if improvement_count == 3 else 5
+    return {"expression": delta, "structure": delta}
 
 
 def revision_ability_deltas(evidence_count: int) -> dict[str, int]:
@@ -157,6 +154,7 @@ async def submit_revision(
             "essay_id": essay_id,
             "completed_task_count": len(request.completed_tasks),
             "completed_tasks": request.completed_tasks,
+            "ability_deltas": ability_deltas,
         },
     )
     essay.status = "settled"

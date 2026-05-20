@@ -108,6 +108,29 @@ def test_apply_ability_delta_refreshes_updated_at(session):
     assert ability.updated_at > old_updated_at
 
 
+def test_apply_ability_delta_adds_ability_when_history_is_created():
+    class RecordingSession:
+        def __init__(self):
+            self.added = []
+
+        def add(self, item):
+            self.added.append(item)
+
+    session = RecordingSession()
+    ability = AbilityProfile(student_id="student-1", expression=40)
+
+    apply_ability_delta(
+        session,
+        ability,
+        ability_deltas={"expression": 4},
+        source_type=TaskType.sentence,
+        source_id="sentence-training-1",
+    )
+
+    assert any(isinstance(item, AbilityHistory) for item in session.added)
+    assert ability in session.added
+
+
 def test_apply_ability_delta_persists_history_with_source(session):
     parent = ParentUser(email="parent@example.com", display_name="Parent")
     student = StudentProfile(parent_id=parent.id, name="小宇", persona="real_child")
