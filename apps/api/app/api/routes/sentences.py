@@ -14,6 +14,8 @@ from app.services.recommendations import choose_today_tasks
 
 router = APIRouter(prefix="/api/students", tags=["sentences"])
 
+SENTENCE_ABILITY_DELTA_FALLBACK = {"expression": 2, "observation": 2}
+
 
 class SentenceTrainingCreate(BaseModel):
     source_sentence: str = Field(min_length=1)
@@ -52,9 +54,11 @@ async def create_sentence_training(
         focus=request.focus,
         ai_feedback=feedback.model_dump(),
     )
-    apply_ability_delta(ability, TaskType.sentence, "sentence_upgrade", 0.8)
-    event = settle_task(student, TaskType.sentence, feedback.problem_monsters, {"focus": request.focus})
     session.add(training)
+    session.flush()
+    ability_deltas = feedback.ability_delta or SENTENCE_ABILITY_DELTA_FALLBACK
+    apply_ability_delta(session, ability, ability_deltas, TaskType.sentence, training.id)
+    event = settle_task(student, TaskType.sentence, feedback.problem_monsters, {"focus": request.focus})
     session.add(ability)
     session.add(student)
     session.add(event)

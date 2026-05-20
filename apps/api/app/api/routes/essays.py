@@ -15,6 +15,18 @@ from app.services.llm_provider import LLMProvider
 router = APIRouter(tags=["essays"])
 
 
+def draft_ability_deltas(improvement_count: int) -> dict[str, int]:
+    if improvement_count <= 2:
+        return {"expression": 5, "structure": 5}
+    if improvement_count == 3:
+        return {"expression": 3, "structure": 3}
+    return {}
+
+
+def revision_ability_deltas(evidence_count: int) -> dict[str, int]:
+    return {"revision": 5 if evidence_count >= 2 else 4}
+
+
 class EssayCreate(BaseModel):
     title: str = Field(min_length=1)
     draft: str = Field(min_length=20)
@@ -37,7 +49,8 @@ async def create_essay(
     settings: Settings = Depends(get_settings),
 ):
     student = session.get(StudentProfile, student_id)
-    if not student:
+    ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
+    if not student or not ability:
         raise HTTPException(status_code=404, detail="student not found")
     try:
         feedback_result = await essay_feedback(
@@ -64,6 +77,10 @@ async def create_essay(
         llm_call_log_id=feedback_result.log.id if feedback_result.log else None,
     )
     session.add(version)
+    session.flush()
+    ability_deltas = draft_ability_deltas(len(feedback.improvements))
+    apply_ability_delta(session, ability, ability_deltas, TaskType.essay, version.id)
+    session.add(ability)
     essay_payload = essay.model_dump()
     version_payload = version.model_dump()
     session.commit()
@@ -130,7 +147,8 @@ async def submit_revision(
     except IntegrityError as exc:
         session.rollback()
         raise HTTPException(status_code=409, detail="essay already settled") from exc
-    apply_ability_delta(ability, TaskType.essay, "essay_revision", 0.85, completed_revision=True)
+    ability_deltas = revision_ability_deltas(len(comparison.evidence))
+    apply_ability_delta(session, ability, ability_deltas, TaskType.essay, revision.id)
     event = settle_task(
         student,
         TaskType.essay,

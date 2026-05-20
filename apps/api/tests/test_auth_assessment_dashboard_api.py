@@ -1,6 +1,6 @@
 from sqlmodel import select
 
-from app.domain.models import Assessment, StudentProfile
+from app.domain.models import AbilityHistory, Assessment, StudentProfile
 from app.domain.seed import seed_demo_data
 
 
@@ -34,6 +34,7 @@ def test_assessment_creates_first_ability_sketch_and_dashboard(session, client):
 
     assert response.status_code == 201
     assert response.json()["assessment"]["summary"] == "完成入门小试炼，生成第一张能力草图。"
+    assert len(session.exec(select(AbilityHistory)).all()) == 0
     dashboard = client.get(f"/api/students/{student_id}/dashboard").json()
     assert dashboard["ability_note"] == "第一张能力草图"
     assert dashboard["today_tasks"]["main"]["kind"] in {"essay", "sentence"}

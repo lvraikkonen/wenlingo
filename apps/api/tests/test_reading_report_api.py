@@ -7,7 +7,16 @@ from sqlmodel import select
 
 from app.api.deps import get_db_session
 from app.domain.enums import BadgeCode, TaskType
-from app.domain.models import AbilityProfile, Essay, EssayVersion, GameEvent, ReadingSession, Report, StudentProfile
+from app.domain.models import (
+    AbilityHistory,
+    AbilityProfile,
+    Essay,
+    EssayVersion,
+    GameEvent,
+    ReadingSession,
+    Report,
+    StudentProfile,
+)
 from app.domain.seed import seed_demo_data
 from app.main import create_app
 
@@ -84,13 +93,19 @@ def test_reading_session_updates_transfer_tip_and_report(session, client):
 
     assert reading.status_code == 201
     assert reading.json()["transfer_tip"] == "写景时可以加入声音。"
-    assert session.exec(select(ReadingSession)).one().article_title == "春天的声音"
+    saved_reading = session.exec(select(ReadingSession)).one()
+    assert saved_reading.article_title == "春天的声音"
 
     ability_after = session.exec(
         select(AbilityProfile).where(AbilityProfile.student_id == student.id)
     ).one()
     assert ability_after.comprehension > comprehension_before
     assert ability_after.summarization > summarization_before
+    history = session.exec(select(AbilityHistory).where(AbilityHistory.source_id == saved_reading.id)).all()
+    assert {(row.ability_name, row.source_type) for row in history} == {
+        ("comprehension", TaskType.reading),
+        ("summarization", TaskType.reading),
+    }
     event = session.exec(select(GameEvent).where(GameEvent.task_type == TaskType.reading)).one()
     assert event.xp_delta == 30
     assert event.badge_code == BadgeCode.reading_transfer

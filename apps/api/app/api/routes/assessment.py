@@ -5,7 +5,6 @@ from sqlmodel import Session, select
 from app.api.deps import get_db_session
 from app.domain.enums import TaskType
 from app.domain.models import AbilityProfile, Assessment, StudentProfile
-from app.services.abilities import apply_ability_delta
 from app.services.gamification import settle_task
 
 router = APIRouter(prefix="/api/students", tags=["assessment"])
@@ -34,7 +33,6 @@ def create_assessment(
         short_writing=request.short_writing,
         summary="完成入门小试炼，生成第一张能力草图。",
     )
-    apply_ability_delta(ability, TaskType.assessment, "entry_assessment", 0.6)
     event = settle_task(student, TaskType.assessment, [], {"summary": assessment.summary})
     session.add(assessment)
     session.add(event)

@@ -10,6 +10,8 @@ from app.services.gamification import settle_task
 
 router = APIRouter(prefix="/api/students", tags=["readings"])
 
+READING_ABILITY_DELTAS = {"comprehension": 3, "summarization": 3}
+
 ARTICLES = {
     "spring-sounds": {
         "title": "春天的声音",
@@ -41,9 +43,10 @@ def create_reading(
         ai_feedback={"encouragement": "你抓住了文章里的声音细节。"},
         transfer_tip=article["transfer_tip"],
     )
-    apply_ability_delta(ability, TaskType.reading, "reading_transfer", 0.75)
-    event = settle_task(student, TaskType.reading, ["概括不清"], {"transfer_tip": article["transfer_tip"]})
     session.add(reading)
+    session.flush()
+    apply_ability_delta(session, ability, READING_ABILITY_DELTAS, TaskType.reading, reading.id)
+    event = settle_task(student, TaskType.reading, ["概括不清"], {"transfer_tip": article["transfer_tip"]})
     session.add(ability)
     session.add(student)
     session.add(event)

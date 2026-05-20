@@ -1,6 +1,7 @@
 from sqlmodel import select
 
-from app.domain.models import AbilityProfile, GameEvent, SentenceTraining, StudentProfile
+from app.domain.enums import TaskType
+from app.domain.models import AbilityHistory, AbilityProfile, GameEvent, SentenceTraining, StudentProfile
 from app.domain.seed import seed_demo_data
 
 
@@ -26,8 +27,14 @@ def test_sentence_training_persists_feedback_ability_and_game_event(session, cli
     assert payload["feedback"]["specific_improvement"] == "加入了可看见的细节"
     assert payload["settlement"]["xp_delta"] == 25
     assert payload["next_task"]["kind"] in {"essay", "sentence"}
-    assert session.exec(select(SentenceTraining)).one().focus == "鍔犵粏鑺?"
+    training = session.exec(select(SentenceTraining)).one()
+    assert training.focus == "鍔犵粏鑺?"
     assert session.exec(select(GameEvent)).one().problem_monsters == ["空泛表达"]
     assert session.exec(
         select(AbilityProfile).where(AbilityProfile.student_id == student.id)
     ).one().expression > 40
+    history = session.exec(select(AbilityHistory).where(AbilityHistory.student_id == student.id)).all()
+    assert {(row.ability_name, row.delta, row.source_type, row.source_id) for row in history} == {
+        ("expression", 4, TaskType.sentence, training.id),
+        ("observation", 4, TaskType.sentence, training.id),
+    }

@@ -5,7 +5,7 @@ from sqlmodel import select
 from app.api.routes.essays import EssayRevisionCreate, submit_revision
 from app.core.config import get_settings
 from app.domain.enums import TaskType
-from app.domain.models import Essay, EssayVersion, GameEvent, LLMCallLog, StudentProfile
+from app.domain.models import AbilityHistory, Essay, EssayVersion, GameEvent, LLMCallLog, StudentProfile
 from app.domain.seed import seed_demo_data
 from app.services.llm_provider import MockLLMProvider
 
@@ -49,6 +49,16 @@ def test_essay_from_existing_draft_feedback_and_revision(session, client):
     assert start.status_code == 201
     essay_id = start.json()["essay"]["id"]
     assert start.json()["feedback"]["revision_tasks"][0]["instruction"] == "给第二段加一个动作描写"
+    first_draft = session.exec(
+        select(EssayVersion).where(EssayVersion.version_label == "first_draft")
+    ).one()
+    draft_history = session.exec(
+        select(AbilityHistory).where(AbilityHistory.source_id == first_draft.id)
+    ).all()
+    assert {(row.ability_name, row.delta, row.source_type) for row in draft_history} == {
+        ("expression", 5, TaskType.essay),
+        ("structure", 5, TaskType.essay),
+    }
 
     revision = client.post(
         f"/api/essays/{essay_id}/revision",
@@ -74,6 +84,12 @@ def test_essay_from_existing_draft_feedback_and_revision(session, client):
     saved_revision = session.exec(
         select(EssayVersion).where(EssayVersion.version_label == "revision")
     ).one()
+    revision_history = session.exec(
+        select(AbilityHistory).where(AbilityHistory.source_id == saved_revision.id)
+    ).all()
+    assert {(row.ability_name, row.delta, row.source_type) for row in revision_history} == {
+        ("revision", 5, TaskType.essay),
+    }
     assert saved_revision.completed_tasks == ["给第二段加一个动作描写"]
     assert saved_revision.skipped_tasks == []
     assert saved_revision.duration_seconds == 420
@@ -150,6 +166,7 @@ def test_revision_cannot_be_settled_twice(session, client):
     assert second_revision.json()["detail"] == "essay already settled"
     assert len(session.exec(select(EssayVersion)).all()) == 2
     assert len(session.exec(select(GameEvent)).all()) == 1
+    assert len(session.exec(select(AbilityHistory)).all()) == 3
     assert parent_students(session, parent.id)[0].xp == xp_after_first_revision
 
 
@@ -191,4 +208,5 @@ async def test_revision_integrity_conflict_returns_409_before_settlement(session
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail == "essay already settled"
     assert len(session.exec(select(GameEvent)).all()) == 0
+    assert len(session.exec(select(AbilityHistory)).all()) == 0
     assert parent_students(session, parent.id)[0].xp == xp_before
