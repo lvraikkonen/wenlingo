@@ -20,7 +20,7 @@ def student_dashboard(student_id: str, session: Session = Depends(get_db_session
         "student": student,
         "ability_note": "第一张能力草图" if has_assessment else "等待入门小试点",
         "child_abilities": to_child_abilities(ability),
-        "today_tasks": choose_today_tasks(ability, has_assessment).model_dump(),
+        "today_tasks": choose_today_tasks(ability).model_dump(),
         "map": ["句子工坊", "作文城堡", "阅读峡谷"],
         "coach_message": "今天先完成推荐任务，再看看哪里变强了。",
     }

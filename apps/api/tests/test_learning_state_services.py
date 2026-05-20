@@ -233,11 +233,41 @@ def test_recommendations_prioritize_structure_gap():
         revision=28,
     )
 
-    tasks = choose_today_tasks(ability, has_completed_assessment=True)
+    tasks = choose_today_tasks(ability)
 
     assert tasks.main.kind == "essay"
     assert tasks.main.title == "作文城堡"
     assert tasks.main.focus == "把选材和结构说清楚"
     assert tasks.quick.kind == "sentence"
     assert tasks.quick.title == "句子工坊"
+    assert tasks.quick.focus == "加动作或神态"
+
+
+def test_recommendations_only_assessment_for_all_default_abilities():
+    ability = AbilityProfile(student_id="student-1")
+
+    tasks = choose_today_tasks(ability)
+
+    assert tasks.main.kind == "assessment"
+    assert tasks.main.title == "入门小试炼"
+    assert tasks.main.focus == "第一张能力草图"
+    assert tasks.main.minutes == "3-5"
+    assert tasks.quick.kind == "sentence"
+    assert tasks.quick.focus == "加细节"
+
+
+def test_recommendations_prioritize_expression_or_observation_gap():
+    ability = AbilityProfile(
+        student_id="student-1",
+        expression=28,
+        observation=34,
+        structure=45,
+        comprehension=42,
+        summarization=42,
+    )
+
+    tasks = choose_today_tasks(ability)
+
+    assert tasks.main.kind == "essay"
+    assert tasks.main.focus == "把句子和细节写具体"
     assert tasks.quick.focus == "加动作或神态"

@@ -69,5 +69,5 @@ async def create_sentence_training(
         "training": training_payload,
         "feedback": feedback,
         "settlement": settlement_payload,
-        "next_task": choose_today_tasks(ability, has_completed_assessment=True).main.model_dump(),
+        "next_task": choose_today_tasks(ability).main.model_dump(),
     }
