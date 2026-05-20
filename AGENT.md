@@ -79,6 +79,17 @@ Before completing a task:
 - Add tests for new behavior.
 - Summarize what was tested and what was not tested.
 
+### Windows / Codex Verification Notes
+
+- In this environment, `pnpm` may not be available on `PATH`. If `pnpm ...`
+  is not recognized, use `corepack pnpm ...` for web commands. Do not treat
+  `pnpm` command resolution as a test failure.
+- Before running Playwright E2E, remove the ignored local SQLite database
+  `apps/api/playwright-e2e.db` if it exists. The Playwright API startup uses
+  `app.db.init_db`, which creates missing tables but does not migrate existing
+  SQLite tables. A stale database can retain an old schema and cause errors
+  such as missing columns on `llmcalllog`.
+
 ## Documentation Rules
 
 When behavior changes:
