@@ -55,6 +55,18 @@ class AbilityProfile(SQLModel, table=True):
     updated_at: datetime = timestamp_field()
 
 
+class AbilityHistory(SQLModel, table=True):
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    student_id: str = Field(foreign_key="studentprofile.id", index=True)
+    ability_name: str
+    old_value: int
+    new_value: int
+    delta: int
+    source_type: TaskType
+    source_id: str
+    created_at: datetime = timestamp_field()
+
+
 class Assessment(SQLModel, table=True):
     id: str = Field(default_factory=new_uuid, primary_key=True)
     student_id: str = Field(foreign_key="studentprofile.id", index=True)

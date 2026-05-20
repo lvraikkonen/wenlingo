@@ -41,3 +41,21 @@ def test_family_test_llm_student_usage_has_migration():
     assert "llmcalllog" in migration_text
     assert "student_id" in migration_text
     assert "task_name" in migration_text
+
+
+def test_ability_history_has_migration():
+    migration_path = Path("app/db/migrations/versions/20260520_ability_history.py")
+    migration_text = migration_path.read_text(encoding="utf-8")
+
+    assert "abilityhistory" in migration_text
+    assert "student_id" in migration_text
+    assert "ability_name" in migration_text
+    assert "old_value" in migration_text
+    assert "new_value" in migration_text
+    assert "delta" in migration_text
+    assert "source_type" in migration_text
+    assert "source_id" in migration_text
+    assert "created_at" in migration_text
+    assert "ix_abilityhistory_student_id" in migration_text
+    assert "fk_abilityhistory_student_id_studentprofile" in migration_text
+    assert 'down_revision = "20260515_family_test_llm_student_usage"' in migration_text
