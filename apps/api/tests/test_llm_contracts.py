@@ -12,6 +12,7 @@ from app.services.llm_contracts import (
     EssayFeedback,
     GhostwritingCheck,
     MaterialCard,
+    MaterialQuestion,
     OutlineResult,
     ReportContent,
     RevisionTask,
@@ -56,6 +57,52 @@ def test_pre_writing_contracts_validate_material_card_and_outline_result():
 
     assert len(material.questions) == 3
     assert outline.sections[0] == "开头交代时间地点"
+
+
+@pytest.mark.parametrize(
+    ("contract", "payload"),
+    [
+        (
+            MaterialQuestion,
+            {"question": "这件事发生在哪里？", "hint": "想一想地点和时间", "extra": "ignored"},
+        ),
+        (
+            MaterialCard,
+            {
+                "questions": [
+                    {"question": "这件事发生在哪里？", "hint": "想一想地点和时间"},
+                    {"question": "谁和你一起？", "hint": "写出一个人物"},
+                    {"question": "最重要的动作是什么？", "hint": "选一个看得见的动作"},
+                ],
+                "encouragement": "先把素材想清楚，再开始写。",
+                "extra": "ignored",
+            },
+        ),
+        (
+            OutlineResult,
+            {
+                "sections": ["开头交代时间地点", "中间写最重要的动作", "结尾写自己的感受"],
+                "tip": "每一段只抓一个重点。",
+                "extra": "ignored",
+            },
+        ),
+    ],
+)
+def test_pre_writing_contracts_reject_extra_fields(contract, payload):
+    with pytest.raises(ValidationError):
+        contract(**payload)
+
+
+def test_material_card_rejects_extra_fields_inside_questions():
+    with pytest.raises(ValidationError):
+        MaterialCard(
+            questions=[
+                {"question": "这件事发生在哪里？", "hint": "想一想地点和时间", "extra": "ignored"},
+                {"question": "谁和你一起？", "hint": "写出一个人物"},
+                {"question": "最重要的动作是什么？", "hint": "选一个看得见的动作"},
+            ],
+            encouragement="先把素材想清楚，再开始写。",
+        )
 
 
 @pytest.mark.asyncio

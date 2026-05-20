@@ -1,3 +1,4 @@
+import html
 import re
 from dataclasses import dataclass
 from datetime import datetime, time, timezone
@@ -58,6 +59,10 @@ GHOSTWRITING_INTENT_REGEXES = [
 
 def _normalize_request(text: str) -> str:
     return "".join(char for char in text.lower() if char.isalnum())
+
+
+def _wrap_student_payload(tag: str, value: str) -> str:
+    return f"<{tag}>{html.escape(value, quote=False)}</{tag}>"
 
 
 def convert_ghostwriting_request(text: str) -> GhostwritingCheck:
@@ -277,8 +282,8 @@ async def sentence_upgrade_feedback(
         task_type=TaskType.sentence,
         task_name="sentence_upgrade_feedback",
         payload={
-            "source_sentence": f"<student_sentence>{source_sentence}</student_sentence>",
-            "upgraded_sentence": f"<student_sentence>{upgraded_sentence}</student_sentence>",
+            "source_sentence": _wrap_student_payload("student_sentence", source_sentence),
+            "upgraded_sentence": _wrap_student_payload("student_sentence", upgraded_sentence),
             "focus": focus,
         },
         output_model=SentenceFeedback,
@@ -314,8 +319,8 @@ async def essay_feedback(
         task_type=TaskType.essay,
         task_name="essay_feedback",
         payload={
-            "title": f"<student_title>{title}</student_title>",
-            "draft": f"<student_draft>{draft}</student_draft>",
+            "title": _wrap_student_payload("student_title", title),
+            "draft": _wrap_student_payload("student_draft", draft),
         },
         output_model=EssayFeedback,
         fallback=fallback_essay_feedback(),

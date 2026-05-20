@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from pydantic import BaseModel, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 
 NonBlankStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -47,16 +47,22 @@ class GhostwritingCheck(BaseModel):
 
 
 class MaterialQuestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     question: NonBlankStr
     hint: NonBlankStr
 
 
 class MaterialCard(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     questions: list[MaterialQuestion] = Field(min_length=3, max_length=5)
     encouragement: NonBlankStr
 
 
 class OutlineResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     sections: list[NonBlankStr] = Field(min_length=3, max_length=5)
     tip: NonBlankStr
 
