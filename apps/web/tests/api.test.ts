@@ -123,7 +123,7 @@ describe("api client", () => {
       source_sentence: "公园很美。",
       upgraded_sentence: "清晨的公园里，荷叶上的水珠一闪一闪。",
       focus: "加细节",
-    };
+    } satisfies Parameters<typeof createSentenceTraining>[1];
 
     await createSentenceTraining("s1", payload);
 

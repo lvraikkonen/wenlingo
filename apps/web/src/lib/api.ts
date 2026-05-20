@@ -55,6 +55,12 @@ export type SentenceTrainingResponse = {
   settlement: Settlement;
 };
 
+export type SentenceFocus =
+  | "加细节"
+  | "加动作或神态"
+  | "加心理感受"
+  | "加比喻或拟人";
+
 export type RevisionTask = {
   instruction: string;
   target: string;
@@ -132,7 +138,7 @@ export function createSentenceTraining(
   payload: {
     source_sentence: string;
     upgraded_sentence: string;
-    focus: string;
+    focus: SentenceFocus;
   },
 ): Promise<SentenceTrainingResponse> {
   return requestJson<SentenceTrainingResponse>(

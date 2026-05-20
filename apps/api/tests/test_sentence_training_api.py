@@ -16,9 +16,9 @@ def test_sentence_training_persists_feedback_ability_and_game_event(session, cli
     response = client.post(
         f"/api/students/{student.id}/sentences",
         json={
-            "source_sentence": "鍏洯寰堢編銆?",
-            "upgraded_sentence": "娓呮櫒鐨勫叕鍥噷锛岃嵎鍙朵笂鐨勬按鐝犱竴闂竴闂紝鍍忓皬鐏场銆?",
-            "focus": "鍔犵粏鑺?",
+            "source_sentence": "公园很美。",
+            "upgraded_sentence": "清晨的公园里，荷叶上的水珠一闪一闪，像小灯泡。",
+            "focus": "加细节",
         },
     )
 
@@ -28,7 +28,7 @@ def test_sentence_training_persists_feedback_ability_and_game_event(session, cli
     assert payload["settlement"]["xp_delta"] == 25
     assert payload["next_task"]["kind"] in {"essay", "sentence"}
     training = session.exec(select(SentenceTraining)).one()
-    assert training.focus == "鍔犵粏鑺?"
+    assert training.focus == "加细节"
     assert session.exec(select(GameEvent)).one().problem_monsters == ["空泛表达"]
     assert session.exec(
         select(AbilityProfile).where(AbilityProfile.student_id == student.id)
@@ -38,3 +38,36 @@ def test_sentence_training_persists_feedback_ability_and_game_event(session, cli
         ("expression", 4, TaskType.sentence, training.id),
         ("observation", 4, TaskType.sentence, training.id),
     }
+
+
+def test_sentence_training_rejects_invalid_focus(session, client):
+    parent = seed_demo_data(session)
+    student = parent_students(session, parent.id)[0]
+
+    response = client.post(
+        f"/api/students/{student.id}/sentences",
+        json={
+            "source_sentence": "公园很美。",
+            "upgraded_sentence": "公园里的花在风里轻轻摇。",
+            "focus": "随便写",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_sentence_training_rejects_overlong_sentences(session, client):
+    parent = seed_demo_data(session)
+    student = parent_students(session, parent.id)[0]
+    too_long = "细" * 501
+
+    response = client.post(
+        f"/api/students/{student.id}/sentences",
+        json={
+            "source_sentence": too_long,
+            "upgraded_sentence": "公园里的花在风里轻轻摇。",
+            "focus": "加细节",
+        },
+    )
+
+    assert response.status_code == 422

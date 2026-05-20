@@ -100,6 +100,23 @@ def test_essay_from_existing_draft_feedback_and_revision(session, client):
     assert {log.task_type for log in logs} == {TaskType.essay}
 
 
+def test_essay_create_rejects_overlong_title_and_draft(session, client):
+    parent = seed_demo_data(session)
+    student = parent_students(session, parent.id)[0]
+
+    title_response = client.post(
+        f"/api/students/{student.id}/essays",
+        json={"title": "题" * 101, "draft": "我学会了骑车。刚开始我很害怕。后来我会了。", "entry": "existing_draft"},
+    )
+    draft_response = client.post(
+        f"/api/students/{student.id}/essays",
+        json={"title": "我学会了骑车", "draft": "文" * 3001, "entry": "existing_draft"},
+    )
+
+    assert title_response.status_code == 422
+    assert draft_response.status_code == 422
+
+
 def test_draft_ability_deltas_use_five_unless_exactly_three_improvements():
     assert draft_ability_deltas(2) == {"expression": 5, "structure": 5}
     assert draft_ability_deltas(3) == {"expression": 3, "structure": 3}

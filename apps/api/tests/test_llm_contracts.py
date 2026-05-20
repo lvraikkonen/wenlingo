@@ -18,7 +18,7 @@ from app.services.llm_contracts import (
 from app.services.llm_provider import LLMProviderResponse, MockLLMProvider, response_contract_for_task
 
 
-def test_essay_feedback_rejects_more_than_three_revision_tasks():
+def test_essay_feedback_rejects_more_than_one_revision_task():
     with pytest.raises(ValidationError):
         EssayFeedback(
             strengths=["动作写得清楚", "心情能看见"],
@@ -28,8 +28,6 @@ def test_essay_feedback_rejects_more_than_three_revision_tasks():
             revision_tasks=[
                 RevisionTask(instruction="加一个动作描写", target="第二段"),
                 RevisionTask(instruction="加一句心理活动", target="第二段"),
-                RevisionTask(instruction="加一个过渡句", target="第三段"),
-                RevisionTask(instruction="让结尾感受更清楚", target="结尾"),
             ],
         )
 

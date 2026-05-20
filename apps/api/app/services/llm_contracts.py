@@ -16,7 +16,7 @@ class EssayFeedback(BaseModel):
     improvements: list[NonBlankStr] = Field(min_length=1, max_length=3)
     problem_monsters: list[NonBlankStr] = Field(min_length=1, max_length=3)
     sentence_notes: list[NonBlankStr] = Field(min_length=1, max_length=3)
-    revision_tasks: list[RevisionTask] = Field(min_length=1, max_length=3)
+    revision_tasks: list[RevisionTask] = Field(min_length=1, max_length=1)
 
 
 class EssayRevisionComparison(BaseModel):

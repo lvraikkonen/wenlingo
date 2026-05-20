@@ -25,8 +25,8 @@ def revision_ability_deltas(evidence_count: int) -> dict[str, int]:
 
 
 class EssayCreate(BaseModel):
-    title: str = Field(min_length=1)
-    draft: str = Field(min_length=20)
+    title: str = Field(min_length=1, max_length=100)
+    draft: str = Field(min_length=20, max_length=3000)
     entry: str
 
 

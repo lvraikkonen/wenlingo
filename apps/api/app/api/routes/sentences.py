@@ -4,7 +4,7 @@ from sqlmodel import Session, select
 
 from app.api.deps import get_db_session, get_llm_provider
 from app.core.config import Settings, get_settings
-from app.domain.enums import TaskType
+from app.domain.enums import SentenceFocus, TaskType
 from app.domain.models import AbilityProfile, SentenceTraining, StudentProfile
 from app.services.abilities import apply_ability_delta
 from app.services.ai_tasks import sentence_upgrade_feedback
@@ -18,9 +18,9 @@ SENTENCE_ABILITY_DELTA_FALLBACK = {"expression": 2, "observation": 2}
 
 
 class SentenceTrainingCreate(BaseModel):
-    source_sentence: str = Field(min_length=1)
-    upgraded_sentence: str = Field(min_length=1)
-    focus: str
+    source_sentence: str = Field(min_length=1, max_length=500)
+    upgraded_sentence: str = Field(min_length=1, max_length=500)
+    focus: SentenceFocus
 
 
 @router.post("/{student_id}/sentences", status_code=201)
@@ -35,11 +35,12 @@ async def create_sentence_training(
     ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
     if not student or not ability:
         raise HTTPException(status_code=404, detail="student not found")
+    focus = request.focus.value
     feedback_result = await sentence_upgrade_feedback(
         provider=provider,
         source_sentence=request.source_sentence,
         upgraded_sentence=request.upgraded_sentence,
-        focus=request.focus,
+        focus=focus,
         session=session,
         prompt_version=settings.llm_prompt_version,
         student_id=student_id,
@@ -51,14 +52,14 @@ async def create_sentence_training(
         student_id=student_id,
         source_sentence=request.source_sentence,
         upgraded_sentence=request.upgraded_sentence,
-        focus=request.focus,
+        focus=focus,
         ai_feedback=feedback.model_dump(),
     )
     session.add(training)
     session.flush()
     ability_deltas = feedback.ability_delta or SENTENCE_ABILITY_DELTA_FALLBACK
     apply_ability_delta(session, ability, ability_deltas, TaskType.sentence, training.id)
-    event = settle_task(student, TaskType.sentence, feedback.problem_monsters, {"focus": request.focus})
+    event = settle_task(student, TaskType.sentence, feedback.problem_monsters, {"focus": focus})
     session.add(ability)
     session.add(student)
     session.add(event)

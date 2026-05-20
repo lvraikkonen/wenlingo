@@ -16,6 +16,13 @@ class TaskType(str, Enum):
     report = "report"
 
 
+class SentenceFocus(str, Enum):
+    detail = "加细节"
+    action_or_expression = "加动作或神态"
+    feeling = "加心理感受"
+    figurative = "加比喻或拟人"
+
+
 class ReportType(str, Enum):
     stage = "stage"
     weekly = "weekly"

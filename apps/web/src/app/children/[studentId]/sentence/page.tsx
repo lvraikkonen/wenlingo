@@ -8,8 +8,11 @@ import { FamilyTopbar } from "../../../../components/FamilyTopbar";
 import { SettlementPanel } from "../../../../components/SettlementPanel";
 import {
   createSentenceTraining,
+  type SentenceFocus,
   type SentenceTrainingResponse,
 } from "../../../../lib/api";
+
+const DEFAULT_SENTENCE_FOCUS: SentenceFocus = "加细节";
 
 export default function SentencePage({
   params,
@@ -33,7 +36,7 @@ export default function SentencePage({
       const result = await createSentenceTraining(studentId, {
         source_sentence: sourceSentence,
         upgraded_sentence: upgradedSentence,
-        focus: "加细节",
+        focus: DEFAULT_SENTENCE_FOCUS,
       });
 
       setResult(result);
