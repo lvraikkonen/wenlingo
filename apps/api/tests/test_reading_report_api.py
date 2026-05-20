@@ -102,9 +102,9 @@ def test_reading_session_updates_transfer_tip_and_report(session, client):
     assert ability_after.comprehension > comprehension_before
     assert ability_after.summarization > summarization_before
     history = session.exec(select(AbilityHistory).where(AbilityHistory.source_id == saved_reading.id)).all()
-    assert {(row.ability_name, row.source_type) for row in history} == {
-        ("comprehension", TaskType.reading),
-        ("summarization", TaskType.reading),
+    assert {(row.ability_name, row.delta, row.source_type) for row in history} == {
+        ("comprehension", 4, TaskType.reading),
+        ("summarization", 4, TaskType.reading),
     }
     event = session.exec(select(GameEvent).where(GameEvent.task_type == TaskType.reading)).one()
     assert event.xp_delta == 30

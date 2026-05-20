@@ -10,7 +10,7 @@ from app.services.gamification import settle_task
 
 router = APIRouter(prefix="/api/students", tags=["readings"])
 
-READING_ABILITY_DELTAS = {"comprehension": 3, "summarization": 3}
+READING_ABILITY_DELTAS = {"comprehension": 4, "summarization": 4}
 
 ARTICLES = {
     "spring-sounds": {
