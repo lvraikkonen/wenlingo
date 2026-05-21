@@ -9,19 +9,17 @@ from app.domain.enums import TaskType
 from app.domain.models import AbilityProfile, Essay, EssayVersion, StudentProfile
 from app.services.abilities import apply_ability_delta
 from app.services.ai_tasks import essay_feedback, essay_revision_comparison
+from app.services.essay_workflow import (
+    ASSESSMENT_ESSAY_STATUS,
+    REVISION_REQUESTED_STATUS,
+    SETTLED_ESSAY_STATUS,
+    draft_ability_deltas,
+    revision_ability_deltas,
+)
 from app.services.gamification import settle_task
 from app.services.llm_provider import LLMProvider
 
 router = APIRouter(tags=["essays"])
-
-
-def draft_ability_deltas(improvement_count: int) -> dict[str, int]:
-    delta = 3 if improvement_count == 3 else 5
-    return {"expression": delta, "structure": delta}
-
-
-def revision_ability_deltas(evidence_count: int) -> dict[str, int]:
-    return {"revision": 5 if evidence_count >= 2 else 4}
 
 
 class EssayCreate(BaseModel):
@@ -63,7 +61,7 @@ async def create_essay(
         feedback = feedback_result.output
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    essay = Essay(student_id=student_id, title=request.title, status="revision_requested")
+    essay = Essay(student_id=student_id, title=request.title, status=REVISION_REQUESTED_STATUS)
     session.add(essay)
     session.flush()
     version = EssayVersion(
@@ -95,7 +93,9 @@ async def submit_revision(
     essay = session.get(Essay, essay_id)
     if not essay:
         raise HTTPException(status_code=404, detail="essay not found")
-    if essay.status == "settled":
+    if essay.status == ASSESSMENT_ESSAY_STATUS:
+        raise HTTPException(status_code=404, detail="essay not found")
+    if essay.status == SETTLED_ESSAY_STATUS:
         raise HTTPException(status_code=409, detail="essay already settled")
     first_draft = session.exec(
         select(EssayVersion).where(
@@ -157,7 +157,7 @@ async def submit_revision(
             "ability_deltas": ability_deltas,
         },
     )
-    essay.status = "settled"
+    essay.status = SETTLED_ESSAY_STATUS
     session.add(essay)
     session.add(ability)
     session.add(student)

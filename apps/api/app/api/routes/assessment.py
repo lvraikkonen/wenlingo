@@ -2,51 +2,67 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from app.api.deps import get_db_session
-from app.domain.enums import TaskType
-from app.domain.models import AbilityProfile, Assessment, StudentProfile
-from app.services.gamification import settle_task
+from app.api.deps import get_db_session, get_llm_provider
+from app.core.config import Settings, get_settings
+from app.domain.models import AbilityProfile, StudentProfile
+from app.services.assessment import complete_entry_assessment
+from app.services.llm_provider import LLMProvider
 
 router = APIRouter(prefix="/api/students", tags=["assessment"])
 
 
 class AssessmentCreate(BaseModel):
-    sentence_before: str = Field(min_length=1)
-    sentence_after: str = Field(min_length=1)
-    short_writing: str = Field(min_length=20, max_length=200)
+    sentence_before: str = Field(min_length=1, max_length=500)
+    sentence_after: str = Field(min_length=1, max_length=500)
+    short_writing: str = Field(min_length=20, max_length=500)
 
 
 @router.post("/{student_id}/assessment", status_code=201)
-def create_assessment(
+async def create_assessment(
     student_id: str,
     request: AssessmentCreate,
     session: Session = Depends(get_db_session),
+    provider: LLMProvider = Depends(get_llm_provider),
+    settings: Settings = Depends(get_settings),
 ):
     student = session.get(StudentProfile, student_id)
     ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
     if not student or not ability:
+        session.rollback()
         raise HTTPException(status_code=404, detail="student not found")
-    assessment = Assessment(
-        student_id=student_id,
-        sentence_before=request.sentence_before,
-        sentence_after=request.sentence_after,
-        short_writing=request.short_writing,
-        summary="完成入门小试炼，生成第一张能力草图。",
-    )
-    event = settle_task(student, TaskType.assessment, [], {"summary": assessment.summary})
-    session.add(assessment)
-    session.add(event)
-    session.add(ability)
-    session.add(student)
-    session.commit()
-    return {
-        "assessment": {
-            "id": assessment.id,
-            "summary": assessment.summary,
-        },
-        "game_event": {
-            "xp_delta": event.xp_delta,
-            "level_after": event.level_after,
-            "badge_code": event.badge_code,
-        },
-    }
+
+    try:
+        result = await complete_entry_assessment(
+            session=session,
+            student=student,
+            ability=ability,
+            provider=provider,
+            settings=settings,
+            sentence_before=request.sentence_before,
+            sentence_after=request.sentence_after,
+            short_writing=request.short_writing,
+        )
+        assessment_payload = {
+            "id": result.assessment.id,
+            "summary": result.assessment.summary,
+            "sentence_training_id": result.assessment.sentence_training_id,
+            "essay_id": result.assessment.essay_id,
+        }
+        settlement_payload = result.settlement.model_dump()
+        response_payload = {
+            "assessment": assessment_payload,
+            "ability_sketch": result.ability_sketch,
+            "settlement": settlement_payload,
+            "game_event": settlement_payload,
+        }
+        session.commit()
+        return response_payload
+    except ValueError as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        session.rollback()
+        raise
+    except Exception:
+        session.rollback()
+        raise

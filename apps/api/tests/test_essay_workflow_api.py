@@ -2,11 +2,12 @@ import pytest
 from fastapi import HTTPException
 from sqlmodel import select
 
-from app.api.routes.essays import EssayRevisionCreate, draft_ability_deltas, submit_revision
+from app.api.routes.essays import EssayRevisionCreate, submit_revision
 from app.core.config import get_settings
 from app.domain.enums import TaskType
 from app.domain.models import AbilityHistory, Essay, EssayVersion, GameEvent, LLMCallLog, StudentProfile
 from app.domain.seed import seed_demo_data
+from app.services.essay_workflow import draft_ability_deltas
 from app.services.llm_provider import MockLLMProvider
 
 
