@@ -417,6 +417,25 @@ V0.1 不追求能力模型复杂，而是要保证：
 2. 能力变化能解释给孩子和家长；
 3. 能力数据能驱动下一次任务推荐。
 
+### 能力轴与开放改进标签的边界
+
+LLM 可以用开放语言描述孩子在一次练习中的具体改进点，例如“细节描写”“比喻运用”“动作更具体”“颜色描写”等。
+这些标签用于反馈展示、证据记录和后续产品分析。
+
+但所有会进入能力画像、成长历史、任务推荐和家长报告的能力变化，都必须归一到系统定义的 canonical 能力轴：
+
+```text
+comprehension
+summarization
+expression
+observation
+structure
+revision
+```
+
+非 canonical 的能力名称不能直接写入能力画像或成长历史。
+系统可以将已知标签映射到 canonical 能力轴；如果一次练习没有任何可识别的 canonical 能力变化，则应使用该任务类型的默认成长规则兜底。
+
 ---
 
 ## 12. 入门诊断模块
@@ -1134,6 +1153,14 @@ llm_router.generate(task_type, payload)
 
 所有 AI 输出必须尽量使用 JSON Schema 校验。
 
+AI 输出中的开放改进点和能力变化必须分开：
+
+- `observed_improvements`：可以使用中文自然语言标签，描述孩子具体做得更好的地方；
+- `ability_delta`：只能使用系统定义的 canonical 能力轴，作为能力画像和成长历史的写入依据。
+
+如果 LLM provider 返回了非 canonical 的 `ability_delta` key，业务层不能直接持久化这些 key。
+系统应优先映射已知标签；无法映射时，按任务类型使用默认能力增长兜底，并保留原始 AI 输出作为反馈证据或调用日志。
+
 作文反馈示例：
 
 ```json
@@ -1146,7 +1173,6 @@ llm_router.generate(task_type, payload)
     "expression": 60,
     "observation": 55,
     "structure": 48,
-    "emotion": 50,
     "revision": 0
   },
   "monsters": [
@@ -1166,6 +1192,10 @@ llm_router.generate(task_type, payload)
   ],
   "rewards": {
     "exp": 30,
+    "observed_improvements": [
+      "细节描写",
+      "动作更具体"
+    ],
     "ability_delta": {
       "expression": 8,
       "observation": 6
@@ -1345,7 +1375,7 @@ updated_at
 id
 student_id
 comprehension
-summary
+summarization
 expression
 observation
 structure
@@ -1723,6 +1753,25 @@ V0.1 的关键不是一次训练，而是数据不断积累。
 3. 阅读后写一句中心思想 3 次。
 ```
 
+能力变化进入数据飞轮时必须保持稳定口径：
+
+```text
+训练行为
+    ↓
+AI 反馈中的开放改进点
+    ↓
+映射 / 兜底为 canonical ability_delta
+    ↓
+写入成长历史
+    ↓
+更新能力画像
+    ↓
+驱动推荐和报告
+```
+
+开放改进点可以不断扩展，但能力画像不能随着 LLM provider 的自由命名而扩散。
+这样既保留了语文表达改进的丰富性，也保证长期数据可以聚合、比较和解释。
+
 ---
 
 ## 27. V0.1 成功指标
@@ -1930,4 +1979,3 @@ V0.1 的直接目标是帮助一个孩子坚持练习、看到进步。
 最终希望孩子形成这样的感受：
 
 > 我不是在被批改作文，我是在一点点变成更厉害的表达者。
-

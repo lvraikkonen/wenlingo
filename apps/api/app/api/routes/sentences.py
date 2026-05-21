@@ -6,7 +6,7 @@ from app.api.deps import get_db_session, get_llm_provider
 from app.core.config import Settings, get_settings
 from app.domain.enums import SentenceFocus, TaskType
 from app.domain.models import AbilityProfile, SentenceTraining, StudentProfile
-from app.services.abilities import apply_ability_delta
+from app.services.abilities import VALID_ABILITY_NAMES, apply_ability_delta
 from app.services.ai_tasks import sentence_upgrade_feedback
 from app.services.gamification import settle_task
 from app.services.llm_provider import LLMProvider
@@ -57,7 +57,12 @@ async def create_sentence_training(
     )
     session.add(training)
     session.flush()
-    ability_deltas = feedback.ability_delta or SENTENCE_ABILITY_DELTA_FALLBACK
+    ability_deltas = feedback.ability_delta
+    if not any(
+        ability_name in VALID_ABILITY_NAMES and raw_delta > 0
+        for ability_name, raw_delta in ability_deltas.items()
+    ):
+        ability_deltas = SENTENCE_ABILITY_DELTA_FALLBACK
     apply_ability_delta(session, ability, ability_deltas, TaskType.sentence, training.id)
     event = settle_task(student, TaskType.sentence, feedback.problem_monsters, {"focus": focus})
     session.add(ability)
