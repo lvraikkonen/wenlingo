@@ -94,5 +94,6 @@ pnpm e2e
 
 `pnpm e2e` starts the API and web dev servers via Playwright. By default it
 uses a local SQLite file at `apps/api/playwright-e2e.db`; set
-`PLAYWRIGHT_DATABASE_URL` to point it at another database. Use
+`PLAYWRIGHT_DATABASE_URL` to point it at another database. Remove stale SQLite
+files before E2E runs using `qa/2026-05-21-stale-sqlite-cleanup.md`. Use
 `corepack pnpm e2e -- mvp.spec.ts` on Windows if `pnpm` is not on PATH.
