@@ -169,3 +169,20 @@ def test_essay_version_tracks_revision_task_metadata_and_llm_log_link():
     assert version.completed_tasks == ["给第二段加一个动作描写"]
     assert version.skipped_tasks == ["补一个结尾感受"]
     assert version.llm_call_log_id == "log-1"
+
+
+def test_assessment_artifact_references_are_nullable_and_indexed():
+    sentence_column = Assessment.__table__.c["sentence_training_id"]
+    essay_column = Assessment.__table__.c["essay_id"]
+    index_columns = {
+        column.name
+        for index in Assessment.__table__.indexes
+        for column in index.columns
+    }
+
+    assert sentence_column.nullable is True
+    assert essay_column.nullable is True
+    assert sentence_column.foreign_keys
+    assert essay_column.foreign_keys
+    assert "sentence_training_id" in index_columns
+    assert "essay_id" in index_columns

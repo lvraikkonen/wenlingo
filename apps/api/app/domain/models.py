@@ -74,6 +74,12 @@ class Assessment(SQLModel, table=True):
     sentence_after: str
     short_writing: str
     summary: str
+    sentence_training_id: str | None = Field(
+        default=None,
+        foreign_key="sentencetraining.id",
+        index=True,
+    )
+    essay_id: str | None = Field(default=None, foreign_key="essay.id", index=True)
     created_at: datetime = timestamp_field()
 
 

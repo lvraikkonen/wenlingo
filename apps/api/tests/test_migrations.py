@@ -61,3 +61,18 @@ def test_ability_history_has_migration():
     assert "ix_abilityhistory_student_id" in migration_text
     assert "fk_abilityhistory_student_id_studentprofile" in migration_text
     assert 'down_revision = "20260515_family_test_llm_student_usage"' in migration_text
+
+
+def test_assessment_artifact_references_have_migration():
+    migration_path = Path("app/db/migrations/versions/20260521_assessment_artifacts.py")
+    migration_text = migration_path.read_text(encoding="utf-8")
+
+    assert "20260521_assessment_artifacts" in migration_text
+    assert 'down_revision = "20260520_ability_history"' in migration_text
+    assert "assessment" in migration_text
+    assert "sentence_training_id" in migration_text
+    assert "essay_id" in migration_text
+    assert "ix_assessment_sentence_training_id" in migration_text
+    assert "ix_assessment_essay_id" in migration_text
+    assert "fk_assessment_sentence_training_id_sentencetraining" in migration_text
+    assert "fk_assessment_essay_id_essay" in migration_text
