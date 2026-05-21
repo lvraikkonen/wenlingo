@@ -31,8 +31,6 @@ def _raise_for_provider_failure(log: LLMCallLog | None) -> None:
     errors = [error.strip() for error in log.error_message.split(";") if error.strip()]
     if all(error.startswith("validation error:") for error in errors):
         return
-    if log.error_message == "daily limit exceeded":
-        return
     raise RuntimeError(log.error_message)
 
 

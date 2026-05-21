@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import select
 
 from app.api.deps import get_db_session, get_llm_provider
+from app.core.config import Settings, get_settings
 from app.domain.enums import TaskType
 from app.domain.models import (
     AbilityHistory,
@@ -82,6 +83,28 @@ class RaiseOnEssayFeedbackProvider:
         if task_name == "essay_feedback":
             raise RuntimeError("essay pipeline exploded")
         raise ValueError(f"Unknown LLM task: {task_name}")
+
+
+class QuotaLimitedAssessmentProvider:
+    provider_name = "real-assessment-provider"
+    model_name = "assessment-quota"
+
+    async def complete_json(self, task_name, payload):
+        if task_name == "essay_feedback":
+            parsed = {
+                "strengths": ["能写清楚发生了什么", "写出了自己的心情"],
+                "improvements": ["再补一个动作细节"],
+                "problem_monsters": ["细节缺口"],
+                "sentence_notes": ["把害怕换成看得见的动作。"],
+                "revision_tasks": [{"instruction": "补一个动作", "target": "中间段"}],
+            }
+            return LLMProviderResponse(
+                parsed_json=parsed,
+                raw_response=json.dumps(parsed, ensure_ascii=False),
+                provider=self.provider_name,
+                model=self.model_name,
+            )
+        raise RuntimeError(f"daily limit branch should run before provider call: {task_name}")
 
 
 def test_assessment_creates_artifacts_history_settlement_and_dashboard_transition(session, client):
@@ -167,6 +190,51 @@ def test_schema_valid_fallback_can_complete_assessment(session):
     assert {log.task_name for log in logs} == {"sentence_upgrade_feedback", "essay_feedback"}
     assert all(log.validation_ok is False for log in logs)
     assert response.json()["ability_sketch"]["specific_writing_power"] > 40
+
+
+def test_daily_limit_assessment_rolls_back_without_artifacts_history_or_settlement(session):
+    student = create_default_child(session)
+    session.add(
+        LLMCallLog(
+            student_id=student.id,
+            task_type=TaskType.sentence,
+            task_name="sentence_upgrade_feedback",
+            provider=QuotaLimitedAssessmentProvider.provider_name,
+            model=QuotaLimitedAssessmentProvider.model_name,
+            input_summary="previous assessment sentence request",
+            validation_ok=True,
+        )
+    )
+    session.commit()
+    app = create_app()
+    app.dependency_overrides[get_db_session] = lambda: session
+    app.dependency_overrides[get_llm_provider] = lambda: QuotaLimitedAssessmentProvider()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        llm_daily_limit_enabled=True,
+        llm_daily_limit_per_student_task=1,
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as test_client:
+        response = test_client.post(
+            f"/api/students/{student.id}/assessment",
+            json=valid_assessment_payload(),
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 500
+    assert session.exec(select(Assessment)).all() == []
+    assert session.exec(select(SentenceTraining)).all() == []
+    assert session.exec(select(Essay)).all() == []
+    assert session.exec(select(EssayVersion)).all() == []
+    assert session.exec(select(AbilityHistory)).all() == []
+    assert session.exec(select(GameEvent)).all() == []
+    assert len(session.exec(select(LLMCallLog)).all()) == 1
+    ability = session.exec(
+        select(AbilityProfile).where(AbilityProfile.student_id == student.id)
+    ).one()
+    assert ability.expression == 40
+    assert ability.observation == 40
+    assert ability.structure == 40
 
 
 def test_ghostwriting_rolls_back_all_partial_assessment_rows(session, client):
