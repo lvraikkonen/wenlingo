@@ -19,7 +19,7 @@ from app.domain.models import (
 )
 from app.main import create_app
 from app.services.essay_workflow import ASSESSMENT_ESSAY_STATUS
-from app.services.llm_provider import LLMProviderResponse, MockLLMProvider
+from app.services.llm_provider import LLMProviderResponse
 
 
 def create_default_child(session) -> StudentProfile:
@@ -58,6 +58,30 @@ class AlwaysInvalidAssessmentProvider:
             provider=self.provider_name,
             model=self.model_name,
         )
+
+
+class RaiseOnEssayFeedbackProvider:
+    provider_name = "fake"
+    model_name = "assessment-essay-error"
+
+    async def complete_json(self, task_name, payload):
+        if task_name == "sentence_upgrade_feedback":
+            parsed = {
+                "encouragement": "你把画面写得更清楚了。",
+                "specific_improvement": "加入了可看见的细节",
+                "next_step": "再加一个动作，会更生动。",
+                "ability_delta": {"expression": 4, "observation": 4},
+                "problem_monsters": ["空泛表达"],
+            }
+            return LLMProviderResponse(
+                parsed_json=parsed,
+                raw_response=json.dumps(parsed, ensure_ascii=False),
+                provider=self.provider_name,
+                model=self.model_name,
+            )
+        if task_name == "essay_feedback":
+            raise RuntimeError("essay pipeline exploded")
+        raise ValueError(f"Unknown LLM task: {task_name}")
 
 
 def test_assessment_creates_artifacts_history_settlement_and_dashboard_transition(session, client):
@@ -168,15 +192,11 @@ def test_ghostwriting_rolls_back_all_partial_assessment_rows(session, client):
     assert session.exec(select(LLMCallLog)).all() == []
 
 
-def test_unhandled_assessment_error_rolls_back_partial_rows(session, monkeypatch):
-    async def raising_essay_feedback(*args, **kwargs):
-        raise RuntimeError("essay pipeline exploded")
-
+def test_unhandled_assessment_error_rolls_back_partial_rows(session):
     student = create_default_child(session)
-    monkeypatch.setattr("app.services.assessment.essay_feedback", raising_essay_feedback)
     app = create_app()
     app.dependency_overrides[get_db_session] = lambda: session
-    app.dependency_overrides[get_llm_provider] = lambda: MockLLMProvider()
+    app.dependency_overrides[get_llm_provider] = lambda: RaiseOnEssayFeedbackProvider()
 
     with TestClient(app, raise_server_exceptions=False) as test_client:
         response = test_client.post(
@@ -198,11 +218,19 @@ def test_unhandled_assessment_error_rolls_back_partial_rows(session, monkeypatch
 def test_assessment_rejects_overlong_sentence_and_writing_inputs(session, client):
     student = create_default_child(session)
 
-    sentence_response = client.post(
+    before_response = client.post(
         f"/api/students/{student.id}/assessment",
         json={
             "sentence_before": "细" * 501,
             "sentence_after": "公园里的花在风里轻轻摇。",
+            "short_writing": valid_assessment_payload()["short_writing"],
+        },
+    )
+    after_response = client.post(
+        f"/api/students/{student.id}/assessment",
+        json={
+            "sentence_before": "公园很美。",
+            "sentence_after": "细" * 501,
             "short_writing": valid_assessment_payload()["short_writing"],
         },
     )
@@ -215,7 +243,8 @@ def test_assessment_rejects_overlong_sentence_and_writing_inputs(session, client
         },
     )
 
-    assert sentence_response.status_code == 422
+    assert before_response.status_code == 422
+    assert after_response.status_code == 422
     assert writing_response.status_code == 422
     assert session.exec(select(Assessment)).all() == []
 
@@ -226,6 +255,7 @@ def test_assessment_created_essay_is_not_revisable(session, client):
         f"/api/students/{student.id}/assessment",
         json=valid_assessment_payload(),
     )
+    assert created.status_code == 201
     essay_id = created.json()["assessment"]["essay_id"]
 
     response = client.post(
