@@ -1,7 +1,16 @@
 from sqlmodel import select
 
-from app.domain.models import AbilityHistory, StudentProfile
+from app.domain.enums import TaskType
+from app.domain.models import (
+    AbilityHistory,
+    Assessment,
+    Essay,
+    EssayVersion,
+    SentenceTraining,
+    StudentProfile,
+)
 from app.domain.seed import seed_demo_data
+from app.services.essay_workflow import ASSESSMENT_ESSAY_STATUS
 
 
 def parent_students(session, parent_id: str):
@@ -33,8 +42,33 @@ def test_assessment_creates_first_ability_sketch_and_dashboard(session, client):
     )
 
     assert response.status_code == 201
-    assert response.json()["assessment"]["summary"] == "完成入门小试炼，生成第一张能力草图。"
-    assert len(session.exec(select(AbilityHistory)).all()) == 0
+    payload = response.json()
+    assert payload["assessment"]["summary"] == "完成入门小试炼，生成第一张能力草图。"
+    assert payload["assessment"]["sentence_training_id"]
+    assert payload["assessment"]["essay_id"]
+    assert set(payload["ability_sketch"]) == {
+        "reading_power",
+        "specific_writing_power",
+        "revision_power",
+    }
+    assert payload["settlement"]["xp_delta"] == 20
+    assert payload["game_event"]["xp_delta"] == 20
+
+    assessment = session.exec(select(Assessment)).one()
+    training = session.get(SentenceTraining, payload["assessment"]["sentence_training_id"])
+    essay = session.get(Essay, payload["assessment"]["essay_id"])
+    version = session.exec(
+        select(EssayVersion).where(EssayVersion.essay_id == essay.id)
+    ).one()
+    history = session.exec(select(AbilityHistory)).all()
+
+    assert assessment.sentence_training_id == training.id
+    assert assessment.essay_id == essay.id
+    assert essay.status == ASSESSMENT_ESSAY_STATUS
+    assert {(row.source_type, row.source_id) for row in history} == {
+        (TaskType.sentence, training.id),
+        (TaskType.essay, version.id),
+    }
     dashboard = client.get(f"/api/students/{student_id}/dashboard").json()
     assert dashboard["ability_note"] == "第一张能力草图"
     assert dashboard["today_tasks"]["main"]["kind"] in {"essay", "sentence"}
