@@ -86,7 +86,22 @@ describe("api client", () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
-        assessment: { summary: "完成入门小试炼，生成第一张能力草图。" },
+        assessment: {
+          id: "assessment-1",
+          summary: "完成入门小试炼，生成第一张能力草图。",
+          sentence_training_id: "sentence-training-1",
+          essay_id: "essay-1",
+        },
+        ability_sketch: {
+          reading_power: 40,
+          specific_writing_power: 46,
+          revision_power: 40,
+        },
+        settlement: {
+          xp_delta: 20,
+          level_after: 1,
+          badge_code: null,
+        },
       }),
     }) as unknown as typeof fetch;
     const payload = {

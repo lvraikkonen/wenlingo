@@ -57,7 +57,22 @@ beforeEach(() => {
     ],
   });
   apiMocks.createAssessment.mockResolvedValue({
-    assessment: { summary: "完成入门小试炼，生成第一张能力草图。" },
+    assessment: {
+      id: "assessment-1",
+      summary: "完成入门小试炼，生成第一张能力草图。",
+      sentence_training_id: "sentence-training-1",
+      essay_id: "essay-1",
+    },
+    ability_sketch: {
+      reading_power: 40,
+      specific_writing_power: 46,
+      revision_power: 40,
+    },
+    settlement: {
+      xp_delta: 20,
+      level_after: 1,
+      badge_code: null,
+    },
   });
   apiMocks.createSentenceTraining.mockResolvedValue({
     feedback: {
@@ -79,7 +94,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-test("assessment page submits entry trial", async () => {
+test("assessment page renders four steps and submits all fields once", async () => {
   await act(async () => {
     render(
       <Suspense fallback={null}>
@@ -88,26 +103,47 @@ test("assessment page submits entry trial", async () => {
     );
   });
 
-  await userEvent.type(await screen.findByLabelText("升级前的句子"), "公园很美。");
+  expect(
+    await screen.findByRole("heading", { name: "认识你的写作超能力" }),
+  ).toBeInTheDocument();
+  expect(screen.getByText("约 3-5 分钟")).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "开始小试炼" }));
+
+  expect(screen.getByText("公园很美。")).toBeInTheDocument();
+  expect(screen.queryByLabelText("升级前的句子")).not.toBeInTheDocument();
   await userEvent.type(
     screen.getByLabelText("升级后的句子"),
     "公园里的花红红的，风一吹就轻轻摇。",
   );
+  await userEvent.click(screen.getByRole("button", { name: "继续写小作文" }));
+
+  expect(screen.getByText("写一写你最近一次开心的经历")).toBeInTheDocument();
   await userEvent.type(
     screen.getByLabelText("小写作"),
     "我学会了骑车。刚开始我很害怕，后来爸爸扶着我练，我终于能骑一小段了。",
   );
-  await userEvent.click(screen.getByRole("button", { name: "完成小试炼" }));
+  await userEvent.click(screen.getByRole("button", { name: "生成能力草图" }));
 
-  expect(
-    await screen.findByText("完成入门小试炼，生成第一张能力草图。"),
-  ).toBeInTheDocument();
+  expect(apiMocks.createAssessment).toHaveBeenCalledTimes(1);
   expect(apiMocks.createAssessment).toHaveBeenCalledWith("s1", {
     sentence_before: "公园很美。",
     sentence_after: "公园里的花红红的，风一吹就轻轻摇。",
     short_writing:
       "我学会了骑车。刚开始我很害怕，后来爸爸扶着我练，我终于能骑一小段了。",
   });
+  expect(
+    await screen.findByRole("heading", { name: "第一张能力草图" }),
+  ).toBeInTheDocument();
+  expect(screen.getByText("写具体力")).toBeInTheDocument();
+  expect(screen.getByText("46 / 100")).toBeInTheDocument();
+  expect(screen.getByText("等待阅读试炼")).toBeInTheDocument();
+  expect(screen.getByText("等待二稿试炼")).toBeInTheDocument();
+  expect(screen.getByLabelText("第一张能力草图雷达图")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "回到 Dashboard" })).toHaveAttribute(
+    "href",
+    "/children/s1",
+  );
 });
 
 test("sentence page shows ai feedback and settlement", async () => {
@@ -240,7 +276,7 @@ test("sentence page clears old feedback when retrying after success", async () =
   expect(screen.queryByText("+25 XP")).not.toBeInTheDocument();
 });
 
-test("assessment page disables submit while pending and reports failures", async () => {
+test("assessment page disables submit while loading and permits retry after failure", async () => {
   let rejectAssessment!: (reason?: unknown) => void;
   apiMocks.createAssessment.mockReturnValueOnce(
     new Promise((_, reject) => {
@@ -256,19 +292,29 @@ test("assessment page disables submit while pending and reports failures", async
     );
   });
 
-  await userEvent.type(await screen.findByLabelText("升级前的句子"), "公园很美。");
-  await userEvent.type(screen.getByLabelText("升级后的句子"), "公园的花在风里摇。");
-  await userEvent.type(screen.getByLabelText("小写作"), "我学会了骑车。");
-  const submit = screen.getByRole("button", { name: "完成小试炼" });
+  await userEvent.click(await screen.findByRole("button", { name: "开始小试炼" }));
+  await userEvent.type(
+    screen.getByLabelText("升级后的句子"),
+    "公园里的花在风里轻轻摇。",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "继续写小作文" }));
+  await userEvent.type(
+    screen.getByLabelText("小写作"),
+    "我学会了骑车。刚开始我有点害怕，后来慢慢能骑过小路，我很开心。",
+  );
+  const submit = screen.getByRole("button", { name: "生成能力草图" });
 
   await userEvent.click(submit);
 
   expect(submit).toBeDisabled();
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "AI 教练正在整理第一张能力草图",
+  );
 
   rejectAssessment(new Error("network"));
 
   expect(await screen.findByRole("alert")).toHaveTextContent(
-    "提交失败，请稍后再试。",
+    "这次小试炼没有提交成功。不是你的问题，检查一下网络后再试一次。",
   );
   await waitFor(() => expect(submit).not.toBeDisabled());
 });
@@ -303,4 +349,20 @@ test("sentence page disables submit while pending and reports failures", async (
     "这次句子练习没有提交成功。先别急，检查一下网络后再试一次。",
   );
   await waitFor(() => expect(submit).not.toBeDisabled());
+});
+
+test("assessment sketch uses no charting package", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { resolve } = await import("node:path");
+  const packageJson = JSON.parse(
+    readFileSync(resolve(process.cwd(), "package.json"), "utf8"),
+  );
+  const installedDependencies = {
+    ...packageJson.dependencies,
+    ...packageJson.devDependencies,
+  };
+
+  expect(installedDependencies).not.toHaveProperty("recharts");
+  expect(installedDependencies).not.toHaveProperty("chart.js");
+  expect(installedDependencies).not.toHaveProperty("@nivo/radar");
 });

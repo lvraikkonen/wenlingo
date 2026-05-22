@@ -28,21 +28,33 @@ export function getDashboard(studentId: string): Promise<DashboardResponse> {
   );
 }
 
-export type AssessmentResponse = {
-  assessment: {
-    summary: string;
-  };
-};
-
 export type Settlement = {
   xp_delta: number;
   level_after: number;
-  badge_code?: string;
+  badge_code?: string | null;
   evidence?: {
     completed_task_count?: number;
     completed_tasks?: string[];
     [key: string]: unknown;
   };
+};
+
+export type AbilitySketch = {
+  reading_power: number;
+  specific_writing_power: number;
+  revision_power: number;
+};
+
+export type AssessmentResponse = {
+  assessment: {
+    id: string;
+    summary: string;
+    sentence_training_id: string;
+    essay_id: string;
+  };
+  ability_sketch: AbilitySketch;
+  settlement: Settlement;
+  game_event?: Settlement;
 };
 
 export type SentenceTrainingResponse = {
