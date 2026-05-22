@@ -1,7 +1,100 @@
+import { execFileSync } from "node:child_process";
 import { expect, test } from "@playwright/test";
 
 test.use({
   baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000",
+});
+
+function seedDefaultAssessmentChild() {
+  execFileSync(
+    "uv",
+    [
+      "run",
+      "python",
+      "-c",
+      [
+        "import os",
+        "from sqlalchemy import delete",
+        "from sqlmodel import Session, create_engine, select",
+        "from app.domain.models import AbilityHistory, AbilityProfile, Assessment, Essay, EssayVersion, GameEvent, LLMCallLog, ParentUser, ReadingSession, Report, SentenceTraining, StudentProfile",
+        "STUDENT_ID = 'e2e-assessment-child'",
+        "PARENT_ID = 'e2e-assessment-parent'",
+        "engine = create_engine(os.environ['DATABASE_URL'])",
+        "with Session(engine) as session:",
+        "    essay_ids = session.exec(select(Essay.id).where(Essay.student_id == STUDENT_ID)).all()",
+        "    session.execute(delete(Assessment).where(Assessment.student_id == STUDENT_ID))",
+        "    session.execute(delete(AbilityHistory).where(AbilityHistory.student_id == STUDENT_ID))",
+        "    session.execute(delete(GameEvent).where(GameEvent.student_id == STUDENT_ID))",
+        "    session.execute(delete(ReadingSession).where(ReadingSession.student_id == STUDENT_ID))",
+        "    session.execute(delete(Report).where(Report.student_id == STUDENT_ID))",
+        "    session.execute(delete(SentenceTraining).where(SentenceTraining.student_id == STUDENT_ID))",
+        "    if essay_ids:",
+        "        session.execute(delete(EssayVersion).where(EssayVersion.essay_id.in_(essay_ids)))",
+        "    session.execute(delete(Essay).where(Essay.student_id == STUDENT_ID))",
+        "    session.execute(delete(LLMCallLog).where(LLMCallLog.student_id == STUDENT_ID))",
+        "    session.execute(delete(AbilityProfile).where(AbilityProfile.student_id == STUDENT_ID))",
+        "    session.execute(delete(StudentProfile).where(StudentProfile.id == STUDENT_ID))",
+        "    session.execute(delete(ParentUser).where(ParentUser.id == PARENT_ID))",
+        "    parent = ParentUser(id=PARENT_ID, email='e2e-assessment@example.com', display_name='E2E Parent')",
+        "    student = StudentProfile(id=STUDENT_ID, parent_id=parent.id, name='\\u5c0f\\u6d4b', persona='real_child', is_real_child=True)",
+        "    ability = AbilityProfile(student_id=student.id)",
+        "    session.add(parent)",
+        "    session.add(student)",
+        "    session.add(ability)",
+        "    session.commit()",
+      ].join("\n"),
+    ],
+    {
+      cwd: "../api",
+      env: {
+        ...process.env,
+        DATABASE_URL:
+          process.env.PLAYWRIGHT_DATABASE_URL ?? "sqlite:///./playwright-e2e.db",
+      },
+    },
+  );
+}
+
+test("default child completes assessment and returns to non-assessment dashboard recommendation", async ({
+  page,
+}) => {
+  seedDefaultAssessmentChild();
+
+  await page.goto("/children/e2e-assessment-child");
+
+  await expect(page.getByRole("heading", { name: "小测的小文星球" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "入门小试炼" })).toBeVisible();
+  await page
+    .getByRole("article")
+    .filter({ hasText: "入门小试炼" })
+    .getByRole("link", { name: "开始任务" })
+    .click();
+
+  await expect(
+    page.getByRole("heading", { name: "认识你的写作超能力" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "开始小试炼" }).click();
+  await expect(page.getByText("公园很美。")).toBeVisible();
+  await page
+    .getByLabel("升级后的句子")
+    .fill("公园里的花红红的，风一吹就轻轻摇。");
+  await page.getByRole("button", { name: "继续写小作文" }).click();
+  await page
+    .getByLabel("小写作")
+    .fill("我学会了骑车。刚开始我很害怕，后来爸爸扶着我练，我终于能骑一小段了。");
+  await page.getByRole("button", { name: "生成能力草图" }).click();
+
+  await expect(page.getByRole("heading", { name: "第一张能力草图" })).toBeVisible();
+  await expect(
+    page.getByRole("paragraph").filter({ hasText: /^写具体力$/ }),
+  ).toBeVisible();
+  await expect(page.getByText("等待阅读试炼")).toBeVisible();
+  await expect(page.getByText("等待二稿试炼")).toBeVisible();
+
+  await page.getByRole("link", { name: "回到 Dashboard" }).click();
+  await expect(page.getByRole("heading", { name: "第一张能力草图" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "作文城堡" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "入门小试炼" })).toHaveCount(0);
 });
 
 test("family demo completes family-test readiness flow without manual URL edits", async ({
