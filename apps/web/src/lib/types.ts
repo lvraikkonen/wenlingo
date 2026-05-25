@@ -38,3 +38,50 @@ export type DashboardResponse = {
   map: string[];
   coach_message: string;
 };
+
+export type AlphaParent = {
+  id: string;
+  display_name: string;
+};
+
+export type AlphaParentResponse = {
+  parent: AlphaParent;
+  children_url: string;
+};
+
+export type AlphaChild = Student & {
+  assessment_completed?: boolean;
+  dashboard_url?: string;
+  summary_url?: string;
+};
+
+export type AlphaChildrenResponse = {
+  parent: AlphaParent;
+  children: AlphaChild[];
+};
+
+export type AlphaChildCreateResponse = {
+  student: Student;
+  dashboard_url: string;
+  summary_url: string;
+};
+
+export type AlphaAbilityChange = {
+  ability_name: string;
+  label: string;
+  delta: number;
+};
+
+export type AlphaChildSummary = {
+  student: Student;
+  assessment_completed: boolean;
+  practice_counts: {
+    assessments: number;
+    sentence_trainings: number;
+    essays: number;
+  };
+  ability_changes: AlphaAbilityChange[];
+  recent_highlight: string | null;
+  next_suggestion: string;
+  empty_state: string | null;
+};

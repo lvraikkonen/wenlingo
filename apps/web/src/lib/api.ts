@@ -1,4 +1,11 @@
-import type { DashboardResponse, DemoLoginResponse } from "./types";
+import type {
+  AlphaChildCreateResponse,
+  AlphaChildSummary,
+  AlphaChildrenResponse,
+  AlphaParentResponse,
+  DashboardResponse,
+  DemoLoginResponse,
+} from "./types";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
@@ -217,4 +224,43 @@ export function createReport(studentId: string): Promise<ReportResponse> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ report_type: "stage" }),
   });
+}
+
+export function createAlphaParent(payload: {
+  display_name: string;
+}): Promise<AlphaParentResponse> {
+  return requestJson<AlphaParentResponse>("/api/alpha/parents", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getAlphaChildren(parentId: string): Promise<AlphaChildrenResponse> {
+  return requestJson<AlphaChildrenResponse>(
+    `/api/alpha/parents/${parentId}/children`,
+  );
+}
+
+export function createAlphaChild(
+  parentId: string,
+  payload: { nickname: string; grade: number },
+): Promise<AlphaChildCreateResponse> {
+  return requestJson<AlphaChildCreateResponse>(
+    `/api/alpha/parents/${parentId}/children`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function getAlphaChildSummary(
+  parentId: string,
+  studentId: string,
+): Promise<AlphaChildSummary> {
+  return requestJson<AlphaChildSummary>(
+    `/api/alpha/parents/${parentId}/children/${studentId}/summary`,
+  );
 }
