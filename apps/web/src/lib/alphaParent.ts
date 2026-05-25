@@ -1,24 +1,52 @@
 export const ALPHA_PARENT_STORAGE_KEY = "wenlingo_alpha_parent_id";
 
-function canUseStorage() {
-  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+function getStorage(): Storage | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    return window.localStorage ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export function getStoredAlphaParentId(): string | null {
-  if (!canUseStorage()) {
+  const storage = getStorage();
+  if (!storage) {
     return null;
   }
-  return window.localStorage.getItem(ALPHA_PARENT_STORAGE_KEY);
+
+  try {
+    return storage.getItem(ALPHA_PARENT_STORAGE_KEY);
+  } catch {
+    return null;
+  }
 }
 
 export function setStoredAlphaParentId(parentId: string) {
-  if (canUseStorage()) {
-    window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, parentId);
+  const storage = getStorage();
+  if (!storage) {
+    return;
+  }
+
+  try {
+    storage.setItem(ALPHA_PARENT_STORAGE_KEY, parentId);
+  } catch {
+    // Ignore storage failures so blocked/private storage does not break alpha entry.
   }
 }
 
 export function clearStoredAlphaParentId() {
-  if (canUseStorage()) {
-    window.localStorage.removeItem(ALPHA_PARENT_STORAGE_KEY);
+  const storage = getStorage();
+  if (!storage) {
+    return;
+  }
+
+  try {
+    storage.removeItem(ALPHA_PARENT_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures so blocked/private storage does not break alpha entry.
   }
 }

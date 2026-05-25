@@ -41,6 +41,7 @@ export type DashboardResponse = {
 
 export type AlphaParent = {
   id: string;
+  email: string;
   display_name: string;
 };
 
@@ -49,10 +50,16 @@ export type AlphaParentResponse = {
   children_url: string;
 };
 
-export type AlphaChild = Student & {
+export type AlphaChild = {
+  id: string;
+  nickname: string;
+  name: string;
+  grade_label: string;
+  persona: "real_child";
+  is_real_child: boolean;
+  dashboard_url: string;
+  summary_url: string;
   assessment_completed?: boolean;
-  dashboard_url?: string;
-  summary_url?: string;
 };
 
 export type AlphaChildrenResponse = {
@@ -61,19 +68,20 @@ export type AlphaChildrenResponse = {
 };
 
 export type AlphaChildCreateResponse = {
-  student: Student;
+  child: AlphaChild;
   dashboard_url: string;
   summary_url: string;
 };
 
 export type AlphaAbilityChange = {
-  ability_name: string;
+  ability: string;
   label: string;
   delta: number;
 };
 
 export type AlphaChildSummary = {
-  student: Student;
+  parent_id: string;
+  child: AlphaChild;
   assessment_completed: boolean;
   practice_counts: {
     assessments: number;
