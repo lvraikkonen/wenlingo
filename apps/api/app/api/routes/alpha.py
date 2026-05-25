@@ -217,6 +217,7 @@ def alpha_child_summary(
         if deltas[ability] != 0
     ]
     assessment_completed = assessment_count > 0
+    has_progress = assessment_count + sentence_count + essay_count > 0 or bool(history_rows)
 
     return {
         "parent_id": parent_id,
@@ -231,8 +232,8 @@ def alpha_child_summary(
         "recent_highlight": "孩子完成了第一次能力草图。"
         if assessment_completed
         else None,
-        "empty_state": None if assessment_completed else EMPTY_SUMMARY,
+        "empty_state": None if has_progress else EMPTY_SUMMARY,
         "next_suggestion": POPULATED_NEXT_SUGGESTION
-        if assessment_completed
+        if has_progress
         else EMPTY_NEXT_SUGGESTION,
     }

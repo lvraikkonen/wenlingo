@@ -6,6 +6,7 @@ from app.domain.models import (
     AbilityProfile,
     Assessment,
     ParentUser,
+    SentenceTraining,
     StudentProfile,
 )
 from app.domain.seed import seed_demo_data
@@ -157,6 +158,45 @@ def test_alpha_summary_for_new_child_returns_empty_state(client):
     assert payload["ability_changes"] == []
     assert payload["empty_state"] == "还没有训练记录。完成入门小试炼后，这里会出现第一份成长摘要。"
     assert payload["next_suggestion"] == "先完成入门小试炼，生成第一张能力草图。"
+
+
+def test_alpha_summary_with_sentence_training_but_no_assessment_is_not_empty(
+    session, client
+):
+    parent = create_alpha_parent(client)
+    child = create_alpha_child(client, parent["id"])
+    training = SentenceTraining(
+        student_id=child["id"],
+        source_sentence="公园很美。",
+        upgraded_sentence="公园里的花红红的，风一吹就轻轻摇。",
+        focus="加细节",
+        ai_feedback={},
+    )
+    session.add(training)
+    session.flush()
+    session.add(
+        AbilityHistory(
+            student_id=child["id"],
+            ability_name="expression",
+            old_value=40,
+            new_value=44,
+            delta=4,
+            source_type=TaskType.sentence,
+            source_id=training.id,
+        )
+    )
+    session.commit()
+
+    response = client.get(
+        f"/api/alpha/parents/{parent['id']}/children/{child['id']}/summary"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["assessment_completed"] is False
+    assert payload["practice_counts"]["sentence_trainings"] == 1
+    assert payload["empty_state"] is None
+    assert payload["next_suggestion"] == "继续练习把句子写具体。"
 
 
 def test_alpha_summary_after_assessment_returns_counts_and_ability_changes(
