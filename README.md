@@ -48,6 +48,34 @@ cd apps/api
 $env:DATABASE_URL = "sqlite:///./manual-test.db"
 $env:CORS_ALLOW_ORIGINS = "http://127.0.0.1:3012,http://localhost:3012"
 uv run python -m app.db.init_db
+
+# Optional: seed one disposable default child for V0.4 assessment verification.
+# This keeps the four demo children unchanged, and creates a new all-40 child
+# that should start from the "入门小试炼" dashboard recommendation.
+$seed = @'
+from sqlmodel import Session, create_engine
+
+from app.domain.enums import StudentPersona
+from app.domain.models import AbilityProfile, StudentProfile
+from app.domain.seed import seed_demo_data
+
+engine = create_engine("sqlite:///./manual-test.db")
+with Session(engine) as session:
+    seed_demo_data(session)
+    if session.get(StudentProfile, "manual-default-child") is None:
+        student = StudentProfile(
+            id="manual-default-child",
+            parent_id="p1",
+            name="小测",
+            persona=StudentPersona.real_child,
+            is_real_child=True,
+        )
+        session.add(student)
+        session.add(AbilityProfile(student_id=student.id))
+        session.commit()
+'@
+$seed | uv run python -
+
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8012
 ```
 
@@ -59,9 +87,12 @@ $env:NEXT_PUBLIC_API_BASE_URL = "http://127.0.0.1:8012"
 corepack pnpm dev --hostname 127.0.0.1 --port 3012
 ```
 
-Open `http://127.0.0.1:3012` and use the demo family entry. If you want real
-LLM feedback in this mode, configure `apps/api/.env` as described below before
-starting the API.
+Open `http://127.0.0.1:3012` and use the demo family entry. For V0.4
+assessment verification, choose `小测`: before completing the entry trial its
+Dashboard should recommend `入门小试炼`; after completion it should show
+`第一张能力草图` and switch the main recommendation to a personalized sentence or
+essay task. If you want real LLM feedback in this mode, configure
+`apps/api/.env` as described below before starting the API.
 
 ## Local Real LLM Check
 
