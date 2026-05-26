@@ -131,28 +131,32 @@ Backend service:
 
 ```text
 Root Directory: apps/api
-Start Command: uv run alembic upgrade head && uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT
+Pre-deploy Command: uv run alembic upgrade head
+Start Command: uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
 
 Set `DATABASE_URL` from the PostgreSQL service, `CORS_ALLOW_ORIGINS` to the
 public web origin, and keep all LLM provider credentials server-side on the API
-service. Railway public services must listen on `0.0.0.0:$PORT`, which is why
-the backend command binds uvicorn explicitly.
+service. Keep migrations in Railway's Pre-deploy Command so normal restarts and
+future scaling do not re-run migrations during application boot. Railway public
+services must listen on `0.0.0.0:$PORT`, which is why the backend command binds
+uvicorn explicitly.
 
 Frontend service:
 
 ```text
 Root Directory: apps/web
 Build Command: corepack pnpm install --frozen-lockfile && corepack pnpm build
-Start Command: corepack pnpm start
+Start Command: corepack pnpm start -- -H 0.0.0.0 -p $PORT
 ```
 
 Set `NEXT_PUBLIC_API_BASE_URL` to the public API origin before building the web
 service, because Next.js embeds `NEXT_PUBLIC_*` values into the browser bundle.
-Do not expose LLM keys through `NEXT_PUBLIC_*`.
+Use full HTTPS origins with no trailing slash for both `CORS_ALLOW_ORIGINS` and
+`NEXT_PUBLIC_API_BASE_URL`. Do not expose LLM keys through `NEXT_PUBLIC_*`.
 
-Full Alpha deployment steps, smoke tests, rollback, and backup/deletion notes
-live in `docs/alpha-deploy.md`. Manual rollout QA lives in
+Full Alpha deployment steps, Alpha data verification, smoke tests, rollback, and
+backup/deletion notes live in `docs/alpha-deploy.md`. Manual rollout QA lives in
 `qa/2026-05-25-v0.4.1a-alpha-entry-manual-qa.md`.
 
 ## Verification
