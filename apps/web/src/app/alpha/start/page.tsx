@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import type { FormEvent } from "react";
 import { createAlphaParent } from "../../../lib/api";
 import {
@@ -10,11 +10,25 @@ import {
   setStoredAlphaParentId,
 } from "../../../lib/alphaParent";
 
+const ALPHA_PARENT_STORAGE_EVENT = "wenlingo-alpha-parent-storage";
+
+function subscribeToAlphaParentStorage(onStoreChange: () => void) {
+  window.addEventListener("storage", onStoreChange);
+  window.addEventListener(ALPHA_PARENT_STORAGE_EVENT, onStoreChange);
+
+  return () => {
+    window.removeEventListener("storage", onStoreChange);
+    window.removeEventListener(ALPHA_PARENT_STORAGE_EVENT, onStoreChange);
+  };
+}
+
 export default function AlphaStartPage() {
   const router = useRouter();
   const [displayName, setDisplayName] = useState("Alpha 家长");
-  const [storedParentId, setStoredParentId] = useState(() =>
-    getStoredAlphaParentId(),
+  const storedParentId = useSyncExternalStore(
+    subscribeToAlphaParentStorage,
+    getStoredAlphaParentId,
+    () => null,
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -43,7 +57,7 @@ export default function AlphaStartPage() {
 
   function restartAlphaFamily() {
     clearStoredAlphaParentId();
-    setStoredParentId(null);
+    window.dispatchEvent(new Event(ALPHA_PARENT_STORAGE_EVENT));
   }
 
   return (
@@ -80,7 +94,9 @@ export default function AlphaStartPage() {
                 系统会保存孩子的昵称、年级、句子改写、短写作内容、AI
                 反馈、能力变化和使用记录，用于生成学习反馈和改进产品。
               </p>
-              <p>请不要填写孩子的真实姓名、学校、住址、电话或其他敏感信息。</p>
+              <p>
+                请不要填写孩子的真实姓名、学校、住址、电话、出生日期、照片或其他敏感信息。
+              </p>
               <p>孩子的写作内容可能会发送给 AI 服务，用于生成学习反馈。</p>
               <p>继续使用表示家长同意参与本次内测。</p>
             </div>

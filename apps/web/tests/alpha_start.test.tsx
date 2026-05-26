@@ -31,6 +31,7 @@ test("shows alpha notice before creating a parent", () => {
   expect(screen.getByRole("heading", { name: /小文星球 WenLingo/ })).toBeInTheDocument();
   expect(screen.getByText(/小范围 Alpha 内测/)).toBeInTheDocument();
   expect(screen.getByText(/请不要填写孩子的真实姓名/)).toBeInTheDocument();
+  expect(screen.getByText(/出生日期、照片/)).toBeInTheDocument();
   expect(screen.getByText(/孩子的写作内容可能会发送给 AI 服务/)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "继续使用 Alpha" })).toBeInTheDocument();
 });
