@@ -112,6 +112,49 @@ Do not commit `.env`. After running the 小宇 essay revision path, create a QA
 record under `qa/` with provider/model, prompt version, whether retry/fallback
 triggered, and the manual AI quality verdict.
 
+## Railway Alpha Deployment
+
+The V0.4.1a Alpha deployment target is Railway. Use one Railway project with
+three services:
+
+```text
+wenlingo-postgres  Railway PostgreSQL service
+wenlingo-api       FastAPI backend, root directory apps/api
+wenlingo-web       Next.js frontend, root directory apps/web
+```
+
+For Alpha, use Railway PostgreSQL or another persistent PostgreSQL instance.
+Do not use local SQLite, a disposable demo database, or a database file tied to
+a developer machine.
+
+Backend service:
+
+```text
+Root Directory: apps/api
+Start Command: uv run alembic upgrade head && uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
+
+Set `DATABASE_URL` from the PostgreSQL service, `CORS_ALLOW_ORIGINS` to the
+public web origin, and keep all LLM provider credentials server-side on the API
+service. Railway public services must listen on `0.0.0.0:$PORT`, which is why
+the backend command binds uvicorn explicitly.
+
+Frontend service:
+
+```text
+Root Directory: apps/web
+Build Command: corepack pnpm install --frozen-lockfile && corepack pnpm build
+Start Command: corepack pnpm start
+```
+
+Set `NEXT_PUBLIC_API_BASE_URL` to the public API origin before building the web
+service, because Next.js embeds `NEXT_PUBLIC_*` values into the browser bundle.
+Do not expose LLM keys through `NEXT_PUBLIC_*`.
+
+Full Alpha deployment steps, smoke tests, rollback, and backup/deletion notes
+live in `docs/alpha-deploy.md`. Manual rollout QA lives in
+`qa/2026-05-25-v0.4.1a-alpha-entry-manual-qa.md`.
+
 ## Verification
 
 ```bash
