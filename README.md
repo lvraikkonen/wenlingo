@@ -153,7 +153,9 @@ Start Command: corepack pnpm start -- -H 0.0.0.0 -p $PORT
 Set `NEXT_PUBLIC_API_BASE_URL` to the public API origin before building the web
 service, because Next.js embeds `NEXT_PUBLIC_*` values into the browser bundle.
 Use full HTTPS origins with no trailing slash for both `CORS_ALLOW_ORIGINS` and
-`NEXT_PUBLIC_API_BASE_URL`. Do not expose LLM keys through `NEXT_PUBLIC_*`.
+`NEXT_PUBLIC_API_BASE_URL`. If either value changes, manually redeploy the
+affected Railway service so CORS and the browser bundle use the new origin. Do
+not expose LLM keys through `NEXT_PUBLIC_*`.
 
 Full Alpha deployment steps, Alpha data verification, smoke tests, rollback, and
 backup/deletion notes live in `docs/alpha-deploy.md`. Manual rollout QA lives in

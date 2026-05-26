@@ -98,6 +98,8 @@ Frontend variables:
 
 Set `NEXT_PUBLIC_API_BASE_URL` before building the frontend service because Next.js bakes `NEXT_PUBLIC_*` variables into the browser bundle at build time.
 
+On first deployment, set `CORS_ALLOW_ORIGINS` after the web public domain exists, then redeploy `wenlingo-api`. Set `NEXT_PUBLIC_API_BASE_URL` before building `wenlingo-web`. If either `NEXT_PUBLIC_API_BASE_URL` or `CORS_ALLOW_ORIGINS` changes later, manually redeploy the affected service so the runtime CORS allowlist and browser bundle use the new values.
+
 Use a full HTTPS origin for `NEXT_PUBLIC_API_BASE_URL`, for example:
 
 ```text
