@@ -21,7 +21,6 @@ export default function ParentChildSummaryPage({ params }: SummaryPageProps) {
   useEffect(() => {
     const parentId = getStoredAlphaParentId();
     if (!parentId) {
-      setIsLoading(false);
       router.replace("/alpha/start");
       return;
     }

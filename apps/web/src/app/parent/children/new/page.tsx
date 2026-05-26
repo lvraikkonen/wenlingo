@@ -9,7 +9,7 @@ import { getStoredAlphaParentId } from "../../../../lib/alphaParent";
 
 export default function NewChildPage() {
   const router = useRouter();
-  const [parentId, setParentId] = useState<string | null>(null);
+  const [parentId] = useState(() => getStoredAlphaParentId());
   const [nickname, setNickname] = useState("");
   const [grade, setGrade] = useState("4");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -20,13 +20,10 @@ export default function NewChildPage() {
   } | null>(null);
 
   useEffect(() => {
-    const storedParentId = getStoredAlphaParentId();
-    if (!storedParentId) {
+    if (!parentId) {
       router.replace("/alpha/start");
-      return;
     }
-    setParentId(storedParentId);
-  }, [router]);
+  }, [parentId, router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

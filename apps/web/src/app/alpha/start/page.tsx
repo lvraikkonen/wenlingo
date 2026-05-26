@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { FormEvent } from "react";
 import { createAlphaParent } from "../../../lib/api";
 import {
@@ -13,13 +13,11 @@ import {
 export default function AlphaStartPage() {
   const router = useRouter();
   const [displayName, setDisplayName] = useState("Alpha 家长");
-  const [storedParentId, setStoredParentId] = useState<string | null>(null);
+  const [storedParentId, setStoredParentId] = useState(() =>
+    getStoredAlphaParentId(),
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    setStoredParentId(getStoredAlphaParentId());
-  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
