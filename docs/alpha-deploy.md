@@ -62,6 +62,28 @@ uv run alembic upgrade head
 
 Do not leave the bootstrap command in place for future schema changes. Future migrations must be applied with `alembic upgrade head`; repeatedly stamping head can hide unapplied migrations. The init script must stay idempotent and must not delete, truncate, or reseed Alpha data.
 
+#### First Deployment Recovery
+
+If the first Railway deploy already ran `app.db.init_db` but then attempted `alembic upgrade head`, Alembic may fail on the first migration with a duplicate table, column, or constraint error such as:
+
+```text
+psycopg2.errors.DuplicateTable: relation "uq_essay_version_label_per_essay" already exists
+```
+
+That means the schema exists, but the `alembic_version` marker was not stamped. Recover by temporarily changing Railway's Pre-deploy Command to:
+
+```bash
+uv run alembic stamp head
+```
+
+Redeploy the API service once. After it succeeds, change Railway's Pre-deploy Command back to:
+
+```bash
+uv run alembic upgrade head
+```
+
+Do not drop the PostgreSQL database, do not run downgrade migrations, and do not rerun demo seed scripts to fix this state. The goal is only to align Alembic's version marker with the schema that `init_db` already created.
+
 Backend variables:
 
 | Variable | Railway value |

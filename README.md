@@ -136,7 +136,7 @@ Ongoing Pre-deploy Command: uv run alembic upgrade head
 Start Command: uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
 
-The current migration chain assumes the base schema already exists. On a brand-new Railway database, run the bootstrap command once to create the SQLModel schema and mark the Alembic revision as current. After that first successful deploy, switch Railway's Pre-deploy Command to the ongoing `alembic upgrade head` command. Do not run demo seed scripts in Alpha.
+The current migration chain assumes the base schema already exists. On a brand-new Railway database, run the bootstrap command once to create the SQLModel schema and mark the Alembic revision as current. After that first successful deploy, switch Railway's Pre-deploy Command to the ongoing `alembic upgrade head` command. If `init_db` already ran and a later deploy fails with duplicate tables, columns, or constraints, run `uv run alembic stamp head` once to recover the missing Alembic version marker, then redeploy with the ongoing command. Do not run demo seed scripts in Alpha.
 
 Set `DATABASE_URL` from the PostgreSQL service, `CORS_ALLOW_ORIGINS` to the
 public web origin, and keep all LLM provider credentials server-side on the API
