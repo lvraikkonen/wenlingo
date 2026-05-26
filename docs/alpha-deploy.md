@@ -44,12 +44,23 @@ Service:
 Name: wenlingo-api
 Source: GitHub repo
 Root Directory: apps/api
-Pre-deploy Command: uv run alembic upgrade head
+First deployment bootstrap command: uv run python -m app.db.init_db && uv run alembic stamp head
+Ongoing Pre-deploy Command: uv run alembic upgrade head
 Start Command: uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT
 Public Networking: enabled
 ```
 
-Keep database migrations in Railway's Pre-deploy Command instead of the long-running Start Command. This prevents routine container restarts, retries, or future scaling from re-running migrations as part of application boot.
+Keep database initialization and migrations out of the long-running Start Command.
+
+For the first deployment into a brand-new database, temporarily use the bootstrap command as Railway's Pre-deploy Command. `app.db.init_db` creates the current SQLModel schema, and `alembic stamp head` records that schema as the current Alembic revision without replaying historical migrations that may add columns, tables, or constraints already created by `init_db`.
+
+After the first successful deploy, switch Railway's Pre-deploy Command to the ongoing command:
+
+```bash
+uv run alembic upgrade head
+```
+
+Do not leave the bootstrap command in place for future schema changes. Future migrations must be applied with `alembic upgrade head`; repeatedly stamping head can hide unapplied migrations. The init script must stay idempotent and must not delete, truncate, or reseed Alpha data.
 
 Backend variables:
 

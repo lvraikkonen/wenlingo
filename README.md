@@ -131,9 +131,12 @@ Backend service:
 
 ```text
 Root Directory: apps/api
-Pre-deploy Command: uv run alembic upgrade head
+First deployment bootstrap command: uv run python -m app.db.init_db && uv run alembic stamp head
+Ongoing Pre-deploy Command: uv run alembic upgrade head
 Start Command: uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT
 ```
+
+The current migration chain assumes the base schema already exists. On a brand-new Railway database, run the bootstrap command once to create the SQLModel schema and mark the Alembic revision as current. After that first successful deploy, switch Railway's Pre-deploy Command to the ongoing `alembic upgrade head` command. Do not run demo seed scripts in Alpha.
 
 Set `DATABASE_URL` from the PostgreSQL service, `CORS_ALLOW_ORIGINS` to the
 public web origin, and keep all LLM provider credentials server-side on the API
