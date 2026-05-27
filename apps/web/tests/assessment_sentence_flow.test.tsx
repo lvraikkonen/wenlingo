@@ -307,8 +307,13 @@ test("assessment page disables submit while loading and permits retry after fail
   await userEvent.click(submit);
 
   expect(submit).toBeDisabled();
-  expect(screen.getByRole("status")).toHaveTextContent(
-    "AI 教练正在整理第一张能力草图",
+  expect(submit.querySelector(".animate-spin")).toBeInTheDocument();
+  const status = screen.getByRole("status");
+  expect(status).toHaveTextContent("AI 教练正在整理第一张能力草图");
+  expect(status).toHaveClass(
+    "rounded-lg",
+    "bg-[var(--wen-bg)]",
+    "text-[var(--wen-orange)]",
   );
 
   rejectAssessment(new Error("network"));

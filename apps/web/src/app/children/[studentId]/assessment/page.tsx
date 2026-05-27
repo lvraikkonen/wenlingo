@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, RotateCcw, Sparkles } from "lucide-react";
+import { ArrowRight, Loader2, RotateCcw, Sparkles } from "lucide-react";
 import { use, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { createAssessment } from "../../../../lib/api";
@@ -306,14 +306,18 @@ export default function AssessmentPage({
                 disabled={!canSubmitWriting || isSubmitting}
                 className="inline-flex items-center gap-2 rounded-lg bg-[var(--wen-orange)] px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <Sparkles size={18} aria-hidden="true" />
+                {isSubmitting ? (
+                  <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles size={18} aria-hidden="true" />
+                )}
                 生成能力草图
               </button>
             </form>
             {isSubmitting ? (
               <p
                 role="status"
-                className="mt-4 text-sm font-semibold text-[var(--wen-muted)]"
+                className="mt-4 rounded-lg bg-[var(--wen-bg)] px-4 py-3 text-sm font-semibold text-[var(--wen-orange)]"
               >
                 AI 教练正在整理第一张能力草图
               </p>
