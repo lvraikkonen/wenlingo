@@ -150,7 +150,7 @@ Frontend service:
 ```text
 Root Directory: apps/web
 Build Command: corepack pnpm install --frozen-lockfile && corepack pnpm build
-Start Command: corepack pnpm start -- -H 0.0.0.0 -p $PORT
+Start Command: corepack pnpm exec next start -H 0.0.0.0 -p $PORT
 ```
 
 Set `NEXT_PUBLIC_API_BASE_URL` to the public API origin before building the web
