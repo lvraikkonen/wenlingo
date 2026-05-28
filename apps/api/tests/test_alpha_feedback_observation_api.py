@@ -242,7 +242,7 @@ def test_product_event_payload_sanitizes_nested_sensitive_keys(session, client):
 
 
 def test_feedback_reaction_upserts_assessment_target(session, client):
-    _, child = create_parent_and_child(client, session)
+    parent, child = create_parent_and_child(client, session)
     assessment = Assessment(
         student_id=child["id"],
         sentence_before="公园很美。",
@@ -268,6 +268,14 @@ def test_feedback_reaction_upserts_assessment_target(session, client):
     reactions = session.exec(select(FeedbackReaction)).all()
     assert len(reactions) == 1
     assert reactions[0].reaction == "negative"
+    assert reactions[0].parent_id == parent["id"]
+    events = session.exec(
+        select(ProductEvent).where(
+            ProductEvent.event_type == "child_feedback_reaction_submitted"
+        )
+    ).all()
+    assert len(events) == 2
+    assert [event.parent_id for event in events] == [parent["id"], parent["id"]]
 
 
 def test_feedback_reaction_rejects_cross_student_target(session, client):

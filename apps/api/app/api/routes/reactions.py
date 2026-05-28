@@ -98,12 +98,12 @@ def create_feedback_reaction(
     ).first()
     if reaction:
         reaction.reaction = request.reaction
-        reaction.parent_id = request.parent_id
+        reaction.parent_id = student.parent_id
         reaction.alpha_session_id = request.alpha_session_id
         reaction.updated_at = datetime.now(timezone.utc)
     else:
         reaction = FeedbackReaction(
-            parent_id=request.parent_id,
+            parent_id=student.parent_id,
             student_id=student_id,
             target_type=request.target_type,
             target_id=request.target_id,
@@ -115,7 +115,7 @@ def create_feedback_reaction(
         record_product_event(
             session,
             "child_feedback_reaction_submitted",
-            parent_id=request.parent_id,
+            parent_id=student.parent_id,
             student_id=student_id,
             alpha_session_id=request.alpha_session_id,
             payload={
