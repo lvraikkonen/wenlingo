@@ -88,14 +88,6 @@ SAFE_PAYLOAD_KEYS = {
     "usefulness",
     "child_count",
 }
-SENSITIVE_PAYLOAD_KEYS = {
-    "essay_text",
-    "ai_feedback",
-    "phone",
-    "invite_code",
-    "code",
-    "raw_code",
-}
 JSON_SAFE_SCALARS = (str, int, float, bool, type(None))
 
 
@@ -186,22 +178,6 @@ _DROP_PAYLOAD_VALUE = object()
 def _sanitize_payload_value(value: Any) -> Any:
     if isinstance(value, JSON_SAFE_SCALARS):
         return value
-    if isinstance(value, list):
-        items = []
-        for item in value:
-            sanitized_item = _sanitize_payload_value(item)
-            if sanitized_item is not _DROP_PAYLOAD_VALUE:
-                items.append(sanitized_item)
-        return items
-    if isinstance(value, dict):
-        sanitized_dict = {}
-        for key, child_value in value.items():
-            if key in SENSITIVE_PAYLOAD_KEYS:
-                continue
-            sanitized_child = _sanitize_payload_value(child_value)
-            if sanitized_child is not _DROP_PAYLOAD_VALUE:
-                sanitized_dict[key] = sanitized_child
-        return sanitized_dict
     return _DROP_PAYLOAD_VALUE
 
 
