@@ -3,8 +3,9 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { Suspense } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
 import ParentChildSummaryPage from "../src/app/parent/children/[studentId]/summary/page";
-import { getAlphaChildSummary } from "../src/lib/api";
+import { getAlphaChildSummary, recordAlphaEvent } from "../src/lib/api";
 import { ALPHA_PARENT_STORAGE_KEY } from "../src/lib/alphaParent";
+import { ALPHA_SESSION_STORAGE_KEY } from "../src/lib/alphaSession";
 
 const replace = vi.fn();
 
@@ -14,6 +15,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("../src/lib/api", () => ({
   getAlphaChildSummary: vi.fn(),
+  recordAlphaEvent: vi.fn(async () => undefined),
 }));
 
 const child = {
@@ -42,6 +44,7 @@ beforeEach(() => {
   window.localStorage.clear();
   replace.mockClear();
   vi.mocked(getAlphaChildSummary).mockReset();
+  vi.mocked(recordAlphaEvent).mockClear();
 });
 
 test("summary page redirects to alpha start when parent id is missing", async () => {
@@ -53,6 +56,7 @@ test("summary page redirects to alpha start when parent id is missing", async ()
 
 test("summary page renders empty state for a child without training records", async () => {
   window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "parent-1");
+  window.localStorage.setItem(ALPHA_SESSION_STORAGE_KEY, "session-1");
   vi.mocked(getAlphaChildSummary).mockResolvedValue({
     parent_id: "parent-1",
     child,
@@ -72,6 +76,13 @@ test("summary page renders empty state for a child without training records", as
 
   expect(await screen.findByRole("heading", { name: "小星的成长摘要" })).toBeInTheDocument();
   expect(getAlphaChildSummary).toHaveBeenCalledWith("parent-1", "student-1");
+  expect(recordAlphaEvent).toHaveBeenCalledWith({
+    event_type: "summary_viewed",
+    parent_id: "parent-1",
+    student_id: "student-1",
+    alpha_session_id: "session-1",
+    payload: { path: "/parent/children/student-1/summary", status: "viewed" },
+  });
   expect(screen.getByText("还没有训练记录。完成入门小试炼后，这里会出现第一份成长摘要。")).toBeInTheDocument();
   expect(screen.getByText("先完成入门小试炼，生成第一张能力草图。")).toBeInTheDocument();
 });

@@ -50,6 +50,23 @@ export type AlphaParentResponse = {
   children_url: string;
 };
 
+export type AlphaInviteValidationResponse = {
+  valid: boolean;
+  invite_id: string;
+  label: string;
+};
+
+export type AlphaEventPayload = Record<string, string | number | boolean | null>;
+
+export type AlphaEventCreate = {
+  event_type: string;
+  parent_id?: string | null;
+  student_id?: string | null;
+  invite_code_id?: string | null;
+  alpha_session_id?: string;
+  payload?: AlphaEventPayload;
+};
+
 export type AlphaChild = {
   id: string;
   nickname: string;

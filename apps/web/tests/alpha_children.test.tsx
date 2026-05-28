@@ -3,8 +3,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { beforeEach, expect, test, vi } from "vitest";
 import ParentChildrenPage from "../src/app/parent/children/page";
 import NewChildPage from "../src/app/parent/children/new/page";
-import { createAlphaChild, getAlphaChildren } from "../src/lib/api";
+import { createAlphaChild, getAlphaChildren, recordAlphaEvent } from "../src/lib/api";
 import { ALPHA_PARENT_STORAGE_KEY } from "../src/lib/alphaParent";
+import { ALPHA_SESSION_STORAGE_KEY } from "../src/lib/alphaSession";
 
 const push = vi.fn();
 const replace = vi.fn();
@@ -43,6 +44,7 @@ vi.mock("../src/lib/api", () => ({
     dashboard_url: "/children/student-2",
     summary_url: "/parent/children/student-2/summary",
   })),
+  recordAlphaEvent: vi.fn(async () => undefined),
 }));
 
 beforeEach(() => {
@@ -52,6 +54,7 @@ beforeEach(() => {
   replace.mockClear();
   vi.mocked(getAlphaChildren).mockClear();
   vi.mocked(createAlphaChild).mockClear();
+  vi.mocked(recordAlphaEvent).mockClear();
 });
 
 test("children list redirects to alpha start when parent id is missing", async () => {
@@ -62,6 +65,7 @@ test("children list redirects to alpha start when parent id is missing", async (
 
 test("children list renders child card and parent actions", async () => {
   window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "parent-1");
+  window.localStorage.setItem(ALPHA_SESSION_STORAGE_KEY, "session-1");
 
   render(<ParentChildrenPage />);
 
@@ -82,6 +86,30 @@ test("children list renders child card and parent actions", async () => {
     "href",
     "/parent/children/student-1/summary",
   );
+  expect(recordAlphaEvent).toHaveBeenCalledWith({
+    event_type: "parent_children_viewed",
+    parent_id: "parent-1",
+    alpha_session_id: "session-1",
+    payload: { path: "/parent/children", status: "viewed" },
+  });
+});
+
+test("children list records child handoff click with student id", async () => {
+  window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "parent-1");
+  window.localStorage.setItem(ALPHA_SESSION_STORAGE_KEY, "session-1");
+
+  render(<ParentChildrenPage />);
+
+  const childLink = await screen.findByRole("link", { name: "进入孩子空间" });
+  fireEvent.click(childLink);
+
+  expect(recordAlphaEvent).toHaveBeenCalledWith({
+    event_type: "child_handoff_clicked",
+    parent_id: "parent-1",
+    student_id: "student-1",
+    alpha_session_id: "session-1",
+    payload: { path: "/parent/children", status: "clicked" },
+  });
 });
 
 test("new child page validates required nickname before submit", async () => {

@@ -2,6 +2,8 @@ import type {
   AlphaChildCreateResponse,
   AlphaChildSummary,
   AlphaChildrenResponse,
+  AlphaEventCreate,
+  AlphaInviteValidationResponse,
   AlphaParentResponse,
   DashboardResponse,
   DemoLoginResponse,
@@ -228,12 +230,36 @@ export function createReport(studentId: string): Promise<ReportResponse> {
 
 export function createAlphaParent(payload: {
   display_name: string;
+  invite_code: string;
+  alpha_session_id: string;
 }): Promise<AlphaParentResponse> {
   return requestJson<AlphaParentResponse>("/api/alpha/parents", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+export function validateAlphaInvite(payload: {
+  code: string;
+  alpha_session_id: string;
+}): Promise<AlphaInviteValidationResponse> {
+  return requestJson<AlphaInviteValidationResponse>(
+    "/api/alpha/invites/validate",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function recordAlphaEvent(payload: AlphaEventCreate): Promise<void> {
+  return requestJson<void>("/api/alpha/events", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }).catch(() => undefined);
 }
 
 export function getAlphaChildren(parentId: string): Promise<AlphaChildrenResponse> {

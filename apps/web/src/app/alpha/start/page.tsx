@@ -1,14 +1,19 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import type { FormEvent } from "react";
-import { createAlphaParent } from "../../../lib/api";
+import {
+  createAlphaParent,
+  recordAlphaEvent,
+  validateAlphaInvite,
+} from "../../../lib/api";
 import {
   clearStoredAlphaParentId,
   getStoredAlphaParentId,
   setStoredAlphaParentId,
 } from "../../../lib/alphaParent";
+import { getStoredAlphaSessionId } from "../../../lib/alphaSession";
 
 const ALPHA_PARENT_STORAGE_EVENT = "wenlingo-alpha-parent-storage";
 
@@ -25,6 +30,8 @@ function subscribeToAlphaParentStorage(onStoreChange: () => void) {
 export default function AlphaStartPage() {
   const router = useRouter();
   const [displayName, setDisplayName] = useState("Alpha 家长");
+  const [inviteCode, setInviteCode] = useState("");
+  const alphaSessionId = getStoredAlphaSessionId();
   const storedParentId = useSyncExternalStore(
     subscribeToAlphaParentStorage,
     getStoredAlphaParentId,
@@ -32,6 +39,14 @@ export default function AlphaStartPage() {
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    recordAlphaEvent({
+      event_type: "alpha_start_viewed",
+      alpha_session_id: alphaSessionId,
+      payload: { path: "/alpha/start", status: "viewed" },
+    });
+  }, [alphaSessionId]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -41,11 +56,25 @@ export default function AlphaStartPage() {
     setIsSubmitting(true);
     setError("");
     try {
-      const response = await createAlphaParent({ display_name: displayName });
+      const trimmedInviteCode = inviteCode.trim();
+      if (!trimmedInviteCode) {
+        setError("请输入内测邀请码。");
+        return;
+      }
+
+      await validateAlphaInvite({
+        code: trimmedInviteCode,
+        alpha_session_id: alphaSessionId,
+      });
+      const response = await createAlphaParent({
+        display_name: displayName,
+        invite_code: trimmedInviteCode,
+        alpha_session_id: alphaSessionId,
+      });
       setStoredAlphaParentId(response.parent.id);
       router.push(response.children_url);
     } catch {
-      setError("进入 Alpha 失败，请稍后再试。");
+      setError("邀请码无效或已失效，请检查后再试。");
     } finally {
       setIsSubmitting(false);
     }
@@ -106,6 +135,15 @@ export default function AlphaStartPage() {
                 <input
                   value={displayName}
                   onChange={(event) => setDisplayName(event.target.value)}
+                  maxLength={40}
+                  className="mt-2 w-full rounded-lg border border-[var(--wen-border)] p-3"
+                />
+              </label>
+              <label className="block font-semibold">
+                内测邀请码
+                <input
+                  value={inviteCode}
+                  onChange={(event) => setInviteCode(event.target.value)}
                   maxLength={40}
                   className="mt-2 w-full rounded-lg border border-[var(--wen-border)] p-3"
                 />

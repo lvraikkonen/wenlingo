@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { getAlphaChildren } from "../../../lib/api";
+import { getAlphaChildren, recordAlphaEvent } from "../../../lib/api";
 import { getStoredAlphaParentId } from "../../../lib/alphaParent";
+import { getStoredAlphaSessionId } from "../../../lib/alphaSession";
 import type { AlphaChildrenResponse } from "../../../lib/types";
 
 export default function ParentChildrenPage() {
@@ -19,6 +20,13 @@ export default function ParentChildrenPage() {
       router.replace("/alpha/start");
       return;
     }
+
+    recordAlphaEvent({
+      event_type: "parent_children_viewed",
+      parent_id: parentId,
+      alpha_session_id: getStoredAlphaSessionId(),
+      payload: { path: "/parent/children", status: "viewed" },
+    });
 
     let isMounted = true;
     getAlphaChildren(parentId)
@@ -115,6 +123,15 @@ export default function ParentChildrenPage() {
                 <div className="mt-5 flex flex-wrap gap-3">
                   <Link
                     href={child.dashboard_url}
+                    onClick={() => {
+                      recordAlphaEvent({
+                        event_type: "child_handoff_clicked",
+                        parent_id: data.parent.id,
+                        student_id: child.id,
+                        alpha_session_id: getStoredAlphaSessionId(),
+                        payload: { path: "/parent/children", status: "clicked" },
+                      });
+                    }}
                     className="rounded-lg bg-[var(--wen-orange)] px-4 py-2 font-semibold text-white"
                   >
                     进入孩子空间
