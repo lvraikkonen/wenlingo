@@ -101,7 +101,12 @@ test("children list records child handoff click with student id", async () => {
   render(<ParentChildrenPage />);
 
   const childLink = await screen.findByRole("link", { name: "进入孩子空间" });
-  fireEvent.click(childLink);
+  const clickEvent = new MouseEvent("click", {
+    bubbles: true,
+    cancelable: true,
+  });
+  clickEvent.preventDefault();
+  childLink.dispatchEvent(clickEvent);
 
   expect(recordAlphaEvent).toHaveBeenCalledWith({
     event_type: "child_handoff_clicked",

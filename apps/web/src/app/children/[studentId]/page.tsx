@@ -5,37 +5,12 @@ import { FamilyTopbar } from "../../../components/FamilyTopbar";
 import { PlanetMap } from "../../../components/PlanetMap";
 import { TaskCards } from "../../../components/TaskCards";
 import { getDashboard } from "../../../lib/api";
+import { buildAlphaDashboardViewedScript } from "../../../lib/alphaSession";
 
 function AlphaDashboardViewedScript({ studentId }: { studentId: string }) {
   const apiBaseUrl =
     process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
-  const script = `
-(() => {
-  try {
-    const parentId = window.localStorage.getItem("wenlingo_alpha_parent_id");
-    if (!parentId) {
-      return;
-    }
-    const alphaSessionId = window.localStorage.getItem("wenlingo_alpha_session_id") || "";
-    window.fetch(${JSON.stringify(`${apiBaseUrl}/api/alpha/events`)}, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        event_type: "child_dashboard_viewed",
-        parent_id: parentId,
-        student_id: ${JSON.stringify(studentId)},
-        alpha_session_id: alphaSessionId,
-        payload: {
-          path: ${JSON.stringify(`/children/${studentId}`)},
-          status: "viewed",
-        },
-      }),
-      cache: "no-store",
-    }).catch(() => undefined);
-  } catch {
-  }
-})();
-`;
+  const script = buildAlphaDashboardViewedScript({ studentId, apiBaseUrl });
 
   return (
     <Script
