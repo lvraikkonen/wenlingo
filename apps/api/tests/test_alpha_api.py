@@ -1,9 +1,13 @@
+from itertools import count
+
 from sqlmodel import select
 
+from app.api.routes.alpha import hash_invite_code
 from app.domain.enums import StudentPersona, TaskType
 from app.domain.models import (
     AbilityHistory,
     AbilityProfile,
+    AlphaInviteCode,
     Assessment,
     ParentUser,
     SentenceTraining,
@@ -18,9 +22,32 @@ ASSESSMENT_PAYLOAD = {
     "short_writing": "我学会了骑车。刚开始我很害怕，后来爸爸扶着我练，我终于能骑一小段了。",
 }
 
+_invite_counter = count(1)
 
-def create_alpha_parent(client, display_name: str = "阿尔法家长") -> dict:
-    response = client.post("/api/alpha/parents", json={"display_name": display_name})
+
+def create_invite(session, code: str = "ALPHA-TEST") -> AlphaInviteCode:
+    invite = AlphaInviteCode(
+        code_hash=hash_invite_code(code),
+        label="测试家庭",
+        status="issued",
+    )
+    session.add(invite)
+    session.commit()
+    session.refresh(invite)
+    return invite
+
+
+def create_alpha_parent(client, session, display_name: str = "阿尔法家长") -> dict:
+    code = f"ALPHA-TEST-{next(_invite_counter)}"
+    create_invite(session, code)
+    response = client.post(
+        "/api/alpha/parents",
+        json={
+            "display_name": display_name,
+            "invite_code": code,
+            "alpha_session_id": "session-test",
+        },
+    )
     assert response.status_code == 201
     return response.json()["parent"]
 
@@ -35,7 +62,16 @@ def create_alpha_child(client, parent_id: str, nickname: str = " 小文 ", grade
 
 
 def test_create_alpha_parent_persists_real_parent_and_returns_children_url(session, client):
-    response = client.post("/api/alpha/parents", json={"display_name": " 阿尔法家长 "})
+    create_invite(session)
+
+    response = client.post(
+        "/api/alpha/parents",
+        json={
+            "display_name": " 阿尔法家长 ",
+            "invite_code": "ALPHA-TEST",
+            "alpha_session_id": "session-test",
+        },
+    )
 
     assert response.status_code == 201
     payload = response.json()
@@ -49,15 +85,24 @@ def test_create_alpha_parent_persists_real_parent_and_returns_children_url(sessi
     assert payload["children_url"] == "/parent/children"
 
 
-def test_create_alpha_parent_blank_name_falls_back_to_default(client):
-    response = client.post("/api/alpha/parents", json={"display_name": "   "})
+def test_create_alpha_parent_blank_name_falls_back_to_default(session, client):
+    create_invite(session)
+
+    response = client.post(
+        "/api/alpha/parents",
+        json={
+            "display_name": "   ",
+            "invite_code": "ALPHA-TEST",
+            "alpha_session_id": "session-test",
+        },
+    )
 
     assert response.status_code == 201
     assert response.json()["parent"]["display_name"] == "Alpha 家长"
 
 
 def test_create_alpha_child_trims_validates_and_creates_default_ability(session, client):
-    parent = create_alpha_parent(client)
+    parent = create_alpha_parent(client, session)
 
     response = client.post(
         f"/api/alpha/parents/{parent['id']}/children",
@@ -91,8 +136,8 @@ def test_create_alpha_child_trims_validates_and_creates_default_ability(session,
     assert payload["summary_url"] == f"/parent/children/{child['id']}/summary"
 
 
-def test_create_alpha_child_rejects_invalid_inputs(client):
-    parent = create_alpha_parent(client)
+def test_create_alpha_child_rejects_invalid_inputs(session, client):
+    parent = create_alpha_parent(client, session)
     invalid_payloads = [
         {"nickname": "   ", "grade": 4},
         {"nickname": "小" * 25, "grade": 4},
@@ -115,9 +160,9 @@ def test_create_alpha_child_missing_parent_returns_404(client):
     assert response.json()["detail"] == "alpha parent not found"
 
 
-def test_list_alpha_children_is_scoped_to_parent_and_includes_urls(client):
-    parent = create_alpha_parent(client, "家长甲")
-    other_parent = create_alpha_parent(client, "家长乙")
+def test_list_alpha_children_is_scoped_to_parent_and_includes_urls(session, client):
+    parent = create_alpha_parent(client, session, "家长甲")
+    other_parent = create_alpha_parent(client, session, "家长乙")
     first_child = create_alpha_child(client, parent["id"], "小甲", 3)
     second_child = create_alpha_child(client, parent["id"], "小乙", 5)
     create_alpha_child(client, other_parent["id"], "小丙", 4)
@@ -139,8 +184,8 @@ def test_list_alpha_children_is_scoped_to_parent_and_includes_urls(client):
     )
 
 
-def test_alpha_summary_for_new_child_returns_empty_state(client):
-    parent = create_alpha_parent(client)
+def test_alpha_summary_for_new_child_returns_empty_state(session, client):
+    parent = create_alpha_parent(client, session)
     child = create_alpha_child(client, parent["id"])
 
     response = client.get(
@@ -163,7 +208,7 @@ def test_alpha_summary_for_new_child_returns_empty_state(client):
 def test_alpha_summary_with_sentence_training_but_no_assessment_is_not_empty(
     session, client
 ):
-    parent = create_alpha_parent(client)
+    parent = create_alpha_parent(client, session)
     child = create_alpha_child(client, parent["id"])
     training = SentenceTraining(
         student_id=child["id"],
@@ -202,7 +247,7 @@ def test_alpha_summary_with_sentence_training_but_no_assessment_is_not_empty(
 def test_alpha_summary_after_assessment_returns_counts_and_ability_changes(
     session, client
 ):
-    parent = create_alpha_parent(client)
+    parent = create_alpha_parent(client, session)
     child = create_alpha_child(client, parent["id"])
     assessment_response = client.post(
         f"/api/students/{child['id']}/assessment",
@@ -236,9 +281,9 @@ def test_alpha_summary_after_assessment_returns_counts_and_ability_changes(
     }
 
 
-def test_alpha_summary_rejects_child_from_other_parent(client):
-    parent = create_alpha_parent(client, "家长甲")
-    other_parent = create_alpha_parent(client, "家长乙")
+def test_alpha_summary_rejects_child_from_other_parent(session, client):
+    parent = create_alpha_parent(client, session, "家长甲")
+    other_parent = create_alpha_parent(client, session, "家长乙")
     other_child = create_alpha_child(client, other_parent["id"])
 
     response = client.get(
