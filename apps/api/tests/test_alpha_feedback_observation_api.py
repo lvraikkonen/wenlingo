@@ -88,6 +88,7 @@ def test_invite_validation_accepts_issued_code_and_records_event(session, client
     ).one()
     assert event.invite_code_id == invite.id
     assert event.alpha_session_id == "session-1"
+    assert event.payload == {"status": "validated"}
 
 
 def test_invite_validation_rejects_consumed_disabled_and_missing_codes(session, client):
@@ -99,6 +100,15 @@ def test_invite_validation_rejects_consumed_disabled_and_missing_codes(session, 
 
         assert response.status_code == 400
         assert response.json()["detail"] == "invite code is not available"
+
+    events = session.exec(
+        select(ProductEvent).where(ProductEvent.event_type == "invite_code_rejected")
+    ).all()
+    assert [event.payload for event in events] == [
+        {"status": "rejected", "error_category": "not_available"},
+        {"status": "rejected", "error_category": "not_available"},
+        {"status": "rejected", "error_category": "not_available"},
+    ]
 
 
 def test_parent_creation_requires_valid_invite_code_and_consumes_once(session, client):
@@ -119,9 +129,10 @@ def test_parent_creation_requires_valid_invite_code_and_consumes_once(session, c
     assert invite.status == "consumed"
     assert invite.consumed_by_parent_id == parent["id"]
     assert invite.consumed_at is not None
-    assert session.exec(
+    event = session.exec(
         select(ProductEvent).where(ProductEvent.event_type == "alpha_parent_created")
     ).one()
+    assert event.payload == {"status": "created"}
 
     response = client.post(
         "/api/alpha/parents",

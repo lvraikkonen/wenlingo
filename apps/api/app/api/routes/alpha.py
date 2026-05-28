@@ -299,6 +299,7 @@ def validate_alpha_invite(
             "invite_code_rejected",
             invite_code_id=existing_invite.id if existing_invite else None,
             alpha_session_id=request.alpha_session_id,
+            payload={"status": "rejected", "error_category": "not_available"},
         )
         session.commit()
         raise HTTPException(status_code=400, detail="invite code is not available")
@@ -307,6 +308,7 @@ def validate_alpha_invite(
         "invite_code_validated",
         invite_code_id=invite.id,
         alpha_session_id=request.alpha_session_id,
+        payload={"status": "validated"},
     )
     session.commit()
     return {"valid": True, "invite_id": invite.id, "label": invite.label}
@@ -368,6 +370,7 @@ def create_alpha_parent(
         parent_id=parent.id,
         invite_code_id=invite.id,
         alpha_session_id=request.alpha_session_id,
+        payload={"status": "created"},
     )
     session.commit()
     session.refresh(parent)
