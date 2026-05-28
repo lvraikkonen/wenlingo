@@ -1,5 +1,6 @@
 from hashlib import sha256
 
+from sqlalchemy import update
 from sqlmodel import select
 
 from app.api.routes import alpha as alpha_routes
@@ -60,6 +61,14 @@ def create_parent_and_child(client, session, code: str = "ALPHA-001"):
     parent = create_parent(client, session, code=code)
     child = create_child(client, parent["id"])
     return parent, child
+
+
+def contains_key(value, key: str) -> bool:
+    if isinstance(value, dict):
+        return key in value or any(contains_key(child, key) for child in value.values())
+    if isinstance(value, list):
+        return any(contains_key(child, key) for child in value)
+    return False
 
 
 def test_invite_validation_accepts_issued_code_and_records_event(session, client):
@@ -123,6 +132,38 @@ def test_parent_creation_requires_valid_invite_code_and_consumes_once(session, c
     assert response.json()["detail"] == "invite code is not available"
 
 
+def test_parent_creation_rejects_invite_consumed_after_lookup(
+    session, client, monkeypatch
+):
+    create_invite(session, "ALPHA-RACE")
+    original_lookup = alpha_routes._get_available_invite
+
+    def consume_after_lookup(db_session, code):
+        invite = original_lookup(db_session, code)
+        if invite:
+            db_session.execute(
+                update(AlphaInviteCode)
+                .where(AlphaInviteCode.id == invite.id)
+                .values(status="consumed")
+            )
+            db_session.flush()
+        return invite
+
+    monkeypatch.setattr(alpha_routes, "_get_available_invite", consume_after_lookup)
+
+    response = client.post(
+        "/api/alpha/parents",
+        json={"display_name": "竞态家长", "invite_code": "ALPHA-RACE"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invite code is not available"
+    assert session.exec(select(ParentUser)).all() == []
+    assert session.exec(
+        select(ProductEvent).where(ProductEvent.event_type == "alpha_parent_created")
+    ).all() == []
+
+
 def test_product_event_endpoint_allows_only_safe_p0_events(client):
     response = client.post(
         "/api/alpha/events",
@@ -157,6 +198,33 @@ def test_product_event_payload_is_sanitized(session, client):
         select(ProductEvent).where(ProductEvent.event_type == "parent_children_viewed")
     ).one()
     assert event.payload == {"path": "/parent/children", "status": "ok"}
+
+
+def test_product_event_payload_sanitizes_nested_sensitive_keys(session, client):
+    response = client.post(
+        "/api/alpha/events",
+        json={
+            "event_type": "alpha_start_viewed",
+            "payload": {
+                "status": {
+                    "value": "viewed",
+                    "essay_text": "must not persist",
+                    "phone": "must not persist",
+                },
+                "path": "/alpha/start",
+                "ai_feedback": "must not persist",
+            },
+        },
+    )
+
+    assert response.status_code == 201
+    event = session.exec(
+        select(ProductEvent).where(ProductEvent.event_type == "alpha_start_viewed")
+    ).one()
+    assert event.payload["path"] == "/alpha/start"
+    assert not contains_key(event.payload, "essay_text")
+    assert not contains_key(event.payload, "ai_feedback")
+    assert not contains_key(event.payload, "phone")
 
 
 def test_feedback_reaction_upserts_assessment_target(session, client):
@@ -213,6 +281,35 @@ def test_feedback_reaction_rejects_cross_student_target(session, client):
     )
 
     assert response.status_code == 404
+
+
+def test_feedback_reaction_rejects_parent_id_from_other_parent(session, client):
+    parent = create_parent(client, session, code="ALPHA-PARENT-A")
+    other_parent = create_parent(client, session, code="ALPHA-PARENT-B")
+    child = create_child(client, parent["id"], "小甲")
+    assessment = Assessment(
+        student_id=child["id"],
+        sentence_before="公园很美。",
+        sentence_after="公园里的花红红的。",
+        short_writing="我学会了骑车，刚开始害怕，后来慢慢会了。",
+        summary="表达更具体。",
+    )
+    session.add(assessment)
+    session.commit()
+    session.refresh(assessment)
+
+    response = client.post(
+        f"/api/students/{child['id']}/feedback-reactions",
+        json={
+            "parent_id": other_parent["id"],
+            "target_type": "assessment",
+            "target_id": assessment.id,
+            "reaction": "positive",
+        },
+    )
+
+    assert response.status_code in {400, 404}
+    assert session.exec(select(FeedbackReaction)).all() == []
 
 
 def test_feedback_reaction_supports_sentence_and_essay_version_targets(session, client):

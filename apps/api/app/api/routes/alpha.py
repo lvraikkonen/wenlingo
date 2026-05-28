@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import update
 from sqlmodel import Session, select
 
 from app.api.deps import get_db_session
@@ -87,6 +88,8 @@ SAFE_PAYLOAD_KEYS = {
     "usefulness",
     "child_count",
 }
+SENSITIVE_PAYLOAD_KEYS = {"essay_text", "ai_feedback", "phone"}
+JSON_SAFE_SCALARS = (str, int, float, bool, type(None))
 
 
 class AlphaParentCreate(BaseModel):
@@ -160,7 +163,39 @@ def hash_invite_code(code: str) -> str:
 def sanitize_event_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
     if not payload:
         return {}
-    return {key: value for key, value in payload.items() if key in SAFE_PAYLOAD_KEYS}
+    sanitized = {}
+    for key, value in payload.items():
+        if key not in SAFE_PAYLOAD_KEYS:
+            continue
+        sanitized_value = _sanitize_payload_value(value)
+        if sanitized_value is not _DROP_PAYLOAD_VALUE:
+            sanitized[key] = sanitized_value
+    return sanitized
+
+
+_DROP_PAYLOAD_VALUE = object()
+
+
+def _sanitize_payload_value(value: Any) -> Any:
+    if isinstance(value, JSON_SAFE_SCALARS):
+        return value
+    if isinstance(value, list):
+        items = []
+        for item in value:
+            sanitized_item = _sanitize_payload_value(item)
+            if sanitized_item is not _DROP_PAYLOAD_VALUE:
+                items.append(sanitized_item)
+        return items
+    if isinstance(value, dict):
+        sanitized_dict = {}
+        for key, child_value in value.items():
+            if key in SENSITIVE_PAYLOAD_KEYS:
+                continue
+            sanitized_child = _sanitize_payload_value(child_value)
+            if sanitized_child is not _DROP_PAYLOAD_VALUE:
+                sanitized_dict[key] = sanitized_child
+        return sanitized_dict
+    return _DROP_PAYLOAD_VALUE
 
 
 def record_product_event(
@@ -322,10 +357,20 @@ def create_alpha_parent(
     )
     session.add(parent)
     session.flush()
-    invite.status = "consumed"
-    invite.consumed_by_parent_id = parent.id
-    invite.consumed_at = datetime.now(timezone.utc)
-    session.add(invite)
+    consumed_at = datetime.now(timezone.utc)
+    consume_result = session.execute(
+        update(AlphaInviteCode)
+        .where(AlphaInviteCode.id == invite.id, AlphaInviteCode.status == "issued")
+        .values(
+            status="consumed",
+            consumed_by_parent_id=parent.id,
+            consumed_at=consumed_at,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if consume_result.rowcount != 1:
+        session.rollback()
+        raise HTTPException(status_code=400, detail="invite code is not available")
     record_product_event(
         session,
         "alpha_parent_created",

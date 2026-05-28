@@ -13,6 +13,7 @@ from app.domain.models import (
     EssayVersion,
     FeedbackReaction,
     SentenceTraining,
+    StudentProfile,
 )
 
 router = APIRouter(prefix="/api/students", tags=["reactions"])
@@ -75,6 +76,11 @@ def create_feedback_reaction(
     request: FeedbackReactionCreate,
     session: Session = Depends(get_db_session),
 ):
+    student = session.get(StudentProfile, student_id)
+    if not student:
+        raise HTTPException(status_code=404, detail="student not found")
+    if request.parent_id is not None and request.parent_id != student.parent_id:
+        raise HTTPException(status_code=404, detail="student not found")
     if not _target_belongs_to_student(
         session,
         student_id,
