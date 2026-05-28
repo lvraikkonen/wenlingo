@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
+import { ParentSummaryFeedback } from "../../../../../components/ParentSummaryFeedback";
 import { getAlphaChildSummary, recordAlphaEvent } from "../../../../../lib/api";
 import { getStoredAlphaParentId } from "../../../../../lib/alphaParent";
 import { getStoredAlphaSessionId } from "../../../../../lib/alphaSession";
@@ -20,15 +21,15 @@ export default function ParentChildSummaryPage({ params }: SummaryPageProps) {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const parentId = getStoredAlphaParentId();
-    if (!parentId) {
+    const storedParentId = getStoredAlphaParentId();
+    if (!storedParentId) {
       router.replace("/alpha/start");
       return;
     }
 
     recordAlphaEvent({
       event_type: "summary_viewed",
-      parent_id: parentId,
+      parent_id: storedParentId,
       student_id: studentId,
       alpha_session_id: getStoredAlphaSessionId(),
       payload: {
@@ -38,7 +39,7 @@ export default function ParentChildSummaryPage({ params }: SummaryPageProps) {
     });
 
     let isMounted = true;
-    getAlphaChildSummary(parentId, studentId)
+    getAlphaChildSummary(storedParentId, studentId)
       .then((response) => {
         if (isMounted) {
           setData(response);
@@ -177,6 +178,12 @@ export default function ParentChildSummaryPage({ params }: SummaryPageProps) {
                 </section>
               </>
             )}
+            {data.parent_id ? (
+              <ParentSummaryFeedback
+                parentId={data.parent_id}
+                studentId={studentId}
+              />
+            ) : null}
           </div>
         ) : null}
       </section>

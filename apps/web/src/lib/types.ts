@@ -110,3 +110,21 @@ export type AlphaChildSummary = {
   next_suggestion: string;
   empty_state: string | null;
 };
+
+export type FeedbackReactionValue = "positive" | "neutral" | "negative";
+
+export type FeedbackReactionTargetType =
+  | "assessment"
+  | "sentence_training"
+  | "essay_draft"
+  | "essay_revision";
+
+export type SavedFeedbackReaction = {
+  id: string;
+  student_id: string;
+  target_type: FeedbackReactionTargetType;
+  target_id: string;
+  reaction: FeedbackReactionValue;
+};
+
+export type ParentSummaryUsefulness = "helpful" | "not_helpful";

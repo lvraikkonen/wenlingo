@@ -7,6 +7,10 @@ import type {
   AlphaParentResponse,
   DashboardResponse,
   DemoLoginResponse,
+  FeedbackReactionTargetType,
+  FeedbackReactionValue,
+  ParentSummaryUsefulness,
+  SavedFeedbackReaction,
 } from "./types";
 
 const API_BASE_URL =
@@ -67,6 +71,9 @@ export type AssessmentResponse = {
 };
 
 export type SentenceTrainingResponse = {
+  training: {
+    id: string;
+  };
   feedback: {
     encouragement: string;
     specific_improvement: string;
@@ -90,6 +97,11 @@ export type RevisionTask = {
 export type EssayResponse = {
   essay: {
     id: string;
+  };
+  first_draft: {
+    id: string;
+    essay_id: string;
+    version_label: "first_draft";
   };
   feedback: {
     strengths: string[];
@@ -288,5 +300,42 @@ export function getAlphaChildSummary(
 ): Promise<AlphaChildSummary> {
   return requestJson<AlphaChildSummary>(
     `/api/alpha/parents/${parentId}/children/${studentId}/summary`,
+  );
+}
+
+export function saveFeedbackReaction(
+  studentId: string,
+  payload: {
+    target_type: FeedbackReactionTargetType;
+    target_id: string;
+    reaction: FeedbackReactionValue;
+    alpha_session_id: string;
+  },
+): Promise<{ reaction: SavedFeedbackReaction }> {
+  return requestJson<{ reaction: SavedFeedbackReaction }>(
+    `/api/students/${studentId}/feedback-reactions`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function saveParentSummaryFeedback(
+  parentId: string,
+  studentId: string,
+  payload: {
+    usefulness: ParentSummaryUsefulness;
+    alpha_session_id: string;
+  },
+): Promise<{ feedback: { usefulness: ParentSummaryUsefulness } }> {
+  return requestJson<{ feedback: { usefulness: ParentSummaryUsefulness } }>(
+    `/api/alpha/parents/${parentId}/children/${studentId}/summary-feedback`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
   );
 }

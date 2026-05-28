@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ArrowRight, Loader2, RotateCcw, Sparkles } from "lucide-react";
 import { use, useMemo, useState } from "react";
 import type { FormEvent } from "react";
+import { FeedbackReaction } from "../../../../components/FeedbackReaction";
 import { createAssessment } from "../../../../lib/api";
 import type { AbilitySketch, AssessmentResponse } from "../../../../lib/api";
 
@@ -350,6 +351,13 @@ export default function AssessmentPage({
             <h1 className="mt-3 text-2xl font-bold">第一张能力草图</h1>
             <div className="mt-6">
               <AbilityRadar sketch={result.ability_sketch} />
+            </div>
+            <div className="mt-6">
+              <FeedbackReaction
+                studentId={studentId}
+                targetType="assessment"
+                targetId={result.assessment.id}
+              />
             </div>
             <div className="mt-6 flex flex-wrap items-center gap-3">
               <span className="rounded-lg bg-[var(--wen-bg)] px-3 py-2 text-sm font-semibold">

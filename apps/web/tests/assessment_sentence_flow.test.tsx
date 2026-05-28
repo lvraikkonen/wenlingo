@@ -75,6 +75,7 @@ beforeEach(() => {
     },
   });
   apiMocks.createSentenceTraining.mockResolvedValue({
+    training: { id: "sentence-training-1" },
     feedback: {
       encouragement: "你把画面写得更清楚了。",
       specific_improvement: "加入了可看见的细节",
@@ -148,6 +149,7 @@ test("assessment page renders four steps and submits all fields once", async () 
 
 test("sentence page shows ai feedback and settlement", async () => {
   const sentenceResponse = {
+    training: { id: "sentence-training-1" },
     feedback: {
       encouragement: "你把画面写得更清楚了。",
       specific_improvement: "加入了可看见的细节",
@@ -215,6 +217,7 @@ test("sentence page shows ai feedback and settlement", async () => {
 
 test("sentence page clears old feedback when retrying after success", async () => {
   const sentenceResponse = {
+    training: { id: "sentence-training-1" },
     feedback: {
       encouragement: "你把画面写得更清楚了。",
       specific_improvement: "加入了可看见的细节",

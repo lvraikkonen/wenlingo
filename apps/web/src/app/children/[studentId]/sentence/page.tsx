@@ -5,6 +5,7 @@ import { use, useState } from "react";
 import type { FormEvent } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import { FamilyTopbar } from "../../../../components/FamilyTopbar";
+import { FeedbackReaction } from "../../../../components/FeedbackReaction";
 import { SettlementPanel } from "../../../../components/SettlementPanel";
 import {
   createSentenceTraining,
@@ -140,6 +141,11 @@ export default function SentencePage({
                 <h3 className="mt-5 text-sm font-bold">下一小步</h3>
                 <p className="mt-2 text-sm">{result.feedback.next_step}</p>
               </section>
+              <FeedbackReaction
+                studentId={studentId}
+                targetType="sentence_training"
+                targetId={result.training.id}
+              />
               <SettlementPanel settlement={result.settlement} />
               <nav
                 aria-label="句子任务下一步"

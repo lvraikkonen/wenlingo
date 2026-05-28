@@ -4,6 +4,7 @@ import { use, useState } from "react";
 import type { FormEvent } from "react";
 import { CheckCircle2, Loader2, Sparkles } from "lucide-react";
 import { FamilyTopbar } from "../../../../components/FamilyTopbar";
+import { FeedbackReaction } from "../../../../components/FeedbackReaction";
 import { SettlementPanel } from "../../../../components/SettlementPanel";
 import {
   createEssay,
@@ -23,6 +24,8 @@ export default function EssayPage({
   const [draft, setDraft] = useState("");
   const [revision, setRevision] = useState("");
   const [essayId, setEssayId] = useState<string | null>(null);
+  const [firstDraftId, setFirstDraftId] = useState<string | null>(null);
+  const [revisionResultId, setRevisionResultId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<null | EssayResponse["feedback"]>(
     null,
   );
@@ -59,6 +62,7 @@ export default function EssayPage({
       });
 
       setEssayId(result.essay.id);
+      setFirstDraftId(result.first_draft?.id ?? null);
       setFeedback(result.feedback);
       setSelectedTasks(
         result.feedback.revision_tasks.map((task) => task.instruction),
@@ -67,6 +71,7 @@ export default function EssayPage({
       setRevision("");
       setComparison(null);
       setSettlement(null);
+      setRevisionResultId(null);
     } catch {
       setError("这次提交没有成功。先别急，检查一下网络后再试一次。");
     } finally {
@@ -103,6 +108,7 @@ export default function EssayPage({
 
       setComparison(result.comparison);
       setSettlement(result.settlement);
+      setRevisionResultId(result.revision.id);
     } catch {
       setError("这次提交没有成功。先别急，检查一下网络后再试一次。");
     } finally {
@@ -199,6 +205,13 @@ export default function EssayPage({
                 </label>
               ))}
             </div>
+            {firstDraftId ? (
+              <FeedbackReaction
+                studentId={studentId}
+                targetType="essay_draft"
+                targetId={firstDraftId}
+              />
+            ) : null}
           </section>
         ) : null}
 
@@ -246,6 +259,15 @@ export default function EssayPage({
                 </p>
               ))}
             </div>
+            {comparison && revisionResultId ? (
+              <div className="mt-5">
+                <FeedbackReaction
+                  studentId={studentId}
+                  targetType="essay_revision"
+                  targetId={revisionResultId}
+                />
+              </div>
+            ) : null}
           </section>
         ) : null}
         {settlement ? <SettlementPanel settlement={settlement} /> : null}
