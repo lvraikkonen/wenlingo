@@ -88,7 +88,14 @@ SAFE_PAYLOAD_KEYS = {
     "usefulness",
     "child_count",
 }
-SENSITIVE_PAYLOAD_KEYS = {"essay_text", "ai_feedback", "phone"}
+SENSITIVE_PAYLOAD_KEYS = {
+    "essay_text",
+    "ai_feedback",
+    "phone",
+    "invite_code",
+    "code",
+    "raw_code",
+}
 JSON_SAFE_SCALARS = (str, int, float, bool, type(None))
 
 

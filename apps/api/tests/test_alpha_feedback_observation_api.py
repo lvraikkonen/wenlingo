@@ -210,6 +210,9 @@ def test_product_event_payload_sanitizes_nested_sensitive_keys(session, client):
                     "value": "viewed",
                     "essay_text": "must not persist",
                     "phone": "must not persist",
+                    "invite_code": "ALPHA-001",
+                    "code": "ALPHA-001",
+                    "raw_code": "ALPHA-001",
                 },
                 "path": "/alpha/start",
                 "ai_feedback": "must not persist",
@@ -225,6 +228,9 @@ def test_product_event_payload_sanitizes_nested_sensitive_keys(session, client):
     assert not contains_key(event.payload, "essay_text")
     assert not contains_key(event.payload, "ai_feedback")
     assert not contains_key(event.payload, "phone")
+    assert not contains_key(event.payload, "invite_code")
+    assert not contains_key(event.payload, "code")
+    assert not contains_key(event.payload, "raw_code")
 
 
 def test_feedback_reaction_upserts_assessment_target(session, client):
