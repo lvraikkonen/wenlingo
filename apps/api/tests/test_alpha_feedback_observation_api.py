@@ -200,6 +200,37 @@ def test_product_event_payload_is_sanitized(session, client):
     assert event.payload == {"path": "/parent/children", "status": "ok"}
 
 
+def test_product_event_payload_drops_scalar_invite_code_values(session, client):
+    response = client.post(
+        "/api/alpha/events",
+        json={
+            "event_type": "alpha_start_viewed",
+            "payload": {
+                "path": "/alpha/start?code=ALPHA-001",
+                "status": "ALPHA-001",
+                "error_category": "bad code ALPHA-SECRET-123",
+                "target_type": "viewed",
+                "target_id": 123,
+                "summary_viewed": True,
+            },
+        },
+    )
+
+    assert response.status_code == 201
+    event = session.exec(
+        select(ProductEvent).where(ProductEvent.event_type == "alpha_start_viewed")
+    ).one()
+    assert event.payload == {
+        "target_type": "viewed",
+        "target_id": 123,
+        "summary_viewed": True,
+    }
+    persisted_payload = str(event.payload)
+    assert "ALPHA-001" not in persisted_payload
+    assert "ALPHA-SECRET-123" not in persisted_payload
+    assert "code=" not in persisted_payload
+
+
 def test_product_event_payload_sanitizes_nested_sensitive_keys(session, client):
     response = client.post(
         "/api/alpha/events",

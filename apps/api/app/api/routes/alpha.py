@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from hashlib import sha256
+import re
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -89,6 +90,9 @@ SAFE_PAYLOAD_KEYS = {
     "child_count",
 }
 JSON_SAFE_SCALARS = (str, int, float, bool, type(None))
+INVITE_CODE_VALUE_PATTERN = re.compile(
+    r"(?i)(?:^|[^a-z0-9])alpha-[a-z0-9]+(?:-[a-z0-9]+)*"
+)
 
 
 class AlphaParentCreate(BaseModel):
@@ -176,6 +180,10 @@ _DROP_PAYLOAD_VALUE = object()
 
 
 def _sanitize_payload_value(value: Any) -> Any:
+    if isinstance(value, str):
+        if "code=" in value.lower() or INVITE_CODE_VALUE_PATTERN.search(value):
+            return _DROP_PAYLOAD_VALUE
+        return value
     if isinstance(value, JSON_SAFE_SCALARS):
         return value
     return _DROP_PAYLOAD_VALUE
