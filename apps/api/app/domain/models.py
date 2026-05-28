@@ -30,6 +30,77 @@ class ParentUser(SQLModel, table=True):
     created_at: datetime = timestamp_field()
 
 
+class AlphaInviteCode(SQLModel, table=True):
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    code_hash: str = Field(index=True, unique=True)
+    label: str
+    status: str = Field(default="issued", index=True)
+    issued_to_note: str = ""
+    consumed_by_parent_id: str | None = Field(
+        default=None,
+        foreign_key="parentuser.id",
+        index=True,
+    )
+    consumed_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    created_at: datetime = timestamp_field()
+
+
+class ProductEvent(SQLModel, table=True):
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    event_type: str = Field(index=True)
+    parent_id: str | None = Field(default=None, foreign_key="parentuser.id", index=True)
+    student_id: str | None = Field(default=None, foreign_key="studentprofile.id", index=True)
+    invite_code_id: str | None = Field(default=None, foreign_key="alphainvitecode.id", index=True)
+    alpha_session_id: str = Field(default="", index=True)
+    payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    created_at: datetime = timestamp_field()
+
+
+class FeedbackReaction(SQLModel, table=True):
+    __table_args__ = (
+        UniqueConstraint(
+            "student_id",
+            "target_type",
+            "target_id",
+            name="uq_feedbackreaction_student_target",
+        ),
+    )
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    parent_id: str | None = Field(default=None, foreign_key="parentuser.id", index=True)
+    student_id: str = Field(foreign_key="studentprofile.id", index=True)
+    target_type: str = Field(index=True)
+    target_id: str = Field(index=True)
+    reaction: str
+    alpha_session_id: str = Field(default="", index=True)
+    created_at: datetime = timestamp_field()
+    updated_at: datetime = timestamp_field()
+
+
+class ParentFeedback(SQLModel, table=True):
+    __table_args__ = (
+        UniqueConstraint(
+            "parent_id",
+            "student_id",
+            "target_type",
+            name="uq_parentfeedback_parent_student_target",
+        ),
+    )
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    parent_id: str = Field(foreign_key="parentuser.id", index=True)
+    student_id: str = Field(foreign_key="studentprofile.id", index=True)
+    target_type: str = Field(default="alpha_summary", index=True)
+    target_id: str
+    usefulness: str
+    alpha_session_id: str = Field(default="", index=True)
+    created_at: datetime = timestamp_field()
+    updated_at: datetime = timestamp_field()
+
+
 class StudentProfile(SQLModel, table=True):
     id: str = Field(default_factory=new_uuid, primary_key=True)
     parent_id: str = Field(foreign_key="parentuser.id", index=True)

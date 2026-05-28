@@ -36,3 +36,9 @@ def test_engine_uses_configured_url():
 
     assert str(engine.url) == "sqlite:///test.db"
     assert engine.pool._pre_ping is True
+
+
+def test_settings_load_alpha_admin_token():
+    settings = Settings(_env_file=None, alpha_admin_token="secret-token")
+
+    assert settings.alpha_admin_token == "secret-token"
