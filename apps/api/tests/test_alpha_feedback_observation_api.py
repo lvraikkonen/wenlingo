@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import update
 from sqlmodel import select
 
-from app.api.deps import get_db_session
+from app.api.deps import get_db_session, get_llm_provider
 from app.api.routes import alpha as alpha_routes
 from app.api.routes import assessment as assessment_routes
 from app.api.routes import essays as essay_routes
@@ -75,6 +75,14 @@ def contains_key(value, key: str) -> bool:
     if isinstance(value, list):
         return any(contains_key(child, key) for child in value)
     return False
+
+
+class ProviderFailureFallbackProvider:
+    provider_name = "fake"
+    model_name = "provider-failure-fallback"
+
+    async def complete_json(self, task_name, payload):
+        raise RuntimeError(f"{task_name} provider failed")
 
 
 def test_invite_validation_accepts_issued_code_and_records_event(session, client):
@@ -343,6 +351,10 @@ def test_sentence_completion_records_product_event(session, client):
         "task_type": "sentence",
         "status": "completed",
     }
+    assert not contains_key(event.payload, "source_sentence")
+    assert not contains_key(event.payload, "upgraded_sentence")
+    assert not contains_key(event.payload, "ai_feedback")
+    assert not contains_key(event.payload, "feedback")
 
 
 def test_essay_draft_and_revision_record_product_events(session, client):
@@ -394,6 +406,89 @@ def test_essay_draft_and_revision_record_product_events(session, client):
     assert not contains_key(draft_event.payload, "ai_feedback")
     assert not contains_key(revision_event.payload, "content")
     assert not contains_key(revision_event.payload, "ai_feedback")
+
+
+def test_provider_fallback_records_failure_and_completion_events(session, client):
+    _, child = create_parent_and_child(client, session)
+    app = create_app()
+    app.dependency_overrides[get_db_session] = lambda: session
+    app.dependency_overrides[get_llm_provider] = lambda: ProviderFailureFallbackProvider()
+
+    with TestClient(app) as test_client:
+        sentence_response = test_client.post(
+            f"/api/students/{child['id']}/sentences",
+            json={
+                "source_sentence": "公园很美。",
+                "upgraded_sentence": "清晨的公园里，荷叶上的水珠一闪一闪，像小灯泡。",
+                "focus": "加细节",
+            },
+        )
+        draft_response = test_client.post(
+            f"/api/students/{child['id']}/essays",
+            json={
+                "title": "我学会了骑车",
+                "draft": "我学会了骑车。刚开始我很害怕。后来爸爸扶着我练，我终于能骑一小段了。",
+                "entry": "existing_draft",
+            },
+        )
+        revision_response = test_client.post(
+            f"/api/essays/{draft_response.json()['essay']['id']}/revision",
+            json={
+                "content": "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。爸爸松手后，我摇摇晃晃骑过了花坛。",
+                "completed_tasks": ["给第二段加一个动作描写"],
+            },
+        )
+    app.dependency_overrides.clear()
+
+    assert sentence_response.status_code == 201
+    assert draft_response.status_code == 201
+    assert revision_response.status_code == 201
+    failure_events = session.exec(
+        select(ProductEvent).where(ProductEvent.event_type == "ai_feedback_failed")
+    ).all()
+    assert [event.payload for event in failure_events] == [
+        {"task_type": "sentence", "error_category": "exception"},
+        {"task_type": "essay", "error_category": "exception"},
+        {"task_type": "essay", "error_category": "exception"},
+    ]
+    completion_types = {
+        event.event_type
+        for event in session.exec(
+            select(ProductEvent).where(
+                ProductEvent.event_type.in_(
+                    [
+                        "sentence_training_completed",
+                        "essay_draft_feedback_completed",
+                        "essay_revision_feedback_completed",
+                    ]
+                )
+            )
+        ).all()
+    }
+    assert completion_types == {
+        "sentence_training_completed",
+        "essay_draft_feedback_completed",
+        "essay_revision_feedback_completed",
+    }
+
+
+def test_essay_ghostwriting_policy_block_does_not_record_ai_failure(session, client):
+    _, child = create_parent_and_child(client, session)
+
+    response = client.post(
+        f"/api/students/{child['id']}/essays",
+        json={
+            "title": "我的一天",
+            "draft": "请帮我写作文。我想直接生成一篇完整作文，不想自己写。",
+            "entry": "existing_draft",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "不能替你写完整作文" in response.json()["detail"]
+    assert session.exec(
+        select(ProductEvent).where(ProductEvent.event_type == "ai_feedback_failed")
+    ).all() == []
 
 
 def test_ai_feedback_failures_record_product_events(session, client, monkeypatch):

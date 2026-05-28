@@ -21,6 +21,7 @@ from app.services.gamification import settle_task
 from app.services.llm_provider import LLMProvider
 
 router = APIRouter(tags=["essays"])
+DAILY_LIMIT_ERROR_MESSAGE = "daily limit exceeded"
 
 
 class EssayCreate(BaseModel):
@@ -34,6 +35,15 @@ class EssayRevisionCreate(BaseModel):
     completed_tasks: list[str] = Field(default_factory=list)
     skipped_tasks: list[str] = Field(default_factory=list)
     duration_seconds: int | None = Field(default=None, ge=0)
+
+
+def _is_ai_feedback_failure(log) -> bool:
+    return bool(
+        log
+        and log.validation_ok is False
+        and log.error_message
+        and log.error_message != DAILY_LIMIT_ERROR_MESSAGE
+    )
 
 
 @router.post("/api/students/{student_id}/essays", status_code=201)
@@ -61,18 +71,6 @@ async def create_essay(
         )
         feedback = feedback_result.output
     except ValueError as exc:
-        session.rollback()
-        try:
-            record_product_event(
-                session,
-                "ai_feedback_failed",
-                parent_id=student.parent_id,
-                student_id=student.id,
-                payload={"task_type": "essay", "error_category": "exception"},
-            )
-            session.commit()
-        except Exception:
-            session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception:
         session.rollback()
@@ -88,6 +86,17 @@ async def create_essay(
         except Exception:
             session.rollback()
         raise
+    if _is_ai_feedback_failure(feedback_result.log):
+        try:
+            record_product_event(
+                session,
+                "ai_feedback_failed",
+                parent_id=student.parent_id,
+                student_id=student.id,
+                payload={"task_type": "essay", "error_category": "exception"},
+            )
+        except Exception:
+            pass
     essay = Essay(student_id=student_id, title=request.title, status=REVISION_REQUESTED_STATUS)
     session.add(essay)
     session.flush()
@@ -185,6 +194,17 @@ async def submit_revision(
             session.rollback()
         raise
     comparison = comparison_result.output
+    if _is_ai_feedback_failure(comparison_result.log):
+        try:
+            record_product_event(
+                session,
+                "ai_feedback_failed",
+                parent_id=student.parent_id,
+                student_id=student.id,
+                payload={"task_type": "essay", "error_category": "exception"},
+            )
+        except Exception:
+            pass
     revision = EssayVersion(
         essay_id=essay_id,
         version_label="revision",

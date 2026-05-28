@@ -16,12 +16,22 @@ from app.services.recommendations import choose_today_tasks
 router = APIRouter(prefix="/api/students", tags=["sentences"])
 
 SENTENCE_ABILITY_DELTA_FALLBACK = {"expression": 2, "observation": 2}
+DAILY_LIMIT_ERROR_MESSAGE = "daily limit exceeded"
 
 
 class SentenceTrainingCreate(BaseModel):
     source_sentence: str = Field(min_length=1, max_length=500)
     upgraded_sentence: str = Field(min_length=1, max_length=500)
     focus: SentenceFocus
+
+
+def _is_ai_feedback_failure(log) -> bool:
+    return bool(
+        log
+        and log.validation_ok is False
+        and log.error_message
+        and log.error_message != DAILY_LIMIT_ERROR_MESSAGE
+    )
 
 
 @router.post("/{student_id}/sentences", status_code=201)
@@ -64,6 +74,17 @@ async def create_sentence_training(
             session.rollback()
         raise
     feedback = feedback_result.output
+    if _is_ai_feedback_failure(feedback_result.log):
+        try:
+            record_product_event(
+                session,
+                "ai_feedback_failed",
+                parent_id=student.parent_id,
+                student_id=student.id,
+                payload={"task_type": "sentence", "error_category": "exception"},
+            )
+        except Exception:
+            pass
     training = SentenceTraining(
         student_id=student_id,
         source_sentence=request.source_sentence,
