@@ -1,9 +1,14 @@
 from hashlib import sha256
 
+from fastapi.testclient import TestClient
 from sqlalchemy import update
 from sqlmodel import select
 
+from app.api.deps import get_db_session
 from app.api.routes import alpha as alpha_routes
+from app.api.routes import assessment as assessment_routes
+from app.api.routes import essays as essay_routes
+from app.api.routes import sentences as sentence_routes
 from app.domain.models import (
     AlphaInviteCode,
     Assessment,
@@ -15,6 +20,7 @@ from app.domain.models import (
     ProductEvent,
     SentenceTraining,
 )
+from app.main import create_app
 
 
 def hash_code(code: str) -> str:
@@ -281,6 +287,176 @@ def test_product_event_payload_sanitizes_nested_sensitive_keys(session, client):
     assert not contains_key(event.payload, "school")
     assert not contains_key(event.payload, "address")
     assert not contains_key(event.payload, "photo")
+
+
+def test_assessment_completion_records_product_event(session, client):
+    _, child = create_parent_and_child(client, session)
+
+    response = client.post(
+        f"/api/students/{child['id']}/assessment",
+        json={
+            "sentence_before": "公园很美。",
+            "sentence_after": "公园里的花红红的，风一吹就轻轻摇。",
+            "short_writing": "我学会了骑车。刚开始我很害怕，后来爸爸扶着我练，我终于能骑一小段了。",
+        },
+    )
+
+    assert response.status_code == 201
+    event = session.exec(
+        select(ProductEvent).where(ProductEvent.event_type == "assessment_completed")
+    ).one()
+    assert event.student_id == child["id"]
+    assert event.payload == {
+        "target_type": "assessment",
+        "target_id": response.json()["assessment"]["id"],
+        "task_type": "assessment",
+        "status": "completed",
+    }
+    assert not contains_key(event.payload, "short_writing")
+    assert not contains_key(event.payload, "sentence_after")
+    assert not contains_key(event.payload, "ai_feedback")
+    assert not contains_key(event.payload, "feedback")
+
+
+def test_sentence_completion_records_product_event(session, client):
+    _, child = create_parent_and_child(client, session)
+
+    response = client.post(
+        f"/api/students/{child['id']}/sentences",
+        json={
+            "source_sentence": "公园很美。",
+            "upgraded_sentence": "清晨的公园里，荷叶上的水珠一闪一闪，像小灯泡。",
+            "focus": "加细节",
+        },
+    )
+
+    assert response.status_code == 201
+    event = session.exec(
+        select(ProductEvent).where(
+            ProductEvent.event_type == "sentence_training_completed"
+        )
+    ).one()
+    assert event.student_id == child["id"]
+    assert event.payload == {
+        "target_type": "sentence_training",
+        "target_id": response.json()["training"]["id"],
+        "task_type": "sentence",
+        "status": "completed",
+    }
+
+
+def test_essay_draft_and_revision_record_product_events(session, client):
+    _, child = create_parent_and_child(client, session)
+
+    draft_response = client.post(
+        f"/api/students/{child['id']}/essays",
+        json={
+            "title": "我学会了骑车",
+            "draft": "我学会了骑车。刚开始我很害怕。后来爸爸扶着我练，我终于能骑一小段了。",
+            "entry": "existing_draft",
+        },
+    )
+    assert draft_response.status_code == 201
+    essay_id = draft_response.json()["essay"]["id"]
+
+    revision_response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json={
+            "content": "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。爸爸松手后，我摇摇晃晃骑过了花坛。",
+            "completed_tasks": ["给第二段加一个动作描写"],
+        },
+    )
+
+    assert revision_response.status_code == 201
+    draft_event = session.exec(
+        select(ProductEvent).where(
+            ProductEvent.event_type == "essay_draft_feedback_completed"
+        )
+    ).one()
+    revision_event = session.exec(
+        select(ProductEvent).where(
+            ProductEvent.event_type == "essay_revision_feedback_completed"
+        )
+    ).one()
+    assert draft_event.payload == {
+        "target_type": "essay_draft",
+        "target_id": draft_response.json()["first_draft"]["id"],
+        "task_type": "essay",
+        "status": "completed",
+    }
+    assert revision_event.payload == {
+        "target_type": "essay_revision",
+        "target_id": revision_response.json()["revision"]["id"],
+        "task_type": "essay",
+        "status": "completed",
+    }
+    assert not contains_key(draft_event.payload, "content")
+    assert not contains_key(draft_event.payload, "ai_feedback")
+    assert not contains_key(revision_event.payload, "content")
+    assert not contains_key(revision_event.payload, "ai_feedback")
+
+
+def test_ai_feedback_failures_record_product_events(session, client, monkeypatch):
+    _, child = create_parent_and_child(client, session)
+
+    async def raise_assessment_failure(*args, **kwargs):
+        raise RuntimeError("assessment failed")
+
+    async def raise_sentence_failure(*args, **kwargs):
+        raise RuntimeError("sentence failed")
+
+    async def raise_essay_failure(*args, **kwargs):
+        raise RuntimeError("essay failed")
+
+    monkeypatch.setattr(
+        assessment_routes, "complete_entry_assessment", raise_assessment_failure
+    )
+    monkeypatch.setattr(
+        sentence_routes, "sentence_upgrade_feedback", raise_sentence_failure
+    )
+    monkeypatch.setattr(essay_routes, "essay_feedback", raise_essay_failure)
+
+    app = create_app()
+    app.dependency_overrides[get_db_session] = lambda: session
+
+    with TestClient(app, raise_server_exceptions=False) as test_client:
+        assessment_response = test_client.post(
+            f"/api/students/{child['id']}/assessment",
+            json={
+                "sentence_before": "公园很美。",
+                "sentence_after": "公园里的花红红的，风一吹就轻轻摇。",
+                "short_writing": "我学会了骑车。刚开始我很害怕，后来爸爸扶着我练，我终于能骑一小段了。",
+            },
+        )
+        sentence_response = test_client.post(
+            f"/api/students/{child['id']}/sentences",
+            json={
+                "source_sentence": "公园很美。",
+                "upgraded_sentence": "清晨的公园里，荷叶上的水珠一闪一闪，像小灯泡。",
+                "focus": "加细节",
+            },
+        )
+        essay_response = test_client.post(
+            f"/api/students/{child['id']}/essays",
+            json={
+                "title": "我学会了骑车",
+                "draft": "我学会了骑车。刚开始我很害怕。后来爸爸扶着我练，我终于能骑一小段了。",
+                "entry": "existing_draft",
+            },
+        )
+    app.dependency_overrides.clear()
+
+    assert assessment_response.status_code == 500
+    assert sentence_response.status_code == 500
+    assert essay_response.status_code == 500
+    events = session.exec(
+        select(ProductEvent).where(ProductEvent.event_type == "ai_feedback_failed")
+    ).all()
+    assert [event.payload for event in events] == [
+        {"task_type": "assessment", "error_category": "exception"},
+        {"task_type": "sentence", "error_category": "exception"},
+        {"task_type": "essay", "error_category": "exception"},
+    ]
 
 
 def test_feedback_reaction_upserts_assessment_target(session, client):

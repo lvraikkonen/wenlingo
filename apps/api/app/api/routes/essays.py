@@ -4,6 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.api.deps import get_db_session, get_llm_provider
+from app.api.routes.alpha import record_product_event
 from app.core.config import Settings, get_settings
 from app.domain.enums import TaskType
 from app.domain.models import AbilityProfile, Essay, EssayVersion, StudentProfile
@@ -60,7 +61,33 @@ async def create_essay(
         )
         feedback = feedback_result.output
     except ValueError as exc:
+        session.rollback()
+        try:
+            record_product_event(
+                session,
+                "ai_feedback_failed",
+                parent_id=student.parent_id,
+                student_id=student.id,
+                payload={"task_type": "essay", "error_category": "exception"},
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception:
+        session.rollback()
+        try:
+            record_product_event(
+                session,
+                "ai_feedback_failed",
+                parent_id=student.parent_id,
+                student_id=student.id,
+                payload={"task_type": "essay", "error_category": "exception"},
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+        raise
     essay = Essay(student_id=student_id, title=request.title, status=REVISION_REQUESTED_STATUS)
     session.add(essay)
     session.flush()
@@ -73,6 +100,21 @@ async def create_essay(
     )
     session.add(version)
     session.flush()
+    try:
+        record_product_event(
+            session,
+            "essay_draft_feedback_completed",
+            parent_id=student.parent_id,
+            student_id=student.id,
+            payload={
+                "target_type": "essay_draft",
+                "target_id": version.id,
+                "task_type": "essay",
+                "status": "completed",
+            },
+        )
+    except Exception:
+        pass
     ability_deltas = draft_ability_deltas(len(feedback.improvements))
     apply_ability_delta(session, ability, ability_deltas, TaskType.essay, version.id)
     session.add(ability)
@@ -117,16 +159,31 @@ async def submit_revision(
     ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == essay.student_id)).first()
     if not student or not ability:
         raise HTTPException(status_code=404, detail="student not found")
-    comparison_result = await essay_revision_comparison(
-        provider,
-        first_draft.content,
-        request.content,
-        session=session,
-        prompt_version=settings.llm_prompt_version,
-        student_id=essay.student_id,
-        daily_limit_enabled=settings.llm_daily_limit_enabled,
-        daily_limit_per_student_task=settings.llm_daily_limit_per_student_task,
-    )
+    try:
+        comparison_result = await essay_revision_comparison(
+            provider,
+            first_draft.content,
+            request.content,
+            session=session,
+            prompt_version=settings.llm_prompt_version,
+            student_id=essay.student_id,
+            daily_limit_enabled=settings.llm_daily_limit_enabled,
+            daily_limit_per_student_task=settings.llm_daily_limit_per_student_task,
+        )
+    except Exception:
+        session.rollback()
+        try:
+            record_product_event(
+                session,
+                "ai_feedback_failed",
+                parent_id=student.parent_id,
+                student_id=student.id,
+                payload={"task_type": "essay", "error_category": "exception"},
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+        raise
     comparison = comparison_result.output
     revision = EssayVersion(
         essay_id=essay_id,
@@ -144,6 +201,21 @@ async def submit_revision(
     except IntegrityError as exc:
         session.rollback()
         raise HTTPException(status_code=409, detail="essay already settled") from exc
+    try:
+        record_product_event(
+            session,
+            "essay_revision_feedback_completed",
+            parent_id=student.parent_id,
+            student_id=student.id,
+            payload={
+                "target_type": "essay_revision",
+                "target_id": revision.id,
+                "task_type": "essay",
+                "status": "completed",
+            },
+        )
+    except Exception:
+        pass
     ability_deltas = revision_ability_deltas(len(comparison.evidence))
     apply_ability_delta(session, ability, ability_deltas, TaskType.essay, revision.id)
     event = settle_task(

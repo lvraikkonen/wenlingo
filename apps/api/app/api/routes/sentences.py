@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.api.deps import get_db_session, get_llm_provider
+from app.api.routes.alpha import record_product_event
 from app.core.config import Settings, get_settings
 from app.domain.enums import SentenceFocus, TaskType
 from app.domain.models import AbilityProfile, SentenceTraining, StudentProfile
@@ -36,17 +37,32 @@ async def create_sentence_training(
     if not student or not ability:
         raise HTTPException(status_code=404, detail="student not found")
     focus = request.focus.value
-    feedback_result = await sentence_upgrade_feedback(
-        provider=provider,
-        source_sentence=request.source_sentence,
-        upgraded_sentence=request.upgraded_sentence,
-        focus=focus,
-        session=session,
-        prompt_version=settings.llm_prompt_version,
-        student_id=student_id,
-        daily_limit_enabled=settings.llm_daily_limit_enabled,
-        daily_limit_per_student_task=settings.llm_daily_limit_per_student_task,
-    )
+    try:
+        feedback_result = await sentence_upgrade_feedback(
+            provider=provider,
+            source_sentence=request.source_sentence,
+            upgraded_sentence=request.upgraded_sentence,
+            focus=focus,
+            session=session,
+            prompt_version=settings.llm_prompt_version,
+            student_id=student_id,
+            daily_limit_enabled=settings.llm_daily_limit_enabled,
+            daily_limit_per_student_task=settings.llm_daily_limit_per_student_task,
+        )
+    except Exception:
+        session.rollback()
+        try:
+            record_product_event(
+                session,
+                "ai_feedback_failed",
+                parent_id=student.parent_id,
+                student_id=student.id,
+                payload={"task_type": "sentence", "error_category": "exception"},
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+        raise
     feedback = feedback_result.output
     training = SentenceTraining(
         student_id=student_id,
@@ -57,6 +73,21 @@ async def create_sentence_training(
     )
     session.add(training)
     session.flush()
+    try:
+        record_product_event(
+            session,
+            "sentence_training_completed",
+            parent_id=student.parent_id,
+            student_id=student.id,
+            payload={
+                "target_type": "sentence_training",
+                "target_id": training.id,
+                "task_type": "sentence",
+                "status": "completed",
+            },
+        )
+    except Exception:
+        pass
     ability_deltas = feedback.ability_delta
     if not any(
         ability_name in VALID_ABILITY_NAMES and raw_delta > 0

@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.api.deps import get_db_session, get_llm_provider
+from app.api.routes.alpha import record_product_event
 from app.core.config import Settings, get_settings
 from app.domain.models import AbilityProfile, StudentProfile
 from app.services.assessment import complete_entry_assessment
@@ -55,6 +56,21 @@ async def create_assessment(
             "settlement": settlement_payload,
             "game_event": settlement_payload,
         }
+        try:
+            record_product_event(
+                session,
+                "assessment_completed",
+                parent_id=student.parent_id,
+                student_id=student.id,
+                payload={
+                    "target_type": "assessment",
+                    "target_id": result.assessment.id,
+                    "task_type": "assessment",
+                    "status": "completed",
+                },
+            )
+        except Exception:
+            pass
         session.commit()
         return response_payload
     except ValueError as exc:
@@ -65,4 +81,15 @@ async def create_assessment(
         raise
     except Exception:
         session.rollback()
+        try:
+            record_product_event(
+                session,
+                "ai_feedback_failed",
+                parent_id=student.parent_id if student else None,
+                student_id=student_id,
+                payload={"task_type": "assessment", "error_category": "exception"},
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
         raise
