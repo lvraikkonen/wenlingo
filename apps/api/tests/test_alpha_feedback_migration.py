@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 def test_alpha_feedback_observation_has_migration():
@@ -7,7 +8,12 @@ def test_alpha_feedback_observation_has_migration():
     )
     migration_text = migration_path.read_text(encoding="utf-8")
 
-    assert "20260527_alpha_feedback_observation" in migration_text
+    revision_match = re.search(r'^revision = "([^"]+)"$', migration_text, re.MULTILINE)
+    assert revision_match is not None
+    revision = revision_match.group(1)
+
+    assert revision == "20260527_alpha_feedback_obs"
+    assert len(revision) <= 32
     assert 'down_revision = "20260521_assessment_artifacts"' in migration_text
     assert "alphainvitecode" in migration_text
     assert "productevent" in migration_text
