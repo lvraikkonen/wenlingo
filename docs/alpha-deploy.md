@@ -4,7 +4,44 @@ Date: 2026-05-25
 
 ## Purpose
 
-Deploy V0.4.1a for 3-5 trusted Alpha families on Railway.
+Deploy V0.4.1a for 3-5 trusted Alpha families on Railway, with the V0.4.1b feedback and observation addendum.
+
+## V0.4.1b Alpha Feedback and Observation
+
+Required env:
+
+```text
+ALPHA_ADMIN_TOKEN=<strong manual token>
+```
+
+Invite generation:
+
+```bash
+cd apps/api
+uv run python -m app.ops.create_alpha_invites --count 5 --label-prefix "Alpha Family" --issued-to-note "May 2026 invited family"
+```
+
+Legacy parent binding:
+
+```bash
+uv run python -m app.ops.bind_alpha_invite --parent-id <parent-id> --code <raw-code> --note "V0.4.1a legacy family"
+```
+
+Smoke tests:
+
+- `/alpha/start` valid invite
+- `/alpha/start` consumed invite rejected
+- `/parent/children` continuation for existing parent
+- assessment reaction save
+- summary feedback save
+- `/admin/alpha` token gate
+- `/admin/alpha` overview and family timeline
+
+Privacy boundary:
+
+```text
+Admin Alpha Lite and ProductEvent must not show or store child writing text, upgraded sentence text, essay text, AI feedback body, full invite code, real full name, school, address, phone, or photo.
+```
 
 ## Railway Project Layout
 
