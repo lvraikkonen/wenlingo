@@ -5,6 +5,8 @@ import type {
   AlphaEventCreate,
   AlphaInviteValidationResponse,
   AlphaParentResponse,
+  AdminAlphaFamilyDetail,
+  AdminAlphaOverviewRow,
   DashboardResponse,
   DemoLoginResponse,
   FeedbackReactionTargetType,
@@ -336,6 +338,29 @@ export function saveParentSummaryFeedback(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function getAdminAlphaOverview(
+  token: string,
+): Promise<{ families: AdminAlphaOverviewRow[] }> {
+  return requestJson<{ families: AdminAlphaOverviewRow[] }>(
+    "/api/admin/alpha/overview",
+    {
+      headers: { "X-Alpha-Admin-Token": token },
+    },
+  );
+}
+
+export function getAdminAlphaFamily(
+  token: string,
+  parentId: string,
+): Promise<AdminAlphaFamilyDetail> {
+  return requestJson<AdminAlphaFamilyDetail>(
+    `/api/admin/alpha/families/${parentId}`,
+    {
+      headers: { "X-Alpha-Admin-Token": token },
     },
   );
 }

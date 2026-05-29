@@ -128,3 +128,42 @@ export type SavedFeedbackReaction = {
 };
 
 export type ParentSummaryUsefulness = "helpful" | "not_helpful";
+
+export type AdminAlphaOverviewRow = {
+  invite_id: string;
+  invite_label: string;
+  invite_status: string;
+  parent_id: string | null;
+  parent_display_name: string | null;
+  child_count: number;
+  funnel_stage: string;
+  assessment_completed_count: number;
+  summary_viewed: boolean;
+  reaction_counts: Record<string, number>;
+  latest_parent_feedback: string | null;
+  last_event_at: string | null;
+};
+
+export type AdminAlphaEvent = {
+  id: string;
+  event_type: string;
+  created_at: string;
+  payload: Record<string, unknown>;
+};
+
+export type AdminAlphaFamilyDetail = {
+  parent: {
+    id: string;
+    display_name: string;
+  };
+  children: Array<{
+    id: string;
+    grade_label: string;
+  }>;
+  events: AdminAlphaEvent[];
+  reaction_counts: Record<string, number>;
+  parent_feedback: Array<{
+    student_id: string;
+    usefulness: string;
+  }>;
+};

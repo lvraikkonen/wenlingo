@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import (
+    admin_alpha,
     alpha,
     assessment,
     auth,
@@ -38,6 +39,7 @@ def create_app() -> FastAPI:
         return {"service": "wenlingo-api", "status": "ok"}
 
     app.include_router(auth.router)
+    app.include_router(admin_alpha.router)
     app.include_router(alpha.router)
     app.include_router(reactions.router)
     app.include_router(assessment.router)

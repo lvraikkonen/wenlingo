@@ -19,6 +19,7 @@ from app.domain.models import (
     ParentUser,
     ProductEvent,
     SentenceTraining,
+    StudentProfile,
 )
 from app.main import create_app
 
@@ -734,3 +735,266 @@ def test_event_logging_failure_does_not_break_child_creation(
     children_response = client.get(f"/api/alpha/parents/{parent['id']}/children")
     assert children_response.status_code == 200
     assert [row["id"] for row in children_response.json()["children"]] == [child["id"]]
+
+
+def create_admin_client(session, monkeypatch, token: str = "secret"):
+    monkeypatch.setenv("ALPHA_ADMIN_TOKEN", token)
+    app = create_app()
+    app.dependency_overrides[get_db_session] = lambda: session
+    return app
+
+
+def seed_admin_family(session):
+    invite = AlphaInviteCode(
+        code_hash=hash_code("ALPHA-ADMIN"),
+        label="家庭 Admin",
+        status="consumed",
+        issued_to_note="private note",
+    )
+    parent = ParentUser(
+        email="private-parent@example.com",
+        display_name="观察家长",
+    )
+    session.add(invite)
+    session.add(parent)
+    session.flush()
+    invite.consumed_by_parent_id = parent.id
+    child = StudentProfile(
+        parent_id=parent.id,
+        name="小观察",
+        grade_label="四年级",
+        persona="real_child",
+        is_real_child=True,
+    )
+    session.add(child)
+    session.flush()
+    session.add(
+        Assessment(
+            student_id=child.id,
+            sentence_before="公园很美。",
+            sentence_after="公园里的花红红的。",
+            short_writing="孩子写作正文不能出现在管理端",
+            summary="summary",
+        )
+    )
+    session.add(
+        SentenceTraining(
+            student_id=child.id,
+            source_sentence="原句不能出现",
+            upgraded_sentence="升级句不能出现",
+            focus="加细节",
+            ai_feedback={"body": "AI feedback body should stay private"},
+        )
+    )
+    essay = Essay(student_id=child.id, title="题目")
+    session.add(essay)
+    session.flush()
+    session.add(
+        EssayVersion(
+            essay_id=essay.id,
+            version_label="first_draft",
+            content="作文正文不能出现在管理端",
+            ai_feedback={"body": "Essay AI feedback body should stay private"},
+        )
+    )
+    session.add(
+        ProductEvent(
+            event_type="invite_code_validated",
+            invite_code_id=invite.id,
+            payload={
+                "path": "/alpha/start",
+                "status": "validated",
+                "target_type": "invite",
+                "target_id": "invite-validated",
+                "task_type": "onboarding",
+                "error_category": "none",
+                "summary_viewed": True,
+                "reaction": "positive",
+                "usefulness": "helpful",
+                "child_count": 1,
+                "essay_text": "unsafe stored writing text",
+                "ai_feedback": "unsafe stored AI feedback body",
+                "invite_code": "ALPHA-SECRET-999",
+                "phone": "13800000000",
+                "school": "Unsafe School",
+                "address": "Unsafe Address",
+                "photo": "unsafe-photo.jpg",
+            },
+        )
+    )
+    session.add(
+        ProductEvent(
+            event_type="alpha_parent_created",
+            parent_id=parent.id,
+            invite_code_id=invite.id,
+            payload={"status": "created"},
+        )
+    )
+    session.add(
+        ProductEvent(
+            event_type="assessment_completed",
+            parent_id=parent.id,
+            student_id=child.id,
+            payload={
+                "target_type": "assessment",
+                "target_id": "assessment-1",
+                "status": "completed",
+            },
+        )
+    )
+    session.add(
+        ProductEvent(
+            event_type="summary_viewed",
+            parent_id=parent.id,
+            student_id=child.id,
+            payload={"summary_viewed": True, "status": "viewed"},
+        )
+    )
+    session.add(
+        FeedbackReaction(
+            parent_id=parent.id,
+            student_id=child.id,
+            target_type="assessment",
+            target_id="assessment-1",
+            reaction="positive",
+        )
+    )
+    session.add(
+        FeedbackReaction(
+            parent_id=parent.id,
+            student_id=child.id,
+            target_type="sentence_training",
+            target_id="sentence-1",
+            reaction="negative",
+        )
+    )
+    session.add(
+        ParentFeedback(
+            parent_id=parent.id,
+            student_id=child.id,
+            target_type="alpha_summary",
+            target_id=child.id,
+            usefulness="helpful",
+        )
+    )
+    session.commit()
+    return invite, parent, child
+
+
+def test_admin_overview_requires_alpha_admin_token(session, monkeypatch):
+    app = create_admin_client(session, monkeypatch)
+
+    with TestClient(app) as admin_client:
+        missing = admin_client.get("/api/admin/alpha/overview")
+        wrong = admin_client.get(
+            "/api/admin/alpha/overview",
+            headers={"X-Alpha-Admin-Token": "wrong"},
+        )
+        correct = admin_client.get(
+            "/api/admin/alpha/overview",
+            headers={"X-Alpha-Admin-Token": "secret"},
+        )
+
+    assert missing.status_code in {401, 403}
+    assert wrong.status_code in {401, 403}
+    assert correct.status_code == 200
+
+
+def test_admin_overview_returns_family_funnel_without_sensitive_body(
+    session, monkeypatch
+):
+    invite, parent, _ = seed_admin_family(session)
+    app = create_admin_client(session, monkeypatch)
+
+    with TestClient(app) as admin_client:
+        response = admin_client.get(
+            "/api/admin/alpha/overview",
+            headers={"X-Alpha-Admin-Token": "secret"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    row = body["families"][0]
+    assert row["invite_id"] == invite.id
+    assert row["invite_label"] == "家庭 Admin"
+    assert row["invite_status"] == "consumed"
+    assert row["parent_id"] == parent.id
+    assert row["parent_display_name"] == "观察家长"
+    assert row["child_count"] == 1
+    assert row["funnel_stage"] == "summary_viewed"
+    assert row["assessment_completed_count"] == 1
+    assert row["summary_viewed"] is True
+    assert row["reaction_counts"] == {"negative": 1, "positive": 1}
+    assert row["latest_parent_feedback"] == "helpful"
+    assert row["last_event_at"] is not None
+
+    serialized = str(body)
+    assert "孩子写作正文不能出现在管理端" not in serialized
+    assert "作文正文不能出现在管理端" not in serialized
+    assert "AI feedback body should stay private" not in serialized
+    assert "Essay AI feedback body should stay private" not in serialized
+
+
+def test_admin_family_detail_returns_privacy_safe_timeline(session, monkeypatch):
+    _, parent, _ = seed_admin_family(session)
+    app = create_admin_client(session, monkeypatch)
+
+    with TestClient(app) as admin_client:
+        response = admin_client.get(
+            f"/api/admin/alpha/families/{parent.id}",
+            headers={"X-Alpha-Admin-Token": "secret"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["parent"]["id"] == parent.id
+    assert body["parent"]["display_name"] == "观察家长"
+    assert len(body["children"]) == 1
+    assert body["children"][0] == {"id": body["children"][0]["id"], "grade_label": "四年级"}
+    assert "name" not in body["children"][0]
+    assert body["reaction_counts"] == {"negative": 1, "positive": 1}
+    assert body["parent_feedback"] == [{"student_id": body["children"][0]["id"], "usefulness": "helpful"}]
+    assert [event["created_at"] for event in body["events"]] == sorted(
+        event["created_at"] for event in body["events"]
+    )
+    event_types = [event["event_type"] for event in body["events"]]
+    assert "invite_code_validated" in event_types
+    assert "alpha_parent_created" in event_types
+    assert "assessment_completed" in event_types
+    assert "summary_viewed" in event_types
+    invite_event = next(
+        event for event in body["events"] if event["event_type"] == "invite_code_validated"
+    )
+    assert invite_event["payload"] == {
+        "path": "/alpha/start",
+        "status": "validated",
+        "target_type": "invite",
+        "target_id": "invite-validated",
+        "task_type": "onboarding",
+        "error_category": "none",
+        "summary_viewed": True,
+        "reaction": "positive",
+        "usefulness": "helpful",
+        "child_count": 1,
+    }
+    assessment_event = next(
+        event for event in body["events"] if event["event_type"] == "assessment_completed"
+    )
+    assert assessment_event["payload"] == {
+        "target_type": "assessment",
+        "target_id": "assessment-1",
+        "status": "completed",
+    }
+
+    serialized = str(body)
+    assert "小观察" not in serialized
+    assert "unsafe stored writing text" not in serialized
+    assert "unsafe stored AI feedback body" not in serialized
+    assert "ALPHA-SECRET-999" not in serialized
+    assert "13800000000" not in serialized
+    assert "Unsafe School" not in serialized
+    assert "Unsafe Address" not in serialized
+    assert "unsafe-photo.jpg" not in serialized
+    assert "孩子写作正文不能出现在管理端" not in serialized
+    assert "作文正文不能出现在管理端" not in serialized
+    assert "AI feedback body should stay private" not in serialized
