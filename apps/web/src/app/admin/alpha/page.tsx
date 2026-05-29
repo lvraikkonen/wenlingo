@@ -33,7 +33,6 @@ export default function AdminAlphaPage() {
     if (!storedToken) {
       return;
     }
-    setTokenInput(storedToken);
     void loadOverview(storedToken);
   }, []);
 
