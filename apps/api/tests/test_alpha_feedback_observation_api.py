@@ -578,6 +578,7 @@ def test_feedback_reaction_upserts_assessment_target(session, client):
             },
         )
         assert response.status_code == 201
+        assert response.json()["reaction"]["reaction"] == reaction
 
     reactions = session.exec(select(FeedbackReaction)).all()
     assert len(reactions) == 1
@@ -588,8 +589,8 @@ def test_feedback_reaction_upserts_assessment_target(session, client):
             ProductEvent.event_type == "child_feedback_reaction_submitted"
         )
     ).all()
-    assert len(events) == 2
-    assert [event.parent_id for event in events] == [parent["id"], parent["id"]]
+    assert len(events) == 1
+    assert events[0].parent_id == parent["id"]
 
 
 def test_feedback_reaction_rejects_cross_student_target(session, client):
@@ -705,6 +706,7 @@ def test_parent_summary_feedback_upserts_with_parent_child_ownership(session, cl
             json={"usefulness": usefulness, "alpha_session_id": "session-summary"},
         )
         assert response.status_code == 201
+        assert response.json()["feedback"]["usefulness"] == usefulness
 
     feedback_rows = session.exec(select(ParentFeedback)).all()
     assert len(feedback_rows) == 1
@@ -713,6 +715,144 @@ def test_parent_summary_feedback_upserts_with_parent_child_ownership(session, cl
     assert feedback_rows[0].target_type == "alpha_summary"
     assert feedback_rows[0].target_id == child["id"]
     assert feedback_rows[0].usefulness == "not_helpful"
+    events = session.exec(
+        select(ProductEvent).where(
+            ProductEvent.event_type == "parent_summary_feedback_submitted"
+        )
+    ).all()
+    assert len(events) == 1
+    assert events[0].parent_id == parent["id"]
+    assert events[0].student_id == child["id"]
+
+
+def test_parent_summary_returns_existing_feedback_usefulness(session, client):
+    parent, child = create_parent_and_child(client, session)
+    session.add(
+        ParentFeedback(
+            parent_id=parent["id"],
+            student_id=child["id"],
+            target_type="alpha_summary",
+            target_id=child["id"],
+            usefulness="helpful",
+        )
+    )
+    session.commit()
+
+    response = client.get(
+        f"/api/alpha/parents/{parent['id']}/children/{child['id']}/summary"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["usefulness"] == "helpful"
+
+
+def test_learning_responses_return_existing_feedback_reactions(
+    session, client, monkeypatch
+):
+    parent, child = create_parent_and_child(client, session)
+    original_assessment = assessment_routes.complete_entry_assessment
+    original_sentence_apply = sentence_routes.apply_ability_delta
+    original_essay_apply = essay_routes.apply_ability_delta
+
+    async def complete_assessment_with_reaction(**kwargs):
+        result = await original_assessment(**kwargs)
+        kwargs["session"].add(
+            FeedbackReaction(
+                parent_id=parent["id"],
+                student_id=child["id"],
+                target_type="assessment",
+                target_id=result.assessment.id,
+                reaction="positive",
+            )
+        )
+        kwargs["session"].flush()
+        return result
+
+    def add_sentence_reaction(db_session, ability, ability_deltas, source_type, source_id):
+        original_sentence_apply(
+            db_session,
+            ability,
+            ability_deltas,
+            source_type,
+            source_id,
+        )
+        db_session.add(
+            FeedbackReaction(
+                parent_id=parent["id"],
+                student_id=child["id"],
+                target_type="sentence_training",
+                target_id=source_id,
+                reaction="neutral",
+            )
+        )
+        db_session.flush()
+
+    def add_essay_reaction(db_session, ability, ability_deltas, source_type, source_id):
+        original_essay_apply(db_session, ability, ability_deltas, source_type, source_id)
+        version = db_session.get(EssayVersion, source_id)
+        if not version:
+            return
+        db_session.add(
+            FeedbackReaction(
+                parent_id=parent["id"],
+                student_id=child["id"],
+                target_type="essay_draft"
+                if version.version_label == "first_draft"
+                else "essay_revision",
+                target_id=source_id,
+                reaction="negative",
+            )
+        )
+        db_session.flush()
+
+    monkeypatch.setattr(
+        assessment_routes,
+        "complete_entry_assessment",
+        complete_assessment_with_reaction,
+    )
+    monkeypatch.setattr(sentence_routes, "apply_ability_delta", add_sentence_reaction)
+    monkeypatch.setattr(essay_routes, "apply_ability_delta", add_essay_reaction)
+
+    assessment_response = client.post(
+        f"/api/students/{child['id']}/assessment",
+        json={
+            "sentence_before": "公园很美。",
+            "sentence_after": "公园里的花红红的，风一吹就轻轻摇。",
+            "short_writing": "我学会了骑车。刚开始我很害怕，后来爸爸扶着我练，我终于能骑一小段了。",
+        },
+    )
+    sentence_response = client.post(
+        f"/api/students/{child['id']}/sentences",
+        json={
+            "source_sentence": "公园很美。",
+            "upgraded_sentence": "清晨的公园里，荷叶上的水珠一闪一闪，像小灯泡。",
+            "focus": "加细节",
+        },
+    )
+    draft_response = client.post(
+        f"/api/students/{child['id']}/essays",
+        json={
+            "title": "我学会了骑车",
+            "draft": "我学会了骑车。刚开始我很害怕。后来爸爸扶着我练，我终于能骑一小段了。",
+            "entry": "existing_draft",
+        },
+    )
+    revision_response = client.post(
+        f"/api/essays/{draft_response.json()['essay']['id']}/revision",
+        json={
+            "content": "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。爸爸松手后，我摇摇晃晃骑过了花坛。",
+            "completed_tasks": ["给第二段加一个动作描写"],
+        },
+    )
+
+    assert assessment_response.status_code == 201
+    assert sentence_response.status_code == 201
+    assert draft_response.status_code == 201
+    assert revision_response.status_code == 201
+    assert assessment_response.json()["assessment"]["reaction"] == "positive"
+    assert sentence_response.json()["training"]["reaction"] == "neutral"
+    assert draft_response.json()["first_draft"]["reaction"] == "negative"
+    assert revision_response.json()["revision"]["reaction"] == "negative"
 
 
 def test_event_logging_failure_does_not_break_child_creation(

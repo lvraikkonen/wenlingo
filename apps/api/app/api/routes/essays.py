@@ -4,6 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.api.deps import get_db_session, get_llm_provider
+from app.api.feedback_state import feedback_reaction_value
 from app.api.routes.alpha import record_product_event
 from app.core.config import Settings, get_settings
 from app.domain.enums import TaskType
@@ -129,6 +130,12 @@ async def create_essay(
     session.add(ability)
     essay_payload = essay.model_dump()
     version_payload = version.model_dump()
+    version_payload["reaction"] = feedback_reaction_value(
+        session,
+        student.id,
+        "essay_draft",
+        version.id,
+    )
     session.commit()
     return {"essay": essay_payload, "first_draft": version_payload, "feedback": feedback}
 
@@ -255,6 +262,12 @@ async def submit_revision(
     session.add(student)
     session.add(event)
     revision_payload = revision.model_dump()
+    revision_payload["reaction"] = feedback_reaction_value(
+        session,
+        student.id,
+        "essay_revision",
+        revision.id,
+    )
     settlement_payload = event.model_dump()
     session.commit()
     return {"revision": revision_payload, "comparison": comparison, "settlement": settlement_payload}

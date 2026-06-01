@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { CheckCircle2, Loader2, Sparkles } from "lucide-react";
 import { FamilyTopbar } from "../../../../components/FamilyTopbar";
@@ -20,12 +20,19 @@ export default function EssayPage({
   params: Promise<{ studentId: string }>;
 }) {
   const { studentId } = use(params);
+  const activeStudentId = useRef(studentId);
   const [title, setTitle] = useState("");
   const [draft, setDraft] = useState("");
   const [revision, setRevision] = useState("");
   const [essayId, setEssayId] = useState<string | null>(null);
   const [firstDraftId, setFirstDraftId] = useState<string | null>(null);
+  const [firstDraftReaction, setFirstDraftReaction] = useState<
+    EssayResponse["first_draft"]["reaction"]
+  >(null);
   const [revisionResultId, setRevisionResultId] = useState<string | null>(null);
+  const [revisionResultReaction, setRevisionResultReaction] = useState<
+    EssayRevisionResponse["revision"]["reaction"]
+  >(null);
   const [feedback, setFeedback] = useState<null | EssayResponse["feedback"]>(
     null,
   );
@@ -41,6 +48,26 @@ export default function EssayPage({
   const [isRevisionPending, setIsRevisionPending] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    activeStudentId.current = studentId;
+    setTitle("");
+    setDraft("");
+    setRevision("");
+    setEssayId(null);
+    setFirstDraftId(null);
+    setFirstDraftReaction(null);
+    setRevisionResultId(null);
+    setRevisionResultReaction(null);
+    setFeedback(null);
+    setComparison(null);
+    setSettlement(null);
+    setSelectedTasks([]);
+    setRevisionStartedAt(null);
+    setIsFeedbackPending(false);
+    setIsRevisionPending(false);
+    setError("");
+  }, [studentId]);
+
   function toggleTask(instruction: string) {
     setSelectedTasks((current) =>
       current.includes(instruction)
@@ -53,6 +80,7 @@ export default function EssayPage({
     event.preventDefault();
     setIsFeedbackPending(true);
     setError("");
+    const requestStudentId = studentId;
 
     try {
       const result = await createEssay(studentId, {
@@ -61,8 +89,12 @@ export default function EssayPage({
         entry: "existing_draft",
       });
 
+      if (activeStudentId.current !== requestStudentId) {
+        return;
+      }
       setEssayId(result.essay.id);
       setFirstDraftId(result.first_draft?.id ?? null);
+      setFirstDraftReaction(result.first_draft?.reaction ?? null);
       setFeedback(result.feedback);
       setSelectedTasks(
         result.feedback.revision_tasks.map((task) => task.instruction),
@@ -72,10 +104,16 @@ export default function EssayPage({
       setComparison(null);
       setSettlement(null);
       setRevisionResultId(null);
+      setRevisionResultReaction(null);
     } catch {
+      if (activeStudentId.current !== requestStudentId) {
+        return;
+      }
       setError("这次提交没有成功。先别急，检查一下网络后再试一次。");
     } finally {
-      setIsFeedbackPending(false);
+      if (activeStudentId.current === requestStudentId) {
+        setIsFeedbackPending(false);
+      }
     }
   }
 
@@ -88,6 +126,7 @@ export default function EssayPage({
     setIsRevisionPending(true);
     setIsFeedbackPending(false);
     setError("");
+    const requestStudentId = studentId;
 
     try {
       const allTasks =
@@ -106,13 +145,22 @@ export default function EssayPage({
         duration_seconds: durationSeconds,
       });
 
+      if (activeStudentId.current !== requestStudentId) {
+        return;
+      }
       setComparison(result.comparison);
       setSettlement(result.settlement);
       setRevisionResultId(result.revision.id);
+      setRevisionResultReaction(result.revision.reaction ?? null);
     } catch {
+      if (activeStudentId.current !== requestStudentId) {
+        return;
+      }
       setError("这次提交没有成功。先别急，检查一下网络后再试一次。");
     } finally {
-      setIsRevisionPending(false);
+      if (activeStudentId.current === requestStudentId) {
+        setIsRevisionPending(false);
+      }
     }
   }
 
@@ -207,9 +255,11 @@ export default function EssayPage({
             </div>
             {firstDraftId ? (
               <FeedbackReaction
+                key={`${studentId}:essay_draft:${firstDraftId}`}
                 studentId={studentId}
                 targetType="essay_draft"
                 targetId={firstDraftId}
+                initialReaction={firstDraftReaction ?? null}
               />
             ) : null}
           </section>
@@ -262,9 +312,11 @@ export default function EssayPage({
             {comparison && revisionResultId ? (
               <div className="mt-5">
                 <FeedbackReaction
+                  key={`${studentId}:essay_revision:${revisionResultId}`}
                   studentId={studentId}
                   targetType="essay_revision"
                   targetId={revisionResultId}
+                  initialReaction={revisionResultReaction ?? null}
                 />
               </div>
             ) : null}

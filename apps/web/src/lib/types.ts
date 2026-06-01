@@ -99,6 +99,7 @@ export type AlphaAbilityChange = {
 export type AlphaChildSummary = {
   parent_id: string;
   child: AlphaChild;
+  usefulness?: ParentSummaryUsefulness | null;
   assessment_completed: boolean;
   practice_counts: {
     assessments: number;

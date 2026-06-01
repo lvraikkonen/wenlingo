@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ArrowRight, Loader2, RotateCcw, Sparkles } from "lucide-react";
-import { use, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { FeedbackReaction } from "../../../../components/FeedbackReaction";
 import { createAssessment } from "../../../../lib/api";
@@ -164,6 +164,7 @@ export default function AssessmentPage({
   params: Promise<{ studentId: string }>;
 }) {
   const { studentId } = use(params);
+  const activeStudentId = useRef(studentId);
   const [step, setStep] = useState<Step>("intro");
   const [sentenceAfter, setSentenceAfter] = useState("");
   const [shortWriting, setShortWriting] = useState("");
@@ -173,6 +174,17 @@ export default function AssessmentPage({
 
   const canContinueSentence = sentenceAfter.trim().length > 0;
   const canSubmitWriting = shortWriting.trim().length >= 20;
+
+  useEffect(() => {
+    activeStudentId.current = studentId;
+    setStep("intro");
+    setSentenceAfter("");
+    setShortWriting("");
+    setResult(null);
+    setIsSubmitting(false);
+    setError("");
+  }, [studentId]);
+
   const progress = useMemo(
     () =>
       [
@@ -191,6 +203,7 @@ export default function AssessmentPage({
 
     setIsSubmitting(true);
     setError("");
+    const requestStudentId = studentId;
 
     try {
       const response = await createAssessment(studentId, {
@@ -199,12 +212,20 @@ export default function AssessmentPage({
         short_writing: shortWriting,
       });
 
+      if (activeStudentId.current !== requestStudentId) {
+        return;
+      }
       setResult(response);
       setStep("sketch");
     } catch {
+      if (activeStudentId.current !== requestStudentId) {
+        return;
+      }
       setError("这次小试炼没有提交成功。不是你的问题，检查一下网络后再试一次。");
     } finally {
-      setIsSubmitting(false);
+      if (activeStudentId.current === requestStudentId) {
+        setIsSubmitting(false);
+      }
     }
   }
 
@@ -354,9 +375,11 @@ export default function AssessmentPage({
             </div>
             <div className="mt-6">
               <FeedbackReaction
+                key={`${studentId}:assessment:${result.assessment.id}`}
                 studentId={studentId}
                 targetType="assessment"
                 targetId={result.assessment.id}
+                initialReaction={result.assessment.reaction ?? null}
               />
             </div>
             <div className="mt-6 flex flex-wrap items-center gap-3">

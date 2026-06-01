@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.api.deps import get_db_session, get_llm_provider
+from app.api.feedback_state import feedback_reaction_value
 from app.api.routes.alpha import record_product_event
 from app.core.config import Settings, get_settings
 from app.domain.models import AbilityProfile, StudentProfile
@@ -48,6 +49,12 @@ async def create_assessment(
             "summary": result.assessment.summary,
             "sentence_training_id": result.assessment.sentence_training_id,
             "essay_id": result.assessment.essay_id,
+            "reaction": feedback_reaction_value(
+                session,
+                student.id,
+                "assessment",
+                result.assessment.id,
+            ),
         }
         settlement_payload = result.settlement.model_dump()
         response_payload = {

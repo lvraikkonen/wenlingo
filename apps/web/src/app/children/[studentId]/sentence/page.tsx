@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { use, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import { FamilyTopbar } from "../../../../components/FamilyTopbar";
@@ -21,17 +21,28 @@ export default function SentencePage({
   params: Promise<{ studentId: string }>;
 }) {
   const { studentId } = use(params);
+  const activeStudentId = useRef(studentId);
   const [sourceSentence, setSourceSentence] = useState("");
   const [upgradedSentence, setUpgradedSentence] = useState("");
   const [result, setResult] = useState<SentenceTrainingResponse | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    activeStudentId.current = studentId;
+    setSourceSentence("");
+    setUpgradedSentence("");
+    setResult(null);
+    setIsSubmitting(false);
+    setError("");
+  }, [studentId]);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSubmitting(true);
     setError("");
     setResult(null);
+    const requestStudentId = studentId;
 
     try {
       const result = await createSentenceTraining(studentId, {
@@ -40,11 +51,19 @@ export default function SentencePage({
         focus: DEFAULT_SENTENCE_FOCUS,
       });
 
+      if (activeStudentId.current !== requestStudentId) {
+        return;
+      }
       setResult(result);
     } catch {
+      if (activeStudentId.current !== requestStudentId) {
+        return;
+      }
       setError("这次句子练习没有提交成功。先别急，检查一下网络后再试一次。");
     } finally {
-      setIsSubmitting(false);
+      if (activeStudentId.current === requestStudentId) {
+        setIsSubmitting(false);
+      }
     }
   }
 
@@ -142,9 +161,11 @@ export default function SentencePage({
                 <p className="mt-2 text-sm">{result.feedback.next_step}</p>
               </section>
               <FeedbackReaction
+                key={`${studentId}:sentence_training:${result.training.id}`}
                 studentId={studentId}
                 targetType="sentence_training"
                 targetId={result.training.id}
+                initialReaction={result.training.reaction ?? null}
               />
               <SettlementPanel settlement={result.settlement} />
               <nav

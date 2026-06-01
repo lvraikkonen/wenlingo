@@ -66,6 +66,7 @@ export type AssessmentResponse = {
     summary: string;
     sentence_training_id: string;
     essay_id: string;
+    reaction?: FeedbackReactionValue | null;
   };
   ability_sketch: AbilitySketch;
   settlement: Settlement;
@@ -75,6 +76,7 @@ export type AssessmentResponse = {
 export type SentenceTrainingResponse = {
   training: {
     id: string;
+    reaction?: FeedbackReactionValue | null;
   };
   feedback: {
     encouragement: string;
@@ -104,6 +106,7 @@ export type EssayResponse = {
     id: string;
     essay_id: string;
     version_label: "first_draft";
+    reaction?: FeedbackReactionValue | null;
   };
   feedback: {
     strengths: string[];
@@ -120,6 +123,7 @@ export type EssayRevisionResponse = {
     completed_tasks: string[];
     skipped_tasks: string[];
     duration_seconds: number | null;
+    reaction?: FeedbackReactionValue | null;
   };
   comparison: {
     encouragement: string;

@@ -15,15 +15,19 @@ type SummaryPageProps = {
 
 export default function ParentChildSummaryPage({ params }: SummaryPageProps) {
   const { studentId } = use(params);
-  const router = useRouter();
+  const { replace } = useRouter();
   const [data, setData] = useState<AlphaChildSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     const storedParentId = getStoredAlphaParentId();
+    setData(null);
+    setError("");
+    setIsLoading(true);
+
     if (!storedParentId) {
-      router.replace("/alpha/start");
+      replace("/alpha/start");
       return;
     }
 
@@ -59,7 +63,7 @@ export default function ParentChildSummaryPage({ params }: SummaryPageProps) {
     return () => {
       isMounted = false;
     };
-  }, [router, studentId]);
+  }, [replace, studentId]);
 
   const childName = data?.child.name || data?.child.nickname || "孩子";
   const emptyText =
@@ -180,8 +184,10 @@ export default function ParentChildSummaryPage({ params }: SummaryPageProps) {
             )}
             {data.parent_id ? (
               <ParentSummaryFeedback
+                key={`${data.parent_id}:${studentId}`}
                 parentId={data.parent_id}
                 studentId={studentId}
+                initialUsefulness={data.usefulness ?? null}
               />
             ) : null}
           </div>

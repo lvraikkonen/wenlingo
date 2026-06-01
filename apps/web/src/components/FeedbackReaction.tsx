@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { saveFeedbackReaction } from "../lib/api";
 import { getStoredAlphaSessionId } from "../lib/alphaSession";
 import type {
@@ -18,29 +18,64 @@ type FeedbackReactionProps = {
   studentId: string;
   targetType: FeedbackReactionTargetType;
   targetId: string;
+  initialReaction?: FeedbackReactionValue | null;
 };
 
 export function FeedbackReaction({
   studentId,
   targetType,
   targetId,
+  initialReaction = null,
 }: FeedbackReactionProps) {
-  const [selected, setSelected] = useState<FeedbackReactionValue | null>(null);
+  const targetKey = `${studentId}:${targetType}:${targetId}`;
+  const activeTargetKey = useRef(targetKey);
+  const [selected, setSelected] = useState<FeedbackReactionValue | null>(
+    initialReaction,
+  );
+  const [lastConfirmedReaction, setLastConfirmedReaction] =
+    useState<FeedbackReactionValue | null>(initialReaction);
+  const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    activeTargetKey.current = targetKey;
+    setSelected(initialReaction);
+    setLastConfirmedReaction(initialReaction);
+    setIsSaving(false);
+    setError("");
+  }, [initialReaction, targetId, targetKey, targetType]);
+
   async function handleClick(reaction: FeedbackReactionValue) {
+    if (isSaving) {
+      return;
+    }
+
     setSelected(reaction);
     setError("");
+    setIsSaving(true);
+    const saveTargetKey = targetKey;
 
     try {
-      await saveFeedbackReaction(studentId, {
+      const response = await saveFeedbackReaction(studentId, {
         target_type: targetType,
         target_id: targetId,
         reaction,
         alpha_session_id: getStoredAlphaSessionId(),
       });
+      if (activeTargetKey.current !== saveTargetKey) {
+        return;
+      }
+      setLastConfirmedReaction(response.reaction.reaction);
     } catch {
+      if (activeTargetKey.current !== saveTargetKey) {
+        return;
+      }
+      setSelected(lastConfirmedReaction);
       setError("这次没有保存成功，稍后可以再点一次。");
+    } finally {
+      if (activeTargetKey.current === saveTargetKey) {
+        setIsSaving(false);
+      }
     }
   }
 
@@ -57,8 +92,9 @@ export function FeedbackReaction({
             type="button"
             aria-label={option.aria}
             aria-pressed={selected === option.value}
+            disabled={isSaving}
             onClick={() => handleClick(option.value)}
-            className={`inline-flex h-11 w-11 items-center justify-center rounded-lg border text-xl transition ${
+            className={`inline-flex h-11 w-11 items-center justify-center rounded-lg border text-xl transition disabled:cursor-not-allowed disabled:opacity-60 ${
               selected === option.value
                 ? "border-[var(--wen-orange)] bg-[var(--wen-orange-soft)]"
                 : "border-[var(--wen-border)] bg-white"
@@ -69,7 +105,10 @@ export function FeedbackReaction({
         ))}
       </div>
       {error ? (
-        <p className="mt-3 text-sm font-semibold text-[var(--wen-muted)]">
+        <p
+          role="alert"
+          className="mt-3 text-sm font-semibold text-[var(--wen-muted)]"
+        >
           {error}
         </p>
       ) : null}

@@ -96,6 +96,7 @@ def create_feedback_reaction(
             FeedbackReaction.target_id == request.target_id,
         )
     ).first()
+    is_create = reaction is None
     if reaction:
         reaction.reaction = request.reaction
         reaction.parent_id = student.parent_id
@@ -111,21 +112,22 @@ def create_feedback_reaction(
             alpha_session_id=request.alpha_session_id,
         )
     session.add(reaction)
-    try:
-        record_product_event(
-            session,
-            "child_feedback_reaction_submitted",
-            parent_id=student.parent_id,
-            student_id=student_id,
-            alpha_session_id=request.alpha_session_id,
-            payload={
-                "target_type": request.target_type,
-                "target_id": request.target_id,
-                "reaction": request.reaction,
-            },
-        )
-    except Exception:
-        pass
+    if is_create:
+        try:
+            record_product_event(
+                session,
+                "child_feedback_reaction_submitted",
+                parent_id=student.parent_id,
+                student_id=student_id,
+                alpha_session_id=request.alpha_session_id,
+                payload={
+                    "target_type": request.target_type,
+                    "target_id": request.target_id,
+                    "reaction": request.reaction,
+                },
+            )
+        except Exception:
+            pass
     session.commit()
     session.refresh(reaction)
     return {

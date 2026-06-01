@@ -19,6 +19,17 @@ import { ParentSummaryFeedback } from "../src/components/ParentSummaryFeedback";
 import { ALPHA_PARENT_STORAGE_KEY } from "../src/lib/alphaParent";
 import { ALPHA_SESSION_STORAGE_KEY } from "../src/lib/alphaSession";
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return { promise, resolve, reject };
+}
+
 const apiMocks = vi.hoisted(() => ({
   createAssessment: vi.fn(),
   createSentenceTraining: vi.fn(),
@@ -232,6 +243,155 @@ test("clicking a second reaction updates FeedbackReaction selected state", async
   );
 });
 
+test("FeedbackReaction initializes selected state from persisted reaction", () => {
+  render(
+    <FeedbackReaction
+      studentId="s1"
+      targetType="assessment"
+      targetId="assessment-1"
+      initialReaction="neutral"
+    />,
+  );
+
+  expect(screen.getByRole("button", { name: "一般" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(screen.getByRole("button", { name: "有帮助" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+});
+
+test("FeedbackReaction disables buttons while saving and ignores rapid clicks", async () => {
+  const save = deferred<Awaited<ReturnType<typeof apiMocks.saveFeedbackReaction>>>();
+  apiMocks.saveFeedbackReaction.mockReturnValueOnce(save.promise);
+  render(
+    <FeedbackReaction
+      studentId="s1"
+      targetType="assessment"
+      targetId="assessment-1"
+    />,
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "有帮助" }));
+
+  expect(screen.getByRole("button", { name: "有帮助" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "一般" })).toBeDisabled();
+
+  await userEvent.click(screen.getByRole("button", { name: "一般" }));
+  expect(apiMocks.saveFeedbackReaction).toHaveBeenCalledTimes(1);
+
+  save.resolve({
+    reaction: {
+      id: "reaction-1",
+      student_id: "s1",
+      target_type: "assessment",
+      target_id: "assessment-1",
+      reaction: "positive",
+    },
+  });
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "有帮助" })).toBeEnabled(),
+  );
+});
+
+test("FeedbackReaction save failure reverts to last confirmed reaction", async () => {
+  apiMocks.saveFeedbackReaction
+    .mockResolvedValueOnce({
+      reaction: {
+        id: "reaction-1",
+        student_id: "s1",
+        target_type: "assessment",
+        target_id: "assessment-1",
+        reaction: "neutral",
+      },
+    })
+    .mockRejectedValueOnce(new Error("network"));
+  render(
+    <FeedbackReaction
+      studentId="s1"
+      targetType="assessment"
+      targetId="assessment-1"
+      initialReaction="positive"
+    />,
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "一般" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "一般" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    ),
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "没帮助" }));
+
+  expect(
+    await screen.findByText("这次没有保存成功，稍后可以再点一次。"),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "一般" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(screen.getByRole("button", { name: "没帮助" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+});
+
+test("FeedbackReaction resets on target change and ignores stale save completions", async () => {
+  const firstSave = deferred<Awaited<ReturnType<typeof apiMocks.saveFeedbackReaction>>>();
+  apiMocks.saveFeedbackReaction.mockReturnValueOnce(firstSave.promise);
+  const { rerender } = render(
+    <FeedbackReaction
+      studentId="s1"
+      targetType="assessment"
+      targetId="assessment-1"
+      initialReaction={null}
+    />,
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "有帮助" }));
+  expect(screen.getByRole("button", { name: "有帮助" })).toBeDisabled();
+
+  rerender(
+    <FeedbackReaction
+      studentId="s1"
+      targetType="assessment"
+      targetId="assessment-2"
+      initialReaction="negative"
+    />,
+  );
+
+  expect(screen.getByRole("button", { name: "没帮助" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(screen.getByRole("button", { name: "有帮助" })).toBeEnabled();
+
+  firstSave.resolve({
+    reaction: {
+      id: "reaction-1",
+      student_id: "s1",
+      target_type: "assessment",
+      target_id: "assessment-1",
+      reaction: "positive",
+    },
+  });
+  apiMocks.saveFeedbackReaction.mockRejectedValueOnce(new Error("network"));
+
+  await userEvent.click(screen.getByRole("button", { name: "一般" }));
+
+  expect(
+    await screen.findByText("这次没有保存成功，稍后可以再点一次。"),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "没帮助" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+});
+
 test("FeedbackReaction save failure shows a retry message and keeps other controls usable", async () => {
   apiMocks.saveFeedbackReaction.mockRejectedValueOnce(new Error("network"));
   render(
@@ -250,6 +410,9 @@ test("FeedbackReaction save failure shows a retry message and keeps other contro
   expect(
     await screen.findByText("这次没有保存成功，稍后可以再点一次。"),
   ).toBeInTheDocument();
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "这次没有保存成功，稍后可以再点一次。",
+  );
   expect(screen.getByRole("button", { name: "继续学习" })).toBeEnabled();
 });
 
@@ -259,6 +422,120 @@ test("ParentSummaryFeedback renders usefulness choices", () => {
   expect(screen.getByText("这份成长摘要对你有帮助吗？")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "有帮助" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "没帮助" })).toBeInTheDocument();
+});
+
+test("ParentSummaryFeedback initializes selected state from persisted usefulness", () => {
+  render(
+    <ParentSummaryFeedback
+      parentId="parent-1"
+      studentId="s1"
+      initialUsefulness="not_helpful"
+    />,
+  );
+
+  expect(screen.getByRole("button", { name: "没帮助" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(screen.getByRole("button", { name: "有帮助" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+});
+
+test("ParentSummaryFeedback disables buttons while saving and ignores rapid clicks", async () => {
+  const save = deferred<Awaited<ReturnType<typeof apiMocks.saveParentSummaryFeedback>>>();
+  apiMocks.saveParentSummaryFeedback.mockReturnValueOnce(save.promise);
+  render(<ParentSummaryFeedback parentId="parent-1" studentId="s1" />);
+
+  await userEvent.click(screen.getByRole("button", { name: "有帮助" }));
+
+  expect(screen.getByRole("button", { name: "有帮助" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "没帮助" })).toBeDisabled();
+
+  await userEvent.click(screen.getByRole("button", { name: "没帮助" }));
+  expect(apiMocks.saveParentSummaryFeedback).toHaveBeenCalledTimes(1);
+
+  save.resolve({ feedback: { usefulness: "helpful" } });
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "有帮助" })).toBeEnabled(),
+  );
+});
+
+test("ParentSummaryFeedback save failure reverts to last confirmed usefulness", async () => {
+  apiMocks.saveParentSummaryFeedback
+    .mockResolvedValueOnce({ feedback: { usefulness: "not_helpful" } })
+    .mockRejectedValueOnce(new Error("network"));
+  render(
+    <ParentSummaryFeedback
+      parentId="parent-1"
+      studentId="s1"
+      initialUsefulness="helpful"
+    />,
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "没帮助" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "没帮助" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    ),
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "有帮助" }));
+
+  expect(await screen.findByText("反馈没有保存成功，请稍后再试。")).toBeInTheDocument();
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "反馈没有保存成功，请稍后再试。",
+  );
+  expect(screen.getByRole("button", { name: "没帮助" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(screen.getByRole("button", { name: "有帮助" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+});
+
+test("ParentSummaryFeedback resets on parent change and ignores stale save completions", async () => {
+  const firstSave = deferred<Awaited<ReturnType<typeof apiMocks.saveParentSummaryFeedback>>>();
+  apiMocks.saveParentSummaryFeedback.mockReturnValueOnce(firstSave.promise);
+  const { rerender } = render(
+    <ParentSummaryFeedback
+      parentId="parent-1"
+      studentId="s1"
+      initialUsefulness="helpful"
+    />,
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "没帮助" }));
+  expect(screen.getByRole("button", { name: "有帮助" })).toBeDisabled();
+
+  rerender(
+    <ParentSummaryFeedback
+      parentId="parent-2"
+      studentId="s1"
+      initialUsefulness="helpful"
+    />,
+  );
+
+  expect(screen.getByRole("button", { name: "有帮助" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(screen.getByRole("button", { name: "没帮助" })).toBeEnabled();
+
+  firstSave.resolve({ feedback: { usefulness: "not_helpful" } });
+  apiMocks.saveParentSummaryFeedback.mockRejectedValueOnce(new Error("network"));
+
+  await userEvent.click(screen.getByRole("button", { name: "没帮助" }));
+
+  expect(await screen.findByText("反馈没有保存成功，请稍后再试。")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "有帮助" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
 });
 
 test("ParentSummaryFeedback posts parent summary usefulness with alpha session id", async () => {
@@ -312,6 +589,111 @@ test("assessment page renders a feedback reaction after assessment result with a
   });
 });
 
+test("assessment page passes persisted reaction from assessment response", async () => {
+  apiMocks.createAssessment.mockResolvedValueOnce({
+    assessment: {
+      id: "assessment-1",
+      summary: "完成入门小试炼，生成第一张能力草图。",
+      sentence_training_id: "sentence-training-1",
+      essay_id: "essay-1",
+      reaction: "negative",
+    },
+    ability_sketch: {
+      reading_power: 40,
+      specific_writing_power: 46,
+      revision_power: 40,
+    },
+    settlement: {
+      xp_delta: 20,
+      level_after: 1,
+      badge_code: null,
+    },
+  });
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <AssessmentPage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    );
+  });
+
+  await userEvent.click(await screen.findByRole("button", { name: "开始小试炼" }));
+  await userEvent.type(
+    screen.getByLabelText("升级后的句子"),
+    "公园里的花红红的，风一吹就轻轻摇。",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "继续写小作文" }));
+  await userEvent.type(
+    screen.getByLabelText("小写作"),
+    "我学会了骑车。刚开始我很害怕，后来爸爸扶着我练，我终于能骑一小段了。",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "生成能力草图" }));
+
+  expect(await screen.findByRole("button", { name: "没帮助" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+});
+
+test("assessment page ignores stale assessment completion after student route changes", async () => {
+  const assessment = deferred<Awaited<ReturnType<typeof apiMocks.createAssessment>>>();
+  apiMocks.createAssessment.mockReturnValueOnce(assessment.promise);
+  let rerender!: ReturnType<typeof render>["rerender"];
+  await act(async () => {
+    ({ rerender } = render(
+      <Suspense fallback={null}>
+        <AssessmentPage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    ));
+  });
+
+  await userEvent.click(await screen.findByRole("button", { name: "开始小试炼" }));
+  await userEvent.type(
+    screen.getByLabelText("升级后的句子"),
+    "公园里的花红红的，风一吹就轻轻摇。",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "继续写小作文" }));
+  await userEvent.type(
+    screen.getByLabelText("小写作"),
+    "我学会了骑车。刚开始我很害怕，后来爸爸扶着我练，我终于能骑一小段了。",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "生成能力草图" }));
+
+  await act(async () => {
+    rerender(
+      <Suspense fallback={null}>
+        <AssessmentPage params={Promise.resolve({ studentId: "s2" })} />
+      </Suspense>,
+    );
+  });
+
+  await act(async () => {
+    assessment.resolve({
+      assessment: {
+        id: "assessment-old",
+        summary: "旧孩子的能力草图。",
+        sentence_training_id: "sentence-training-old",
+        essay_id: "essay-old",
+        reaction: "positive",
+      },
+      ability_sketch: {
+        reading_power: 40,
+        specific_writing_power: 46,
+        revision_power: 40,
+      },
+      settlement: {
+        xp_delta: 20,
+        level_after: 1,
+        badge_code: null,
+      },
+    });
+  });
+
+  expect(screen.queryByText("旧孩子的能力草图。")).not.toBeInTheDocument();
+  expect(screen.queryByText("第一张能力草图")).not.toBeInTheDocument();
+  expect(screen.queryByText("这次 AI 教练的提示对你有帮助吗？")).not.toBeInTheDocument();
+});
+
 test("sentence page renders a feedback reaction after sentence result with training id", async () => {
   await act(async () => {
     render(
@@ -332,6 +714,85 @@ test("sentence page renders a feedback reaction after sentence result with train
     reaction: "neutral",
     alpha_session_id: "session-1",
   });
+});
+
+test("sentence page passes persisted reaction from sentence response", async () => {
+  apiMocks.createSentenceTraining.mockResolvedValueOnce({
+    training: { id: "training-1", reaction: "neutral" },
+    feedback: {
+      encouragement: "你把画面写得更清楚了。",
+      specific_improvement: "加入了可看见的细节",
+      next_step: "再加一个动作，会更生动。",
+      problem_monsters: ["空泛表达"],
+    },
+    settlement: {
+      xp_delta: 25,
+      level_after: 2,
+      badge_code: "first_sentence_upgrade",
+    },
+  });
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <SentencePage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    );
+  });
+
+  await userEvent.type(await screen.findByLabelText("原句"), "公园很美。");
+  await userEvent.type(screen.getByLabelText("升级后的句子"), "公园里花香很浓。");
+  await userEvent.click(screen.getByRole("button", { name: "提交给 AI 教练" }));
+
+  expect(await screen.findByRole("button", { name: "一般" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+});
+
+test("sentence page ignores stale sentence completion after student route changes", async () => {
+  const training = deferred<Awaited<ReturnType<typeof apiMocks.createSentenceTraining>>>();
+  apiMocks.createSentenceTraining.mockReturnValueOnce(training.promise);
+  let rerender!: ReturnType<typeof render>["rerender"];
+  await act(async () => {
+    ({ rerender } = render(
+      <Suspense fallback={null}>
+        <SentencePage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    ));
+  });
+
+  await userEvent.type(await screen.findByLabelText("原句"), "公园很美。");
+  await userEvent.type(screen.getByLabelText("升级后的句子"), "公园里花香很浓。");
+  await userEvent.click(screen.getByRole("button", { name: "提交给 AI 教练" }));
+
+  await act(async () => {
+    rerender(
+      <Suspense fallback={null}>
+        <SentencePage params={Promise.resolve({ studentId: "s2" })} />
+      </Suspense>,
+    );
+  });
+
+  await act(async () => {
+    training.resolve({
+      training: { id: "training-old", reaction: "positive" },
+      feedback: {
+        encouragement: "旧孩子的句子反馈。",
+        specific_improvement: "旧反馈不应该出现",
+        next_step: "继续练习。",
+        problem_monsters: ["空泛表达"],
+      },
+      settlement: {
+        xp_delta: 25,
+        level_after: 2,
+        badge_code: "first_sentence_upgrade",
+      },
+    });
+  });
+
+  expect(screen.queryByText("旧孩子的句子反馈。")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("AI 教练反馈")).not.toBeInTheDocument();
+  expect(screen.queryByText("这次 AI 教练的提示对你有帮助吗？")).not.toBeInTheDocument();
 });
 
 test("essay page renders draft and revision feedback reactions with persisted ids", async () => {
@@ -376,6 +837,190 @@ test("essay page renders draft and revision feedback reactions with persisted id
   });
 });
 
+test("essay page passes persisted reactions from draft and revision responses", async () => {
+  apiMocks.createEssay.mockResolvedValueOnce({
+    essay: { id: "essay-1" },
+    first_draft: {
+      id: "draft-1",
+      essay_id: "essay-1",
+      version_label: "first_draft",
+      reaction: "positive",
+    },
+    feedback: {
+      strengths: ["能写清楚发生了什么"],
+      improvements: [],
+      problem_monsters: [],
+      sentence_notes: [],
+      revision_tasks: [{ instruction: "给第二段加一个动作描写", target: "第二段" }],
+    },
+  });
+  apiMocks.submitEssayRevision.mockResolvedValueOnce({
+    revision: {
+      id: "revision-1",
+      completed_tasks: ["给第二段加一个动作描写"],
+      skipped_tasks: [],
+      duration_seconds: 10,
+      reaction: "negative",
+    },
+    comparison: {
+      encouragement: "你把最重要的画面写清楚了。",
+      improved_dimensions: ["细节更多"],
+      evidence: [],
+      next_step: "继续保留动作细节。",
+    },
+    settlement: {
+      xp_delta: 60,
+      level_after: 2,
+      badge_code: "first_revision",
+      evidence: { completed_task_count: 1 },
+    },
+  });
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    );
+  });
+
+  await userEvent.type(await screen.findByLabelText("作文题目"), "我学会了骑车");
+  await userEvent.type(
+    screen.getByLabelText("初稿"),
+    "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "获得点评" }));
+
+  const draftFeedback = await screen.findByLabelText("AI 教练反馈评价");
+  expect(
+    within(draftFeedback).getByRole("button", { name: "有帮助" }),
+  ).toHaveAttribute("aria-pressed", "true");
+
+  await userEvent.type(
+    screen.getByLabelText("二稿"),
+    "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "提交二稿" }));
+
+  const comparison = await screen.findByLabelText("二稿对比");
+  expect(
+    within(comparison).getByRole("button", { name: "没帮助" }),
+  ).toHaveAttribute("aria-pressed", "true");
+});
+
+test("essay page ignores stale draft feedback after student route changes", async () => {
+  const essay = deferred<Awaited<ReturnType<typeof apiMocks.createEssay>>>();
+  apiMocks.createEssay.mockReturnValueOnce(essay.promise);
+  let rerender!: ReturnType<typeof render>["rerender"];
+  await act(async () => {
+    ({ rerender } = render(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    ));
+  });
+
+  await userEvent.type(await screen.findByLabelText("作文题目"), "我学会了骑车");
+  await userEvent.type(
+    screen.getByLabelText("初稿"),
+    "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "获得点评" }));
+
+  await act(async () => {
+    rerender(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "s2" })} />
+      </Suspense>,
+    );
+  });
+
+  await act(async () => {
+    essay.resolve({
+      essay: { id: "essay-old" },
+      first_draft: {
+        id: "draft-old",
+        essay_id: "essay-old",
+        version_label: "first_draft",
+        reaction: "positive",
+      },
+      feedback: {
+        strengths: ["旧孩子的作文点评。"],
+        improvements: [],
+        problem_monsters: [],
+        sentence_notes: [],
+        revision_tasks: [{ instruction: "旧任务", target: "第二段" }],
+      },
+    });
+  });
+
+  expect(screen.queryByText("作文点评")).not.toBeInTheDocument();
+  expect(screen.queryByText("旧孩子的作文点评。")).not.toBeInTheDocument();
+  expect(screen.queryByText("这次 AI 教练的提示对你有帮助吗？")).not.toBeInTheDocument();
+});
+
+test("essay page ignores stale revision comparison after student route changes", async () => {
+  const revision = deferred<Awaited<ReturnType<typeof apiMocks.submitEssayRevision>>>();
+  apiMocks.submitEssayRevision.mockReturnValueOnce(revision.promise);
+  let rerender!: ReturnType<typeof render>["rerender"];
+  await act(async () => {
+    ({ rerender } = render(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    ));
+  });
+
+  await userEvent.type(await screen.findByLabelText("作文题目"), "我学会了骑车");
+  await userEvent.type(
+    screen.getByLabelText("初稿"),
+    "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "获得点评" }));
+  await screen.findByText("作文点评");
+
+  await userEvent.type(
+    screen.getByLabelText("二稿"),
+    "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "提交二稿" }));
+
+  await act(async () => {
+    rerender(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "s2" })} />
+      </Suspense>,
+    );
+  });
+
+  await act(async () => {
+    revision.resolve({
+      revision: {
+        id: "revision-old",
+        completed_tasks: ["给第二段加一个动作描写"],
+        skipped_tasks: [],
+        duration_seconds: 10,
+        reaction: "negative",
+      },
+      comparison: {
+        encouragement: "旧孩子的二稿对比。",
+        improved_dimensions: ["细节更多"],
+        evidence: [],
+        next_step: "继续保留动作细节。",
+      },
+      settlement: {
+        xp_delta: 60,
+        level_after: 2,
+        badge_code: "first_revision",
+        evidence: { completed_task_count: 1 },
+      },
+    });
+  });
+
+  expect(screen.queryByLabelText("二稿对比")).not.toBeInTheDocument();
+  expect(screen.queryByText("旧孩子的二稿对比。")).not.toBeInTheDocument();
+  expect(screen.queryByText("这次 AI 教练的提示对你有帮助吗？")).not.toBeInTheDocument();
+});
+
 test("summary page renders parent feedback after summary loads", async () => {
   await act(async () => {
     render(
@@ -396,4 +1041,109 @@ test("summary page renders parent feedback after summary loads", async () => {
       alpha_session_id: "session-1",
     },
   );
+});
+
+test("summary page passes persisted usefulness from summary response", async () => {
+  apiMocks.getAlphaChildSummary.mockResolvedValue({
+    parent_id: "parent-1",
+    child: summaryChild,
+    usefulness: "not_helpful",
+    assessment_completed: true,
+    practice_counts: {
+      assessments: 1,
+      sentence_trainings: 1,
+      essays: 1,
+    },
+    ability_changes: [{ ability: "expression", label: "表达力", delta: 9 }],
+    recent_highlight: "孩子完成了第一次能力草图。",
+    next_suggestion: "继续练习把句子写具体。",
+    empty_state: null,
+  });
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <ParentChildSummaryPage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    );
+  });
+
+  expect(await screen.findByRole("button", { name: "没帮助" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+});
+
+test("summary page clears previous child feedback while a new child summary loads", async () => {
+  const secondSummary = deferred<Awaited<ReturnType<typeof apiMocks.getAlphaChildSummary>>>();
+  apiMocks.getAlphaChildSummary
+    .mockResolvedValueOnce({
+      parent_id: "parent-1",
+      child: summaryChild,
+      usefulness: "helpful",
+      assessment_completed: true,
+      practice_counts: {
+        assessments: 1,
+        sentence_trainings: 1,
+        essays: 1,
+      },
+      ability_changes: [{ ability: "expression", label: "表达力", delta: 9 }],
+      recent_highlight: "孩子完成了第一次能力草图。",
+      next_suggestion: "继续练习把句子写具体。",
+      empty_state: null,
+    })
+    .mockReturnValueOnce(secondSummary.promise);
+  let rerender!: ReturnType<typeof render>["rerender"];
+  await act(async () => {
+    ({ rerender } = render(
+      <Suspense fallback={null}>
+        <ParentChildSummaryPage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    ));
+  });
+
+  expect(await screen.findByRole("button", { name: "有帮助" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+
+  await act(async () => {
+    rerender(
+      <Suspense fallback={null}>
+        <ParentChildSummaryPage params={Promise.resolve({ studentId: "s2" })} />
+      </Suspense>,
+    );
+  });
+
+  await waitFor(() =>
+    expect(apiMocks.getAlphaChildSummary).toHaveBeenLastCalledWith(
+      "parent-1",
+      "s2",
+    ),
+  );
+  expect(screen.getByRole("status")).toHaveTextContent("正在加载成长摘要...");
+  expect(screen.queryByText("这份成长摘要对你有帮助吗？")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "有帮助" })).not.toBeInTheDocument();
+
+  secondSummary.resolve({
+    parent_id: "parent-1",
+    child: {
+      ...summaryChild,
+      id: "s2",
+      nickname: "小月",
+      name: "小月",
+    },
+    usefulness: "not_helpful",
+    assessment_completed: true,
+    practice_counts: {
+      assessments: 1,
+      sentence_trainings: 1,
+      essays: 1,
+    },
+    ability_changes: [{ ability: "expression", label: "表达力", delta: 3 }],
+    recent_highlight: "新孩子的成长摘要。",
+    next_suggestion: "继续练习。",
+    empty_state: null,
+  });
+
+  expect(await screen.findByText("小月的成长摘要")).toBeInTheDocument();
 });

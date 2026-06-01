@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.api.deps import get_db_session, get_llm_provider
+from app.api.feedback_state import feedback_reaction_value
 from app.api.routes.alpha import record_product_event
 from app.core.config import Settings, get_settings
 from app.domain.enums import SentenceFocus, TaskType
@@ -121,6 +122,12 @@ async def create_sentence_training(
     session.add(student)
     session.add(event)
     training_payload = training.model_dump()
+    training_payload["reaction"] = feedback_reaction_value(
+        session,
+        student.id,
+        "sentence_training",
+        training.id,
+    )
     settlement_payload = event.model_dump()
     session.commit()
     return {

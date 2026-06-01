@@ -10,6 +10,7 @@ from sqlalchemy import update
 from sqlmodel import Session, select
 
 from app.api.deps import get_db_session
+from app.api.feedback_state import parent_summary_usefulness
 from app.domain.enums import StudentPersona
 from app.domain.models import (
     AbilityHistory,
@@ -462,10 +463,12 @@ def alpha_child_summary(
     ]
     assessment_completed = assessment_count > 0
     has_progress = assessment_count + sentence_count + essay_count > 0 or bool(history_rows)
+    usefulness = parent_summary_usefulness(session, parent_id, student.id)
 
     return {
         "parent_id": parent_id,
         "child": _student_payload(student),
+        "usefulness": usefulness,
         "assessment_completed": assessment_completed,
         "practice_counts": {
             "assessments": assessment_count,
@@ -501,6 +504,7 @@ def create_parent_summary_feedback(
             ParentFeedback.target_type == "alpha_summary",
         )
     ).first()
+    is_create = feedback is None
     if feedback:
         feedback.usefulness = request.usefulness
         feedback.target_id = student.id
@@ -516,17 +520,21 @@ def create_parent_summary_feedback(
             alpha_session_id=request.alpha_session_id,
         )
     session.add(feedback)
-    try:
-        record_product_event(
-            session,
-            "parent_summary_feedback_submitted",
-            parent_id=parent_id,
-            student_id=student.id,
-            alpha_session_id=request.alpha_session_id,
-            payload={"usefulness": request.usefulness, "target_type": "alpha_summary"},
-        )
-    except Exception:
-        pass
+    if is_create:
+        try:
+            record_product_event(
+                session,
+                "parent_summary_feedback_submitted",
+                parent_id=parent_id,
+                student_id=student.id,
+                alpha_session_id=request.alpha_session_id,
+                payload={
+                    "usefulness": request.usefulness,
+                    "target_type": "alpha_summary",
+                },
+            )
+        except Exception:
+            pass
     session.commit()
     session.refresh(feedback)
     return {
