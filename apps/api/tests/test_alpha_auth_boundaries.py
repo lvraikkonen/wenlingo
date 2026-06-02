@@ -1,8 +1,8 @@
-from datetime import timedelta
+from datetime import timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
-from sqlmodel import select
+from sqlmodel import Session, select
 from starlette.requests import Request
 
 from app.core.config import Settings
@@ -16,6 +16,12 @@ from app.domain.models import (
     utcnow,
 )
 from app.services.auth_security import hash_secret
+
+
+def as_utc(value):
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
 
 
 def make_request(method: str, headers: dict[str, str] | None = None) -> Request:
@@ -110,6 +116,133 @@ def test_optional_parent_context_uses_configured_session_cookie_name(session):
     assert context.account.id == account.id
     assert context.parent is not None
     assert context.parent.id == parent.id
+
+
+def test_optional_parent_context_persists_stale_last_seen_touch(session):
+    from app.api.auth_deps import optional_parent_context
+
+    _, _, _, token = create_session_family(
+        session,
+        email="stale-session@example.com",
+    )
+    token_hash = hash_secret(token, purpose="session-token", pepper="test-pepper")
+    parent_session = session.exec(
+        select(ParentSession).where(ParentSession.token_hash == token_hash)
+    ).one()
+    stale_last_seen_at = utcnow() - timedelta(hours=1)
+    parent_session.last_seen_at = stale_last_seen_at
+    session.add(parent_session)
+    session.commit()
+    parent_session_id = parent_session.id
+    bind = session.get_bind()
+    session.close()
+
+    with Session(bind) as auth_session:
+        context = optional_parent_context(
+            request=make_request("GET", {"Cookie": f"wenlingo_parent_session={token}"}),
+            db=auth_session,
+            settings=Settings(
+                auth_secret_pepper="test-pepper",
+                auth_session_last_seen_throttle_minutes=15,
+            ),
+        )
+        assert context is not None
+
+    with Session(bind) as verify_session:
+        reloaded = verify_session.get(ParentSession, parent_session_id)
+
+    assert reloaded is not None
+    assert as_utc(reloaded.last_seen_at) > as_utc(stale_last_seen_at)
+
+
+def test_optional_parent_context_does_not_commit_recent_last_seen_touch(
+    session,
+    monkeypatch,
+):
+    from app.api.auth_deps import optional_parent_context
+
+    _, _, _, token = create_session_family(
+        session,
+        email="recent-session@example.com",
+    )
+
+    def unexpected_commit():
+        raise AssertionError("fresh parent session should not be committed")
+
+    monkeypatch.setattr(session, "commit", unexpected_commit)
+
+    context = optional_parent_context(
+        request=make_request("GET", {"Cookie": f"wenlingo_parent_session={token}"}),
+        db=session,
+        settings=Settings(
+            auth_secret_pepper="test-pepper",
+            auth_session_last_seen_throttle_minutes=15,
+        ),
+    )
+
+    assert context is not None
+
+
+def test_optional_parent_context_fails_closed_for_duplicate_linked_parents(session):
+    from app.api.auth_deps import optional_parent_context
+
+    account, _, _, token = create_session_family(
+        session,
+        email="duplicate-parent@example.com",
+    )
+    session.add(
+        ParentUser(
+            email=f"duplicate-{account.id}@wenlingo.local",
+            display_name="Duplicate Parent",
+            account_id=account.id,
+            account_linked_at=utcnow(),
+        )
+    )
+    session.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        optional_parent_context(
+            request=make_request("GET", {"Cookie": f"wenlingo_parent_session={token}"}),
+            db=session,
+            settings=Settings(auth_secret_pepper="test-pepper"),
+        )
+
+    assert exc_info.value.status_code == 409
+
+
+def test_optional_parent_context_keeps_unlinked_account_parent_none(session):
+    from app.api.auth_deps import optional_parent_context
+
+    account = ParentAccount(
+        email_normalized="unlinked@example.com",
+        email_verified_at=utcnow(),
+        last_login_at=utcnow(),
+    )
+    token = "unlinked-token"
+    session.add(account)
+    session.flush()
+    session.add(
+        ParentSession(
+            account_id=account.id,
+            token_hash=hash_secret(
+                token,
+                purpose="session-token",
+                pepper="test-pepper",
+            ),
+            expires_at=utcnow() + timedelta(days=30),
+        )
+    )
+    session.commit()
+
+    context = optional_parent_context(
+        request=make_request("GET", {"Cookie": f"wenlingo_parent_session={token}"}),
+        db=session,
+        settings=Settings(auth_secret_pepper="test-pepper"),
+    )
+
+    assert context is not None
+    assert context.account.id == account.id
+    assert context.parent is None
 
 
 def test_require_parent_context_rejects_missing_session():
