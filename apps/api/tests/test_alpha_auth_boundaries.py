@@ -370,6 +370,62 @@ def test_parents_me_children_returns_session_parent_children(client, session, mo
     assert [row["id"] for row in response.json()["children"]] == [child.id]
 
 
+def test_parents_me_children_post_creates_session_parent_child(
+    client, session, monkeypatch
+):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+    _, parent, _, token = create_session_family(session)
+
+    response = client.post(
+        "/api/alpha/parents/me/children",
+        json={"nickname": "Session Child", "grade": 4},
+        cookies={"wenlingo_parent_session": token},
+    )
+
+    assert response.status_code == 201
+    child_id = response.json()["child"]["id"]
+    child = session.get(StudentProfile, child_id)
+    assert child is not None
+    assert child.parent_id == parent.id
+
+
+def test_parents_me_child_summary_returns_session_parent_summary(
+    client, session, monkeypatch
+):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+    _, parent, child, token = create_session_family(session)
+
+    response = client.get(
+        f"/api/alpha/parents/me/children/{child.id}/summary",
+        cookies={"wenlingo_parent_session": token},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["parent_id"] == parent.id
+    assert response.json()["child"]["id"] == child.id
+
+
+def test_parents_me_child_summary_feedback_uses_session_parent(
+    client, session, monkeypatch
+):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+    _, parent, child, token = create_session_family(session)
+
+    response = client.post(
+        f"/api/alpha/parents/me/children/{child.id}/summary-feedback",
+        json={"usefulness": "helpful"},
+        cookies={"wenlingo_parent_session": token},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["feedback"]["parent_id"] == parent.id
+    assert response.json()["feedback"]["student_id"] == child.id
+    assert response.json()["feedback"]["usefulness"] == "helpful"
+
+
 def test_legacy_parent_path_requires_session_when_auth_required(
     client, session, monkeypatch
 ):
@@ -378,6 +434,21 @@ def test_legacy_parent_path_requires_session_when_auth_required(
     _, parent, _, _ = create_session_family(session)
 
     response = client.get(f"/api/alpha/parents/{parent.id}/children")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "parent session required"
+
+
+def test_legacy_parent_summary_requires_session_when_auth_required(
+    client, session, monkeypatch
+):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+    _, parent, child, _ = create_session_family(session)
+
+    response = client.get(
+        f"/api/alpha/parents/{parent.id}/children/{child.id}/summary",
+    )
 
     assert response.status_code == 401
     assert response.json()["detail"] == "parent session required"
@@ -409,6 +480,25 @@ def test_legacy_parent_path_requires_matching_session_parent(client, session, mo
 
     response = client.get(
         f"/api/alpha/parents/{other_parent.id}/children",
+        cookies={"wenlingo_parent_session": token},
+    )
+
+    assert response.status_code == 404
+
+
+def test_legacy_parent_summary_feedback_rejects_cross_family_session(
+    client, session, monkeypatch
+):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+    _, _, _, token = create_session_family(session)
+    _, other_parent, other_child, _ = create_session_family(
+        session, email="feedback-other@example.com", token="feedback-other-token"
+    )
+
+    response = client.post(
+        f"/api/alpha/parents/{other_parent.id}/children/{other_child.id}/summary-feedback",
+        json={"usefulness": "helpful"},
         cookies={"wenlingo_parent_session": token},
     )
 
