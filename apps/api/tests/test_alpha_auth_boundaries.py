@@ -8,6 +8,7 @@ from starlette.requests import Request
 from app.core.config import Settings
 from app.domain.enums import StudentPersona
 from app.domain.models import (
+    AbilityProfile,
     Essay,
     ParentAccount,
     ParentSession,
@@ -62,6 +63,7 @@ def create_session_family(session, email="parent@example.com", token="token-valu
         is_real_child=True,
     )
     session.add(child)
+    session.add(AbilityProfile(student_id=child.id))
     session.add(
         ParentSession(
             account_id=account.id,
@@ -499,6 +501,61 @@ def test_legacy_parent_summary_feedback_rejects_cross_family_session(
     response = client.post(
         f"/api/alpha/parents/{other_parent.id}/children/{other_child.id}/summary-feedback",
         json={"usefulness": "helpful"},
+        cookies={"wenlingo_parent_session": token},
+    )
+
+    assert response.status_code == 404
+
+
+def test_student_dashboard_requires_session_in_auth_mode(client, session, monkeypatch):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    _, _, child, _ = create_session_family(session)
+
+    response = client.get(f"/api/students/{child.id}/dashboard")
+
+    assert response.status_code == 401
+
+
+def test_student_dashboard_hides_cross_family_child(client, session, monkeypatch):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+    _, _, _, token = create_session_family(session)
+    _, _, other_child, _ = create_session_family(
+        session, email="other@example.com", token="other-token"
+    )
+
+    response = client.get(
+        f"/api/students/{other_child.id}/dashboard",
+        cookies={"wenlingo_parent_session": token},
+    )
+
+    assert response.status_code == 404
+
+
+def test_essay_revision_hides_cross_family_essay(client, session, monkeypatch):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+    _, _, _, token = create_session_family(session)
+    _, _, other_child, _ = create_session_family(
+        session, email="other@example.com", token="other-token"
+    )
+    essay_response = client.post(
+        f"/api/students/{other_child.id}/essays",
+        json={
+            "title": "我学会了骑车",
+            "draft": "我学会了骑车。刚开始我很害怕。后来爸爸扶着我练，我终于能骑一小段了。",
+            "entry": "existing_draft",
+        },
+        cookies={"wenlingo_parent_session": "other-token"},
+    )
+    essay_id = essay_response.json()["essay"]["id"]
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json={
+            "content": "我学会了骑车。刚开始我紧紧抓车把，后来能自己骑过花坛。",
+            "completed_tasks": [],
+        },
         cookies={"wenlingo_parent_session": token},
     )
 

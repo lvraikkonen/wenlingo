@@ -2,6 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
+from app.api.auth_deps import (
+    ParentContext,
+    optional_parent_context,
+    require_allowed_origin,
+    require_json_state_change,
+)
 from app.api.deps import get_db_session, get_llm_provider
 from app.api.feedback_state import feedback_reaction_value
 from app.api.routes.alpha import record_product_event
@@ -19,17 +25,39 @@ class AssessmentCreate(BaseModel):
     short_writing: str = Field(min_length=20, max_length=500)
 
 
-@router.post("/{student_id}/assessment", status_code=201)
+def _student_or_404_for_auth_mode(
+    session: Session,
+    settings: Settings,
+    context: ParentContext | None,
+    student_id: str,
+) -> StudentProfile:
+    student = session.get(StudentProfile, student_id)
+    if not student:
+        raise HTTPException(status_code=404, detail="student not found")
+    if settings.auth_required_for_alpha:
+        if context is None or context.parent is None:
+            raise HTTPException(status_code=401, detail="parent session required")
+        if student.parent_id != context.parent.id:
+            raise HTTPException(status_code=404, detail="student not found")
+    return student
+
+
+@router.post(
+    "/{student_id}/assessment",
+    status_code=201,
+    dependencies=[Depends(require_allowed_origin), Depends(require_json_state_change)],
+)
 async def create_assessment(
     student_id: str,
     request: AssessmentCreate,
     session: Session = Depends(get_db_session),
     provider: LLMProvider = Depends(get_llm_provider),
     settings: Settings = Depends(get_settings),
+    context: ParentContext | None = Depends(optional_parent_context),
 ):
-    student = session.get(StudentProfile, student_id)
+    student = _student_or_404_for_auth_mode(session, settings, context, student_id)
     ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
-    if not student or not ability:
+    if not ability:
         session.rollback()
         raise HTTPException(status_code=404, detail="student not found")
 
