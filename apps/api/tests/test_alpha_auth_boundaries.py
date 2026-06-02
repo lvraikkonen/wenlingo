@@ -77,7 +77,7 @@ def test_optional_parent_context_resolves_session_cookie_and_linked_parent(sessi
     account, parent, _, token = create_session_family(session)
 
     context = optional_parent_context(
-        token=token,
+        request=make_request("GET", {"Cookie": f"wenlingo_parent_session={token}"}),
         db=session,
         settings=Settings(auth_secret_pepper="test-pepper"),
     )
@@ -87,6 +87,29 @@ def test_optional_parent_context_resolves_session_cookie_and_linked_parent(sessi
     assert context.parent is not None
     assert context.parent.id == parent.id
     assert context.session.account_id == account.id
+
+
+def test_optional_parent_context_uses_configured_session_cookie_name(session):
+    from app.api.auth_deps import optional_parent_context
+
+    account, parent, _, token = create_session_family(
+        session,
+        email="custom-cookie@example.com",
+    )
+
+    context = optional_parent_context(
+        request=make_request("GET", {"Cookie": f"custom_parent_session={token}"}),
+        db=session,
+        settings=Settings(
+            auth_secret_pepper="test-pepper",
+            auth_session_cookie_name="custom_parent_session",
+        ),
+    )
+
+    assert context is not None
+    assert context.account.id == account.id
+    assert context.parent is not None
+    assert context.parent.id == parent.id
 
 
 def test_require_parent_context_rejects_missing_session():

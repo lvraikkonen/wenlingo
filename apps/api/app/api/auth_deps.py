@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from fastapi import Cookie, Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 from sqlmodel import Session, select
 
 from app.api.deps import get_db_session
@@ -49,10 +49,11 @@ def require_allowed_origin(
 
 
 def optional_parent_context(
-    token: str | None = Cookie(default=None, alias="wenlingo_parent_session"),
+    request: Request,
     db: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> ParentContext | None:
+    token = request.cookies.get(settings.auth_session_cookie_name)
     session_pair = get_session_account(db=db, settings=settings, token=token)
     if not session_pair:
         return None
