@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     llm_daily_limit_per_student_task: int = 5
     auth_required_for_alpha: bool = False
     auth_session_cookie_name: str = "wenlingo_parent_session"
+    auth_session_cookie_secure: bool = True
     auth_session_days: int = 30
     auth_session_last_seen_throttle_minutes: int = 15
     auth_secret_pepper: str = ""
