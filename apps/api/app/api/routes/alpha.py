@@ -29,6 +29,7 @@ from app.domain.models import (
     AlphaInviteCode,
     Assessment,
     Essay,
+    ParentAccount,
     ParentFeedback,
     ParentUser,
     ProductEvent,
@@ -497,6 +498,17 @@ def _get_available_invite(session: Session, code: str) -> AlphaInviteCode | None
     return invite
 
 
+def _lock_parent_account(session: Session, account_id: str) -> ParentAccount:
+    account = session.exec(
+        select(ParentAccount)
+        .where(ParentAccount.id == account_id)
+        .with_for_update()
+    ).first()
+    if account is None:
+        raise HTTPException(status_code=401, detail="parent session required")
+    return account
+
+
 @router.post("/invites/validate")
 def validate_alpha_invite(
     request: AlphaInviteValidate,
@@ -550,8 +562,32 @@ def create_product_event(
 @router.post("/parents", status_code=201)
 def create_alpha_parent(
     request: AlphaParentCreate,
+    http_request: Request,
     session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
 ):
+    context: ParentContext | None = None
+    if settings.auth_required_for_alpha:
+        context = optional_parent_context(
+            request=http_request,
+            db=session,
+            settings=settings,
+        )
+        if context is None:
+            raise HTTPException(status_code=401, detail="parent session required")
+        require_allowed_origin(http_request, settings)
+        require_json_state_change(http_request)
+        if context.account.email_verified_at is None:
+            raise HTTPException(
+                status_code=401, detail="verified parent session required"
+            )
+        _lock_parent_account(session, context.account.id)
+        linked_parent = session.exec(
+            select(ParentUser).where(ParentUser.account_id == context.account.id)
+        ).first()
+        if linked_parent is not None:
+            raise HTTPException(status_code=409, detail="alpha parent already linked")
+
     invite = _get_available_invite(session, request.invite_code)
     if not invite:
         raise HTTPException(status_code=400, detail="invite code is not available")
@@ -575,6 +611,24 @@ def create_alpha_parent(
     if consume_result.rowcount != 1:
         session.rollback()
         raise HTTPException(status_code=400, detail="invite code is not available")
+    if context is not None:
+        existing_parent_for_account = aliased(ParentUser)
+        linked_at = datetime.now(timezone.utc)
+        link_result = session.execute(
+            update(ParentUser)
+            .where(
+                ParentUser.id == parent.id,
+                ParentUser.account_id.is_(None),
+                ~select(existing_parent_for_account.id)
+                .where(existing_parent_for_account.account_id == context.account.id)
+                .exists(),
+            )
+            .values(account_id=context.account.id, account_linked_at=linked_at)
+            .execution_options(synchronize_session=False)
+        )
+        if link_result.rowcount != 1:
+            session.rollback()
+            raise HTTPException(status_code=409, detail="alpha parent already linked")
     record_product_event(
         session,
         "alpha_parent_created",
@@ -601,6 +655,7 @@ def bind_legacy_alpha_parent(
     if not parent or not _has_consumed_alpha_invite(session, parent.id):
         raise HTTPException(status_code=404, detail="alpha parent not found")
 
+    _lock_parent_account(session, context.account.id)
     existing_parent_for_account = aliased(ParentUser)
     linked_at = datetime.now(timezone.utc)
     bind_result = session.execute(

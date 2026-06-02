@@ -5,10 +5,13 @@ from fastapi import HTTPException
 from sqlmodel import Session, select
 from starlette.requests import Request
 
+from app.api.routes import alpha as alpha_routes
+from app.api.routes.alpha import hash_invite_code
 from app.core.config import Settings
 from app.domain.enums import StudentPersona
 from app.domain.models import (
     AbilityProfile,
+    AlphaInviteCode,
     Essay,
     ParentAccount,
     ParentSession,
@@ -77,6 +80,29 @@ def create_session_family(session, email="parent@example.com", token="token-valu
     )
     session.commit()
     return account, parent, child, token
+
+
+def create_verified_session(session, email="verified@example.com", token="verified-token"):
+    account = ParentAccount(
+        email_normalized=email,
+        email_verified_at=utcnow(),
+        last_login_at=utcnow(),
+    )
+    session.add(account)
+    session.flush()
+    session.add(
+        ParentSession(
+            account_id=account.id,
+            token_hash=hash_secret(
+                token,
+                purpose="session-token",
+                pepper="test-pepper",
+            ),
+            expires_at=utcnow() + timedelta(days=30),
+        )
+    )
+    session.commit()
+    return account, token
 
 
 def test_optional_parent_context_resolves_session_cookie_and_linked_parent(session):
@@ -648,3 +674,152 @@ def test_auth_state_change_requires_session_before_json_guard(client, monkeypatc
     )
 
     assert response.status_code == 401
+
+
+def test_authenticated_alpha_parent_creation_links_current_account_and_consumes_invite(
+    client, session, monkeypatch
+):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+    account, token = create_verified_session(session)
+    invite = AlphaInviteCode(
+        code_hash=hash_invite_code("ALPHA-NEW"), label="New", status="issued"
+    )
+    session.add(invite)
+    session.commit()
+
+    response = client.post(
+        "/api/alpha/parents",
+        json={
+            "display_name": "新家长",
+            "invite_code": "ALPHA-NEW",
+            "alpha_session_id": "session-1",
+        },
+        cookies={"wenlingo_parent_session": token},
+    )
+
+    assert response.status_code == 201
+    parent = session.get(ParentUser, response.json()["parent"]["id"])
+    assert parent.account_id == account.id
+    session.refresh(invite)
+    assert invite.status == "consumed"
+    assert invite.consumed_by_parent_id == parent.id
+
+
+def test_authenticated_alpha_parent_creation_rejects_account_that_already_has_parent(
+    client, session, monkeypatch
+):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+    _, _, _, token = create_session_family(session)
+
+    response = client.post(
+        "/api/alpha/parents",
+        json={"display_name": "重复家长", "invite_code": "ALPHA-ANY"},
+        cookies={"wenlingo_parent_session": token},
+    )
+
+    assert response.status_code == 409
+
+
+def test_authenticated_alpha_parent_creation_rejects_account_linked_after_context(
+    client, session, monkeypatch
+):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+    account, token = create_verified_session(
+        session, email="race@example.com", token="race-token"
+    )
+    invite = AlphaInviteCode(
+        code_hash=hash_invite_code("ALPHA-RACE"), label="Race", status="issued"
+    )
+    session.add(invite)
+    session.commit()
+    original_get_available_invite = alpha_routes._get_available_invite
+
+    def link_account_then_lookup(db, code):
+        db.add(
+            ParentUser(
+                email=f"race-linked-{account.id}@wenlingo.local",
+                display_name="Race Linked Parent",
+                account_id=account.id,
+                account_linked_at=utcnow(),
+            )
+        )
+        db.commit()
+        return original_get_available_invite(db, code)
+
+    monkeypatch.setattr(
+        alpha_routes, "_get_available_invite", link_account_then_lookup
+    )
+
+    response = client.post(
+        "/api/alpha/parents",
+        json={"display_name": "竞态家长", "invite_code": "ALPHA-RACE"},
+        cookies={"wenlingo_parent_session": token},
+    )
+
+    assert response.status_code == 409
+    session.refresh(invite)
+    assert invite.status == "issued"
+    assert invite.consumed_by_parent_id is None
+    linked_parents = session.exec(
+        select(ParentUser).where(ParentUser.account_id == account.id)
+    ).all()
+    assert len(linked_parents) == 1
+    assert linked_parents[0].display_name == "Race Linked Parent"
+
+
+def test_authenticated_alpha_parent_creation_rechecks_linked_parent_before_invite_lookup(
+    client, session, monkeypatch
+):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+    account, token = create_verified_session(
+        session, email="recheck@example.com", token="recheck-token"
+    )
+    invite = AlphaInviteCode(
+        code_hash=hash_invite_code("ALPHA-RECHECK"), label="Recheck", status="issued"
+    )
+    session.add(invite)
+    session.commit()
+    original_optional_parent_context = alpha_routes.optional_parent_context
+    original_get_available_invite = alpha_routes._get_available_invite
+    invite_lookup_called = False
+
+    def resolve_context_then_link_account(request, db, settings):
+        context = original_optional_parent_context(
+            request=request, db=db, settings=settings
+        )
+        db.add(
+            ParentUser(
+                email=f"recheck-linked-{account.id}@wenlingo.local",
+                display_name="Recheck Linked Parent",
+                account_id=account.id,
+                account_linked_at=utcnow(),
+            )
+        )
+        db.commit()
+        return context
+
+    def track_invite_lookup(db, code):
+        nonlocal invite_lookup_called
+        invite_lookup_called = True
+        return original_get_available_invite(db, code)
+
+    monkeypatch.setattr(
+        alpha_routes, "optional_parent_context", resolve_context_then_link_account
+    )
+    monkeypatch.setattr(alpha_routes, "_get_available_invite", track_invite_lookup)
+
+    response = client.post(
+        "/api/alpha/parents",
+        json={"display_name": "复查家长", "invite_code": "ALPHA-RECHECK"},
+        cookies={"wenlingo_parent_session": token},
+    )
+
+    assert response.status_code == 409
+    assert not invite_lookup_called
+    session.refresh(invite)
+    assert invite.status == "issued"
+    assert invite.consumed_by_parent_id is None
