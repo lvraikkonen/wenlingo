@@ -4,7 +4,7 @@ import re
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import update
 from sqlmodel import Session, select
@@ -289,6 +289,16 @@ def _resolve_parent_for_path(
     if context is None or context.parent is None or context.parent.id != parent_id:
         raise HTTPException(status_code=404, detail="alpha parent not found")
     return context.parent
+
+
+def _optional_parent_context_when_alpha_auth_required(
+    request: Request,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> ParentContext | None:
+    if not settings.auth_required_for_alpha:
+        return None
+    return optional_parent_context(request=request, db=session, settings=settings)
 
 
 def _children_payload(parent: ParentUser, session: Session):
@@ -596,7 +606,9 @@ def list_alpha_children(
     parent_id: str,
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-    context: ParentContext | None = Depends(optional_parent_context),
+    context: ParentContext | None = Depends(
+        _optional_parent_context_when_alpha_auth_required
+    ),
 ):
     parent = _resolve_parent_for_path(
         parent_id=parent_id,
@@ -613,7 +625,9 @@ def create_alpha_child(
     request: AlphaChildCreate,
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-    context: ParentContext | None = Depends(optional_parent_context),
+    context: ParentContext | None = Depends(
+        _optional_parent_context_when_alpha_auth_required
+    ),
 ):
     parent = _resolve_parent_for_path(
         parent_id=parent_id,
@@ -630,7 +644,9 @@ def alpha_child_summary(
     student_id: str,
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-    context: ParentContext | None = Depends(optional_parent_context),
+    context: ParentContext | None = Depends(
+        _optional_parent_context_when_alpha_auth_required
+    ),
 ):
     parent = _resolve_parent_for_path(
         parent_id=parent_id,
@@ -652,7 +668,9 @@ def create_parent_summary_feedback(
     request: ParentSummaryFeedbackCreate,
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-    context: ParentContext | None = Depends(optional_parent_context),
+    context: ParentContext | None = Depends(
+        _optional_parent_context_when_alpha_auth_required
+    ),
 ):
     parent = _resolve_parent_for_path(
         parent_id=parent_id,

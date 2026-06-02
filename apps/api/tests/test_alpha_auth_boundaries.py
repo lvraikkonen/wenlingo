@@ -329,6 +329,32 @@ def test_parent_authorization_helpers_scope_students_and_essays(session):
     assert other_child.parent_id == other_parent.id
 
 
+def test_legacy_parent_path_ignores_problematic_session_when_auth_disabled(
+    client, session, monkeypatch
+):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "false")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+    account, parent, child, token = create_session_family(session)
+    session.add(
+        ParentUser(
+            email="duplicate-linked-parent@example.com",
+            display_name="Duplicate Parent",
+            account_id=account.id,
+            account_linked_at=utcnow(),
+        )
+    )
+    session.commit()
+
+    response = client.get(
+        f"/api/alpha/parents/{parent.id}/children",
+        cookies={"wenlingo_parent_session": token},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["parent"]["id"] == parent.id
+    assert [row["id"] for row in response.json()["children"]] == [child.id]
+
+
 def test_parents_me_children_returns_session_parent_children(client, session, monkeypatch):
     monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
     monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
