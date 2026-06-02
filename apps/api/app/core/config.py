@@ -14,6 +14,21 @@ class Settings(BaseSettings):
     llm_base_url: str = ""
     llm_daily_limit_enabled: bool = False
     llm_daily_limit_per_student_task: int = 5
+    auth_required_for_alpha: bool = False
+    auth_session_cookie_name: str = "wenlingo_parent_session"
+    auth_session_days: int = 30
+    auth_session_last_seen_throttle_minutes: int = 15
+    auth_secret_pepper: str = ""
+    magic_code_ttl_minutes: int = 10
+    magic_code_max_attempts: int = 5
+    magic_code_email_rate_limit: int = 3
+    magic_code_ip_rate_limit: int = 20
+    magic_code_alpha_session_rate_limit: int = 5
+    magic_code_from_email: str = ""
+    magic_code_email_provider: str = ""
+    magic_code_dev_echo: bool = False
+    legacy_bind_window_days: int = 14
+    auth_allowed_origins: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

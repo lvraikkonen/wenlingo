@@ -42,3 +42,23 @@ def test_settings_load_alpha_admin_token():
     settings = Settings(_env_file=None, alpha_admin_token="secret-token")
 
     assert settings.alpha_admin_token == "secret-token"
+
+
+def test_settings_load_v05a_auth_defaults():
+    settings = Settings(_env_file=None)
+
+    assert settings.auth_required_for_alpha is False
+    assert settings.auth_session_cookie_name == "wenlingo_parent_session"
+    assert settings.auth_session_days == 30
+    assert settings.auth_session_last_seen_throttle_minutes == 15
+    assert settings.auth_secret_pepper == ""
+    assert settings.magic_code_ttl_minutes == 10
+    assert settings.magic_code_max_attempts == 5
+    assert settings.magic_code_email_rate_limit == 3
+    assert settings.magic_code_ip_rate_limit == 20
+    assert settings.magic_code_alpha_session_rate_limit == 5
+    assert settings.magic_code_from_email == ""
+    assert settings.magic_code_email_provider == ""
+    assert settings.magic_code_dev_echo is False
+    assert settings.legacy_bind_window_days == 14
+    assert settings.auth_allowed_origins == ""

@@ -27,7 +27,74 @@ class ParentUser(SQLModel, table=True):
     id: str = Field(default_factory=new_uuid, primary_key=True)
     email: str = Field(index=True, unique=True)
     display_name: str
+    account_id: str | None = Field(default=None, foreign_key="parentaccount.id", index=True)
+    account_linked_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     created_at: datetime = timestamp_field()
+
+
+class ParentAccount(SQLModel, table=True):
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    email_normalized: str = Field(index=True, unique=True)
+    email_verified_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    phone_e164: str | None = Field(default=None, index=True)
+    phone_bound_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    phone_verified_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    status: str = Field(default="active", index=True)
+    created_at: datetime = timestamp_field()
+    updated_at: datetime = timestamp_field()
+    last_login_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+
+
+class AuthMagicCode(SQLModel, table=True):
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    email_normalized: str = Field(index=True)
+    code_hash: str = Field(index=True)
+    purpose: str = Field(default="parent_login", index=True)
+    expires_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False, index=True)
+    )
+    consumed_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
+    attempt_count: int = 0
+    created_at: datetime = timestamp_field()
+    last_attempt_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    alpha_session_id: str = Field(default="", index=True)
+    request_ip_hash: str = Field(default="", index=True)
+
+
+class ParentSession(SQLModel, table=True):
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    account_id: str = Field(foreign_key="parentaccount.id", index=True)
+    token_hash: str = Field(index=True, unique=True)
+    created_at: datetime = timestamp_field()
+    expires_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False, index=True)
+    )
+    last_seen_at: datetime = timestamp_field()
+    revoked_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
 
 
 class AlphaInviteCode(SQLModel, table=True):

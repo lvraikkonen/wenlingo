@@ -6,10 +6,13 @@ from app.domain.models import (
     AbilityHistory,
     AbilityProfile,
     Assessment,
+    AuthMagicCode,
     Essay,
     EssayVersion,
     GameEvent,
     LLMCallLog,
+    ParentAccount,
+    ParentSession,
     ParentUser,
     ReadingSession,
     Report,
@@ -20,6 +23,13 @@ from app.domain.models import (
 
 TIMESTAMP_FIELDS = [
     (ParentUser, "created_at"),
+    (ParentAccount, "created_at"),
+    (ParentAccount, "updated_at"),
+    (AuthMagicCode, "expires_at"),
+    (AuthMagicCode, "created_at"),
+    (ParentSession, "created_at"),
+    (ParentSession, "expires_at"),
+    (ParentSession, "last_seen_at"),
     (StudentProfile, "created_at"),
     (AbilityProfile, "updated_at"),
     (Assessment, "created_at"),
@@ -30,6 +40,18 @@ TIMESTAMP_FIELDS = [
     (GameEvent, "created_at"),
     (Report, "created_at"),
     (LLMCallLog, "created_at"),
+]
+
+
+NULLABLE_TIMESTAMP_FIELDS = [
+    (ParentUser, "account_linked_at"),
+    (ParentAccount, "email_verified_at"),
+    (ParentAccount, "phone_bound_at"),
+    (ParentAccount, "phone_verified_at"),
+    (ParentAccount, "last_login_at"),
+    (AuthMagicCode, "consumed_at"),
+    (AuthMagicCode, "last_attempt_at"),
+    (ParentSession, "revoked_at"),
 ]
 
 
@@ -54,6 +76,14 @@ def test_timestamp_columns_are_timezone_aware_and_not_nullable():
 
         assert column.type.timezone is True, f"{model.__name__}.{field_name}"
         assert column.nullable is False, f"{model.__name__}.{field_name}"
+
+
+def test_nullable_timestamp_columns_are_timezone_aware():
+    for model, field_name in NULLABLE_TIMESTAMP_FIELDS:
+        column = model.__table__.c[field_name]
+
+        assert column.type.timezone is True, f"{model.__name__}.{field_name}"
+        assert column.nullable is True, f"{model.__name__}.{field_name}"
 
 
 def test_json_columns_are_not_nullable():
@@ -186,3 +216,53 @@ def test_assessment_artifact_references_are_nullable_and_indexed():
     assert essay_column.foreign_keys
     assert "sentence_training_id" in index_columns
     assert "essay_id" in index_columns
+
+
+def test_v05a_parent_user_account_link_is_nullable_indexed_and_foreign_keyed():
+    account_column = ParentUser.__table__.c["account_id"]
+    linked_column = ParentUser.__table__.c["account_linked_at"]
+    index_columns = {
+        column.name
+        for index in ParentUser.__table__.indexes
+        for column in index.columns
+    }
+
+    assert account_column.nullable is True
+    assert linked_column.nullable is True
+    assert account_column.foreign_keys
+    assert "account_id" in index_columns
+
+
+def test_v05a_auth_tables_have_expected_indexes_and_uniques():
+    parent_account_indexes = {
+        column.name
+        for index in ParentAccount.__table__.indexes
+        for column in index.columns
+    }
+    magic_code_indexes = {
+        column.name
+        for index in AuthMagicCode.__table__.indexes
+        for column in index.columns
+    }
+    session_indexes = {
+        column.name
+        for index in ParentSession.__table__.indexes
+        for column in index.columns
+    }
+
+    assert ParentAccount.__table__.c["email_normalized"].unique is True
+    assert ParentSession.__table__.c["token_hash"].unique is True
+    assert "email_normalized" in parent_account_indexes
+    assert "phone_e164" in parent_account_indexes
+    assert "status" in parent_account_indexes
+    assert "email_normalized" in magic_code_indexes
+    assert "code_hash" in magic_code_indexes
+    assert "purpose" in magic_code_indexes
+    assert "alpha_session_id" in magic_code_indexes
+    assert "request_ip_hash" in magic_code_indexes
+    assert "expires_at" in magic_code_indexes
+    assert "consumed_at" in magic_code_indexes
+    assert "account_id" in session_indexes
+    assert "token_hash" in session_indexes
+    assert "expires_at" in session_indexes
+    assert "revoked_at" in session_indexes
