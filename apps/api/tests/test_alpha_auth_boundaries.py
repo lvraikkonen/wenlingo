@@ -327,3 +327,34 @@ def test_parent_authorization_helpers_scope_students_and_essays(session):
 
     assert essay_exc_info.value.status_code == 404
     assert other_child.parent_id == other_parent.id
+
+
+def test_parents_me_children_returns_session_parent_children(client, session, monkeypatch):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+    _, parent, child, token = create_session_family(session)
+
+    response = client.get(
+        "/api/alpha/parents/me/children",
+        cookies={"wenlingo_parent_session": token},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["parent"]["id"] == parent.id
+    assert [row["id"] for row in response.json()["children"]] == [child.id]
+
+
+def test_legacy_parent_path_requires_matching_session_parent(client, session, monkeypatch):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+    _, parent, _, token = create_session_family(session)
+    _, other_parent, _, _ = create_session_family(
+        session, email="other@example.com", token="other-token"
+    )
+
+    response = client.get(
+        f"/api/alpha/parents/{other_parent.id}/children",
+        cookies={"wenlingo_parent_session": token},
+    )
+
+    assert response.status_code == 404

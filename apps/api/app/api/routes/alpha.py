@@ -9,8 +9,15 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import update
 from sqlmodel import Session, select
 
+from app.api.auth_deps import (
+    ParentContext,
+    optional_parent_context,
+    require_linked_parent,
+    require_student_for_parent,
+)
 from app.api.deps import get_db_session
 from app.api.feedback_state import parent_summary_usefulness
+from app.core.config import Settings, get_settings
 from app.domain.enums import StudentPersona
 from app.domain.models import (
     AbilityHistory,
@@ -270,6 +277,168 @@ def _get_parent_child(session: Session, parent_id: str, student_id: str) -> Stud
     return student
 
 
+def _resolve_parent_for_path(
+    *,
+    parent_id: str,
+    session: Session,
+    settings: Settings,
+    context: ParentContext | None,
+) -> ParentUser:
+    if not settings.auth_required_for_alpha:
+        return _get_alpha_parent(session, parent_id)
+    if context is None or context.parent is None or context.parent.id != parent_id:
+        raise HTTPException(status_code=404, detail="alpha parent not found")
+    return context.parent
+
+
+def _children_payload(parent: ParentUser, session: Session):
+    children = session.exec(
+        select(StudentProfile).where(StudentProfile.parent_id == parent.id)
+    ).all()
+    children = sorted(children, key=lambda child: (child.created_at, child.id))
+    return {
+        "parent": _parent_payload(parent),
+        "children": [_student_payload(child, session=session) for child in children],
+    }
+
+
+def _create_child_payload(parent: ParentUser, request: AlphaChildCreate, session: Session):
+    student = StudentProfile(
+        parent_id=parent.id,
+        name=request.nickname,
+        grade_label=GRADE_LABELS[request.grade],
+        persona=StudentPersona.real_child,
+        is_real_child=True,
+    )
+    session.add(student)
+    session.flush()
+    session.add(AbilityProfile(student_id=student.id))
+    try:
+        record_product_event(
+            session,
+            "alpha_child_created",
+            parent_id=parent.id,
+            student_id=student.id,
+            payload={"child_count": 1},
+        )
+    except Exception:
+        pass
+    session.commit()
+    session.refresh(student)
+    return {
+        "child": _student_payload(student),
+        "dashboard_url": _dashboard_url(student.id),
+        "summary_url": _summary_url(student.id),
+    }
+
+
+def _summary_payload(parent: ParentUser, student: StudentProfile, session: Session):
+    assessment_count = _count_rows(session, Assessment, student.id)
+    sentence_count = _count_rows(session, SentenceTraining, student.id)
+    essay_count = _count_rows(session, Essay, student.id)
+    history_rows = session.exec(
+        select(AbilityHistory).where(AbilityHistory.student_id == student.id)
+    ).all()
+
+    deltas = {ability: 0 for ability in ABILITY_ORDER}
+    for row in history_rows:
+        if row.ability_name in deltas:
+            deltas[row.ability_name] += row.delta
+
+    ability_changes = [
+        {
+            "ability": ability,
+            "label": ABILITY_LABELS[ability],
+            "delta": deltas[ability],
+        }
+        for ability in ABILITY_ORDER
+        if deltas[ability] != 0
+    ]
+    assessment_completed = assessment_count > 0
+    has_progress = assessment_count + sentence_count + essay_count > 0 or bool(
+        history_rows
+    )
+    usefulness = parent_summary_usefulness(session, parent.id, student.id)
+
+    return {
+        "parent_id": parent.id,
+        "child": _student_payload(student),
+        "usefulness": usefulness,
+        "assessment_completed": assessment_completed,
+        "practice_counts": {
+            "assessments": assessment_count,
+            "sentence_trainings": sentence_count,
+            "essays": essay_count,
+        },
+        "ability_changes": ability_changes,
+        "recent_highlight": "孩子完成了第一次能力草图。"
+        if assessment_completed
+        else None,
+        "empty_state": None if has_progress else EMPTY_SUMMARY,
+        "next_suggestion": POPULATED_NEXT_SUGGESTION
+        if has_progress
+        else EMPTY_NEXT_SUGGESTION,
+    }
+
+
+def _summary_feedback_payload(
+    parent: ParentUser,
+    student: StudentProfile,
+    request: ParentSummaryFeedbackCreate,
+    session: Session,
+):
+    feedback = session.exec(
+        select(ParentFeedback).where(
+            ParentFeedback.parent_id == parent.id,
+            ParentFeedback.student_id == student.id,
+            ParentFeedback.target_type == "alpha_summary",
+        )
+    ).first()
+    is_create = feedback is None
+    if feedback:
+        feedback.usefulness = request.usefulness
+        feedback.target_id = student.id
+        feedback.alpha_session_id = request.alpha_session_id
+        feedback.updated_at = datetime.now(timezone.utc)
+    else:
+        feedback = ParentFeedback(
+            parent_id=parent.id,
+            student_id=student.id,
+            target_type="alpha_summary",
+            target_id=student.id,
+            usefulness=request.usefulness,
+            alpha_session_id=request.alpha_session_id,
+        )
+    session.add(feedback)
+    if is_create:
+        try:
+            record_product_event(
+                session,
+                "parent_summary_feedback_submitted",
+                parent_id=parent.id,
+                student_id=student.id,
+                alpha_session_id=request.alpha_session_id,
+                payload={
+                    "usefulness": request.usefulness,
+                    "target_type": "alpha_summary",
+                },
+            )
+        except Exception:
+            pass
+    session.commit()
+    session.refresh(feedback)
+    return {
+        "feedback": {
+            "id": feedback.id,
+            "parent_id": feedback.parent_id,
+            "student_id": feedback.student_id,
+            "target_type": feedback.target_type,
+            "target_id": feedback.target_id,
+            "usefulness": feedback.usefulness,
+        }
+    }
+
+
 def _count_rows(session: Session, model, student_id: str) -> int:
     return len(session.exec(select(model).where(model.student_id == student_id)).all())
 
@@ -381,20 +550,61 @@ def create_alpha_parent(
     }
 
 
+@router.get("/parents/me/children")
+def list_session_parent_children(
+    parent: ParentUser = Depends(require_linked_parent),
+    session: Session = Depends(get_db_session),
+):
+    return _children_payload(parent, session)
+
+
+@router.post("/parents/me/children", status_code=201)
+def create_session_parent_child(
+    request: AlphaChildCreate,
+    parent: ParentUser = Depends(require_linked_parent),
+    session: Session = Depends(get_db_session),
+):
+    return _create_child_payload(parent, request, session)
+
+
+@router.get("/parents/me/children/{student_id}/summary")
+def session_parent_child_summary(
+    student_id: str,
+    parent: ParentUser = Depends(require_linked_parent),
+    session: Session = Depends(get_db_session),
+):
+    student = require_student_for_parent(session, parent, student_id)
+    return _summary_payload(parent, student, session)
+
+
+@router.post(
+    "/parents/me/children/{student_id}/summary-feedback",
+    status_code=201,
+)
+def create_session_parent_summary_feedback(
+    student_id: str,
+    request: ParentSummaryFeedbackCreate,
+    parent: ParentUser = Depends(require_linked_parent),
+    session: Session = Depends(get_db_session),
+):
+    student = require_student_for_parent(session, parent, student_id)
+    return _summary_feedback_payload(parent, student, request, session)
+
+
 @router.get("/parents/{parent_id}/children")
 def list_alpha_children(
     parent_id: str,
     session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    context: ParentContext | None = Depends(optional_parent_context),
 ):
-    parent = _get_alpha_parent(session, parent_id)
-    children = session.exec(
-        select(StudentProfile).where(StudentProfile.parent_id == parent.id)
-    ).all()
-    children = sorted(children, key=lambda child: (child.created_at, child.id))
-    return {
-        "parent": _parent_payload(parent),
-        "children": [_student_payload(child, session=session) for child in children],
-    }
+    parent = _resolve_parent_for_path(
+        parent_id=parent_id,
+        session=session,
+        settings=settings,
+        context=context,
+    )
+    return _children_payload(parent, session)
 
 
 @router.post("/parents/{parent_id}/children", status_code=201)
@@ -402,35 +612,16 @@ def create_alpha_child(
     parent_id: str,
     request: AlphaChildCreate,
     session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    context: ParentContext | None = Depends(optional_parent_context),
 ):
-    parent = _get_alpha_parent(session, parent_id)
-    student = StudentProfile(
-        parent_id=parent.id,
-        name=request.nickname,
-        grade_label=GRADE_LABELS[request.grade],
-        persona=StudentPersona.real_child,
-        is_real_child=True,
+    parent = _resolve_parent_for_path(
+        parent_id=parent_id,
+        session=session,
+        settings=settings,
+        context=context,
     )
-    session.add(student)
-    session.flush()
-    session.add(AbilityProfile(student_id=student.id))
-    try:
-        record_product_event(
-            session,
-            "alpha_child_created",
-            parent_id=parent.id,
-            student_id=student.id,
-            payload={"child_count": 1},
-        )
-    except Exception:
-        pass
-    session.commit()
-    session.refresh(student)
-    return {
-        "child": _student_payload(student),
-        "dashboard_url": _dashboard_url(student.id),
-        "summary_url": _summary_url(student.id),
-    }
+    return _create_child_payload(parent, request, session)
 
 
 @router.get("/parents/{parent_id}/children/{student_id}/summary")
@@ -438,52 +629,17 @@ def alpha_child_summary(
     parent_id: str,
     student_id: str,
     session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    context: ParentContext | None = Depends(optional_parent_context),
 ):
-    student = _get_parent_child(session, parent_id, student_id)
-    assessment_count = _count_rows(session, Assessment, student.id)
-    sentence_count = _count_rows(session, SentenceTraining, student.id)
-    essay_count = _count_rows(session, Essay, student.id)
-    history_rows = session.exec(
-        select(AbilityHistory).where(AbilityHistory.student_id == student.id)
-    ).all()
-
-    deltas = {ability: 0 for ability in ABILITY_ORDER}
-    for row in history_rows:
-        if row.ability_name in deltas:
-            deltas[row.ability_name] += row.delta
-
-    ability_changes = [
-        {
-            "ability": ability,
-            "label": ABILITY_LABELS[ability],
-            "delta": deltas[ability],
-        }
-        for ability in ABILITY_ORDER
-        if deltas[ability] != 0
-    ]
-    assessment_completed = assessment_count > 0
-    has_progress = assessment_count + sentence_count + essay_count > 0 or bool(history_rows)
-    usefulness = parent_summary_usefulness(session, parent_id, student.id)
-
-    return {
-        "parent_id": parent_id,
-        "child": _student_payload(student),
-        "usefulness": usefulness,
-        "assessment_completed": assessment_completed,
-        "practice_counts": {
-            "assessments": assessment_count,
-            "sentence_trainings": sentence_count,
-            "essays": essay_count,
-        },
-        "ability_changes": ability_changes,
-        "recent_highlight": "孩子完成了第一次能力草图。"
-        if assessment_completed
-        else None,
-        "empty_state": None if has_progress else EMPTY_SUMMARY,
-        "next_suggestion": POPULATED_NEXT_SUGGESTION
-        if has_progress
-        else EMPTY_NEXT_SUGGESTION,
-    }
+    parent = _resolve_parent_for_path(
+        parent_id=parent_id,
+        session=session,
+        settings=settings,
+        context=context,
+    )
+    student = require_student_for_parent(session, parent, student_id)
+    return _summary_payload(parent, student, session)
 
 
 @router.post(
@@ -495,55 +651,14 @@ def create_parent_summary_feedback(
     student_id: str,
     request: ParentSummaryFeedbackCreate,
     session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    context: ParentContext | None = Depends(optional_parent_context),
 ):
-    student = _get_parent_child(session, parent_id, student_id)
-    feedback = session.exec(
-        select(ParentFeedback).where(
-            ParentFeedback.parent_id == parent_id,
-            ParentFeedback.student_id == student.id,
-            ParentFeedback.target_type == "alpha_summary",
-        )
-    ).first()
-    is_create = feedback is None
-    if feedback:
-        feedback.usefulness = request.usefulness
-        feedback.target_id = student.id
-        feedback.alpha_session_id = request.alpha_session_id
-        feedback.updated_at = datetime.now(timezone.utc)
-    else:
-        feedback = ParentFeedback(
-            parent_id=parent_id,
-            student_id=student.id,
-            target_type="alpha_summary",
-            target_id=student.id,
-            usefulness=request.usefulness,
-            alpha_session_id=request.alpha_session_id,
-        )
-    session.add(feedback)
-    if is_create:
-        try:
-            record_product_event(
-                session,
-                "parent_summary_feedback_submitted",
-                parent_id=parent_id,
-                student_id=student.id,
-                alpha_session_id=request.alpha_session_id,
-                payload={
-                    "usefulness": request.usefulness,
-                    "target_type": "alpha_summary",
-                },
-            )
-        except Exception:
-            pass
-    session.commit()
-    session.refresh(feedback)
-    return {
-        "feedback": {
-            "id": feedback.id,
-            "parent_id": feedback.parent_id,
-            "student_id": feedback.student_id,
-            "target_type": feedback.target_type,
-            "target_id": feedback.target_id,
-            "usefulness": feedback.usefulness,
-        }
-    }
+    parent = _resolve_parent_for_path(
+        parent_id=parent_id,
+        session=session,
+        settings=settings,
+        context=context,
+    )
+    student = require_student_for_parent(session, parent, student_id)
+    return _summary_feedback_payload(parent, student, request, session)
