@@ -370,6 +370,35 @@ def test_parents_me_children_returns_session_parent_children(client, session, mo
     assert [row["id"] for row in response.json()["children"]] == [child.id]
 
 
+def test_legacy_parent_path_requires_session_when_auth_required(
+    client, session, monkeypatch
+):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+    _, parent, _, _ = create_session_family(session)
+
+    response = client.get(f"/api/alpha/parents/{parent.id}/children")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "parent session required"
+
+
+def test_legacy_parent_path_rejects_invalid_session_when_auth_required(
+    client, session, monkeypatch
+):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+    _, parent, _, _ = create_session_family(session)
+
+    response = client.get(
+        f"/api/alpha/parents/{parent.id}/children",
+        cookies={"wenlingo_parent_session": "invalid-token"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "parent session required"
+
+
 def test_legacy_parent_path_requires_matching_session_parent(client, session, monkeypatch):
     monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
     monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")

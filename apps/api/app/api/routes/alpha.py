@@ -269,14 +269,6 @@ def _get_alpha_parent(session: Session, parent_id: str) -> ParentUser:
     return parent
 
 
-def _get_parent_child(session: Session, parent_id: str, student_id: str) -> StudentProfile:
-    _get_alpha_parent(session, parent_id)
-    student = session.get(StudentProfile, student_id)
-    if not student or student.parent_id != parent_id:
-        raise HTTPException(status_code=404, detail="student not found")
-    return student
-
-
 def _resolve_parent_for_path(
     *,
     parent_id: str,
@@ -286,7 +278,9 @@ def _resolve_parent_for_path(
 ) -> ParentUser:
     if not settings.auth_required_for_alpha:
         return _get_alpha_parent(session, parent_id)
-    if context is None or context.parent is None or context.parent.id != parent_id:
+    if context is None:
+        raise HTTPException(status_code=401, detail="parent session required")
+    if context.parent is None or context.parent.id != parent_id:
         raise HTTPException(status_code=404, detail="alpha parent not found")
     return context.parent
 
