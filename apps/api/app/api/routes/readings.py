@@ -4,14 +4,13 @@ from sqlmodel import Session, select
 
 from app.api.auth_deps import (
     ParentContext,
-    optional_parent_context,
-    require_allowed_origin,
-    require_json_state_change,
+    require_auth_mode_state_change,
+    require_student_for_auth_mode,
 )
 from app.api.deps import get_db_session
 from app.core.config import Settings, get_settings
 from app.domain.enums import TaskType
-from app.domain.models import AbilityProfile, ReadingSession, StudentProfile
+from app.domain.models import AbilityProfile, ReadingSession
 from app.services.abilities import apply_ability_delta
 from app.services.gamification import settle_task
 
@@ -32,36 +31,18 @@ class ReadingCreate(BaseModel):
     answers: dict[str, str]
 
 
-def _student_or_404_for_auth_mode(
-    session: Session,
-    settings: Settings,
-    context: ParentContext | None,
-    student_id: str,
-) -> StudentProfile:
-    student = session.get(StudentProfile, student_id)
-    if not student:
-        raise HTTPException(status_code=404, detail="student not found")
-    if settings.auth_required_for_alpha:
-        if context is None or context.parent is None:
-            raise HTTPException(status_code=401, detail="parent session required")
-        if student.parent_id != context.parent.id:
-            raise HTTPException(status_code=404, detail="student not found")
-    return student
-
-
 @router.post(
     "/{student_id}/readings",
     status_code=201,
-    dependencies=[Depends(require_allowed_origin), Depends(require_json_state_change)],
 )
 def create_reading(
     student_id: str,
     request: ReadingCreate,
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
-    context: ParentContext | None = Depends(optional_parent_context),
+    context: ParentContext | None = Depends(require_auth_mode_state_change),
 ):
-    student = _student_or_404_for_auth_mode(session, settings, context, student_id)
+    student = require_student_for_auth_mode(session, settings, context, student_id)
     ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
     article = ARTICLES.get(request.article_id)
     if not ability or not article:

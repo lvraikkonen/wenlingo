@@ -516,6 +516,27 @@ def test_student_dashboard_requires_session_in_auth_mode(client, session, monkey
     assert response.status_code == 401
 
 
+@pytest.mark.parametrize(
+    "cookies",
+    [
+        None,
+        {"wenlingo_parent_session": "invalid-token"},
+    ],
+)
+def test_student_dashboard_requires_session_before_student_lookup(
+    client, monkeypatch, cookies
+):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+
+    response = client.get(
+        "/api/students/nonexistent-student/dashboard",
+        cookies=cookies,
+    )
+
+    assert response.status_code == 401
+
+
 def test_student_dashboard_hides_cross_family_child(client, session, monkeypatch):
     monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
     monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
@@ -530,6 +551,21 @@ def test_student_dashboard_hides_cross_family_child(client, session, monkeypatch
     )
 
     assert response.status_code == 404
+
+
+def test_essay_revision_requires_session_before_essay_lookup(client, monkeypatch):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+
+    response = client.post(
+        "/api/essays/nonexistent-essay/revision",
+        json={
+            "content": "我学会了骑车。刚开始我紧紧抓车把，后来能自己骑过花坛。",
+            "completed_tasks": [],
+        },
+    )
+
+    assert response.status_code == 401
 
 
 def test_essay_revision_hides_cross_family_essay(client, session, monkeypatch):
@@ -560,3 +596,55 @@ def test_essay_revision_hides_cross_family_essay(client, session, monkeypatch):
     )
 
     assert response.status_code == 404
+
+
+def test_student_route_ignores_problematic_session_when_auth_disabled(
+    client, session, monkeypatch
+):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "false")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+    account, _, child, token = create_session_family(session)
+    session.add(
+        ParentUser(
+            email=f"duplicate-{account.id}@wenlingo.local",
+            display_name="Duplicate Parent",
+            account_id=account.id,
+            account_linked_at=utcnow(),
+        )
+    )
+    session.commit()
+
+    response = client.get(
+        f"/api/students/{child.id}/dashboard",
+        cookies={"wenlingo_parent_session": token},
+    )
+
+    assert response.status_code == 200
+
+
+def test_legacy_state_change_does_not_enforce_auth_json_guard(
+    client, session, monkeypatch
+):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "false")
+    _, _, child, _ = create_session_family(session)
+
+    response = client.post(
+        f"/api/students/{child.id}/readings",
+        data="article_id=spring-sounds",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_auth_state_change_requires_session_before_json_guard(client, monkeypatch):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+
+    response = client.post(
+        "/api/students/nonexistent-student/readings",
+        data="article_id=spring-sounds",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+
+    assert response.status_code == 401

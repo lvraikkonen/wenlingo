@@ -5,9 +5,9 @@ from sqlmodel import Session, select
 
 from app.api.auth_deps import (
     ParentContext,
-    optional_parent_context,
-    require_allowed_origin,
-    require_json_state_change,
+    require_auth_mode_state_change,
+    require_essay_for_auth_mode,
+    require_student_for_auth_mode,
 )
 from app.api.deps import get_db_session, get_llm_provider
 from app.api.feedback_state import feedback_reaction_value
@@ -53,41 +53,9 @@ def _is_ai_feedback_failure(log) -> bool:
     )
 
 
-def _student_or_404_for_auth_mode(
-    session: Session,
-    settings: Settings,
-    context: ParentContext | None,
-    student_id: str,
-) -> StudentProfile:
-    student = session.get(StudentProfile, student_id)
-    if not student:
-        raise HTTPException(status_code=404, detail="student not found")
-    if settings.auth_required_for_alpha:
-        if context is None or context.parent is None:
-            raise HTTPException(status_code=401, detail="parent session required")
-        if student.parent_id != context.parent.id:
-            raise HTTPException(status_code=404, detail="student not found")
-    return student
-
-
-def _essay_or_404_for_auth_mode(
-    session: Session,
-    settings: Settings,
-    context: ParentContext | None,
-    essay_id: str,
-) -> Essay:
-    essay = session.get(Essay, essay_id)
-    if not essay:
-        raise HTTPException(status_code=404, detail="essay not found")
-    if settings.auth_required_for_alpha:
-        _student_or_404_for_auth_mode(session, settings, context, essay.student_id)
-    return essay
-
-
 @router.post(
     "/api/students/{student_id}/essays",
     status_code=201,
-    dependencies=[Depends(require_allowed_origin), Depends(require_json_state_change)],
 )
 async def create_essay(
     student_id: str,
@@ -95,9 +63,9 @@ async def create_essay(
     session: Session = Depends(get_db_session),
     provider: LLMProvider = Depends(get_llm_provider),
     settings: Settings = Depends(get_settings),
-    context: ParentContext | None = Depends(optional_parent_context),
+    context: ParentContext | None = Depends(require_auth_mode_state_change),
 ):
-    student = _student_or_404_for_auth_mode(session, settings, context, student_id)
+    student = require_student_for_auth_mode(session, settings, context, student_id)
     ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
     if not ability:
         raise HTTPException(status_code=404, detail="student not found")
@@ -185,7 +153,6 @@ async def create_essay(
 @router.post(
     "/api/essays/{essay_id}/revision",
     status_code=201,
-    dependencies=[Depends(require_allowed_origin), Depends(require_json_state_change)],
 )
 async def submit_revision(
     essay_id: str,
@@ -193,9 +160,9 @@ async def submit_revision(
     session: Session = Depends(get_db_session),
     provider: LLMProvider = Depends(get_llm_provider),
     settings: Settings = Depends(get_settings),
-    context: ParentContext | None = Depends(optional_parent_context),
+    context: ParentContext | None = Depends(require_auth_mode_state_change),
 ):
-    essay = _essay_or_404_for_auth_mode(session, settings, context, essay_id)
+    essay = require_essay_for_auth_mode(session, settings, context, essay_id)
     if essay.status == ASSESSMENT_ESSAY_STATUS:
         raise HTTPException(status_code=404, detail="essay not found")
     if essay.status == SETTLED_ESSAY_STATUS:

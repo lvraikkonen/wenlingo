@@ -4,16 +4,15 @@ from sqlmodel import Session, select
 
 from app.api.auth_deps import (
     ParentContext,
-    optional_parent_context,
-    require_allowed_origin,
-    require_json_state_change,
+    require_auth_mode_state_change,
+    require_student_for_auth_mode,
 )
 from app.api.deps import get_db_session, get_llm_provider
 from app.api.feedback_state import feedback_reaction_value
 from app.api.routes.alpha import record_product_event
 from app.core.config import Settings, get_settings
 from app.domain.enums import SentenceFocus, TaskType
-from app.domain.models import AbilityProfile, SentenceTraining, StudentProfile
+from app.domain.models import AbilityProfile, SentenceTraining
 from app.services.abilities import VALID_ABILITY_NAMES, apply_ability_delta
 from app.services.ai_tasks import sentence_upgrade_feedback
 from app.services.gamification import settle_task
@@ -41,27 +40,9 @@ def _is_ai_feedback_failure(log) -> bool:
     )
 
 
-def _student_or_404_for_auth_mode(
-    session: Session,
-    settings: Settings,
-    context: ParentContext | None,
-    student_id: str,
-) -> StudentProfile:
-    student = session.get(StudentProfile, student_id)
-    if not student:
-        raise HTTPException(status_code=404, detail="student not found")
-    if settings.auth_required_for_alpha:
-        if context is None or context.parent is None:
-            raise HTTPException(status_code=401, detail="parent session required")
-        if student.parent_id != context.parent.id:
-            raise HTTPException(status_code=404, detail="student not found")
-    return student
-
-
 @router.post(
     "/{student_id}/sentences",
     status_code=201,
-    dependencies=[Depends(require_allowed_origin), Depends(require_json_state_change)],
 )
 async def create_sentence_training(
     student_id: str,
@@ -69,9 +50,9 @@ async def create_sentence_training(
     session: Session = Depends(get_db_session),
     provider: LLMProvider = Depends(get_llm_provider),
     settings: Settings = Depends(get_settings),
-    context: ParentContext | None = Depends(optional_parent_context),
+    context: ParentContext | None = Depends(require_auth_mode_state_change),
 ):
-    student = _student_or_404_for_auth_mode(session, settings, context, student_id)
+    student = require_student_for_auth_mode(session, settings, context, student_id)
     ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
     if not ability:
         raise HTTPException(status_code=404, detail="student not found")
