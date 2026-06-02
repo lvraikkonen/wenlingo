@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from hashlib import sha256
+import logging
 import re
 from typing import Any, Literal
 from uuid import uuid4
@@ -7,11 +8,14 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import update
+from sqlalchemy.orm import aliased
 from sqlmodel import Session, select
 
 from app.api.auth_deps import (
     ParentContext,
     optional_parent_context,
+    require_allowed_origin,
+    require_json_state_change,
     require_linked_parent,
     require_student_for_parent,
 )
@@ -33,6 +37,7 @@ from app.domain.models import (
 )
 
 router = APIRouter(prefix="/api/alpha", tags=["alpha"])
+LOGGER = logging.getLogger(__name__)
 
 GRADE_LABELS = {
     3: "三年级",
@@ -80,6 +85,7 @@ P1_EVENT_TYPES = {
     "sentence_training_submitted",
     "essay_draft_submitted",
     "essay_revision_submitted",
+    "legacy_parent_account_bound",
     "legacy_parent_invite_bound",
 }
 
@@ -136,6 +142,10 @@ class AlphaInviteValidate(BaseModel):
         if not normalized:
             raise ValueError("code is required")
         return normalized
+
+
+class LegacyParentBindRequest(BaseModel):
+    legacy_parent_id: str = Field(min_length=1)
 
 
 class ProductEventCreate(BaseModel):
@@ -269,6 +279,16 @@ def _get_alpha_parent(session: Session, parent_id: str) -> ParentUser:
     return parent
 
 
+def _has_consumed_alpha_invite(session: Session, parent_id: str) -> bool:
+    invite = session.exec(
+        select(AlphaInviteCode).where(
+            AlphaInviteCode.consumed_by_parent_id == parent_id,
+            AlphaInviteCode.status == "consumed",
+        )
+    ).first()
+    return invite is not None
+
+
 def _resolve_parent_for_path(
     *,
     parent_id: str,
@@ -293,6 +313,23 @@ def _optional_parent_context_when_alpha_auth_required(
     if not settings.auth_required_for_alpha:
         return None
     return optional_parent_context(request=request, db=session, settings=settings)
+
+
+def _require_legacy_parent_bind_context(
+    request: Request,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> ParentContext:
+    if not settings.auth_required_for_alpha:
+        raise HTTPException(status_code=404, detail="alpha parent not found")
+    context = optional_parent_context(request=request, db=session, settings=settings)
+    if context is None:
+        raise HTTPException(status_code=401, detail="parent session required")
+    require_allowed_origin(request, settings)
+    require_json_state_change(request)
+    if context.account.email_verified_at is None:
+        raise HTTPException(status_code=401, detail="verified parent session required")
+    return context
 
 
 def _children_payload(parent: ParentUser, session: Session):
@@ -552,6 +589,51 @@ def create_alpha_parent(
         "parent": _parent_payload(parent),
         "children_url": "/parent/children",
     }
+
+
+@router.post("/legacy-parent-bind")
+def bind_legacy_alpha_parent(
+    request: LegacyParentBindRequest,
+    context: ParentContext = Depends(_require_legacy_parent_bind_context),
+    session: Session = Depends(get_db_session),
+):
+    parent = session.get(ParentUser, request.legacy_parent_id)
+    if not parent or not _has_consumed_alpha_invite(session, parent.id):
+        raise HTTPException(status_code=404, detail="alpha parent not found")
+
+    existing_parent_for_account = aliased(ParentUser)
+    linked_at = datetime.now(timezone.utc)
+    bind_result = session.execute(
+        update(ParentUser)
+        .where(
+            ParentUser.id == parent.id,
+            ParentUser.account_id.is_(None),
+            ~select(existing_parent_for_account.id)
+            .where(existing_parent_for_account.account_id == context.account.id)
+            .exists(),
+        )
+        .values(account_id=context.account.id, account_linked_at=linked_at)
+        .execution_options(synchronize_session=False)
+    )
+    if bind_result.rowcount != 1:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="这个家庭已经绑定过账号，请联系邀请人处理。",
+        )
+
+    record_product_event(
+        session,
+        "legacy_parent_account_bound",
+        parent_id=parent.id,
+    )
+    LOGGER.info(
+        "legacy_parent_account_bound",
+        extra={"parent_id": parent.id, "account_id": context.account.id},
+    )
+    session.commit()
+    session.refresh(parent)
+    return {"parent": _parent_payload(parent)}
 
 
 @router.get("/parents/me/children")
