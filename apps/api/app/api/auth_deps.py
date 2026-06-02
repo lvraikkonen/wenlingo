@@ -59,13 +59,17 @@ def optional_parent_context(
         return None
 
     account, parent_session = session_pair
-    parents = db.exec(select(ParentUser).where(ParentUser.account_id == account.id)).all()
-    if len(parents) > 1:
-        raise HTTPException(status_code=409, detail="multiple alpha parents linked")
-    parent = parents[0] if parents else None
+    parent = get_linked_parent_for_account(db=db, account_id=account.id)
     if touch_parent_session(db=db, settings=settings, parent_session=parent_session):
         db.commit()
     return ParentContext(account=account, parent=parent, session=parent_session)
+
+
+def get_linked_parent_for_account(db: Session, account_id: str) -> ParentUser | None:
+    parents = db.exec(select(ParentUser).where(ParentUser.account_id == account_id)).all()
+    if len(parents) > 1:
+        raise HTTPException(status_code=409, detail="multiple alpha parents linked")
+    return parents[0] if parents else None
 
 
 def require_parent_context(

@@ -4,7 +4,7 @@ import pytest
 from sqlmodel import select
 
 from app.core.config import Settings
-from app.domain.models import ParentAccount, ParentSession, utcnow
+from app.domain.models import ParentAccount, ParentSession, ParentUser, utcnow
 from app.services.auth_security import hash_secret
 from app.services.parent_sessions import create_parent_session as issue_parent_session
 
@@ -69,6 +69,33 @@ def test_get_session_with_valid_cookie_returns_masked_account(client, session):
     assert response.status_code == 200
     assert response.json()["authenticated"] is True
     assert response.json()["account"]["email_masked"] == "pa***@example.com"
+
+
+def test_get_session_fails_closed_for_duplicate_linked_parents(client, session):
+    account = create_account(session)
+    create_parent_session(session, account)
+    session.add(
+        ParentUser(
+            email="parent-one@example.com",
+            display_name="Parent One",
+            account_id=account.id,
+            account_linked_at=utcnow(),
+        )
+    )
+    session.add(
+        ParentUser(
+            email="parent-two@example.com",
+            display_name="Parent Two",
+            account_id=account.id,
+            account_linked_at=utcnow(),
+        )
+    )
+    session.commit()
+    client.cookies.set("wenlingo_parent_session", "session-token")
+
+    response = client.get("/api/auth/session")
+
+    assert response.status_code == 409
 
 
 def test_get_session_with_expired_cookie_returns_unauthenticated(client, session):

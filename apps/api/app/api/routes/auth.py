@@ -2,9 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session, select
 
+from app.api.auth_deps import get_linked_parent_for_account
 from app.api.deps import get_db_session
 from app.core.config import Settings, get_settings
-from app.domain.models import ParentUser, StudentProfile, utcnow
+from app.domain.models import StudentProfile, utcnow
 from app.domain.seed import seed_demo_data
 from app.services.auth_codes import request_magic_code, verify_magic_code
 from app.services.auth_security import mask_phone, normalize_email, normalize_phone
@@ -113,7 +114,7 @@ def get_parent_session(
     if touch_parent_session(db=session, settings=settings, parent_session=parent_session):
         session.commit()
 
-    parent = session.exec(select(ParentUser).where(ParentUser.account_id == account.id)).first()
+    parent = get_linked_parent_for_account(db=session, account_id=account.id)
     return auth_session_payload(account=account, parent_id=parent.id if parent else None)
 
 
