@@ -50,6 +50,21 @@ export type AlphaParentResponse = {
   children_url: string;
 };
 
+export type AuthSession =
+  | { authenticated: false }
+  | {
+      authenticated: true;
+      account: {
+        email_masked: string;
+        phone_bound: boolean;
+        last_login_at?: string | null;
+      };
+      parent?: {
+        id: string;
+        display_name: string;
+      } | null;
+    };
+
 export type AlphaInviteValidationResponse = {
   valid: boolean;
   invite_id: string;
