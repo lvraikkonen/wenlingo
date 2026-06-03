@@ -56,6 +56,20 @@ def test_playwright_alpha_seed_rejects_unsafe_database_urls(monkeypatch):
         seed_playwright_alpha._assert_playwright_alpha_seed_is_safe(
             "postgresql+psycopg://wenlingo:wenlingo@staging-db/wenlingo"
         )
+    with pytest.raises(SystemExit, match="Refusing"):
+        seed_playwright_alpha._assert_playwright_alpha_seed_is_safe(
+            "sqlite:///./latest.db"
+        )
+    with pytest.raises(SystemExit, match="Refusing") as exc_info:
+        seed_playwright_alpha._assert_playwright_alpha_seed_is_safe(
+            "postgresql+psycopg://testuser:secret@localhost:5432/wenlingo"
+        )
+
+    message = str(exc_info.value)
+    assert "secret" not in message
+    assert "testuser" not in message
+    assert "localhost" not in message
+    assert "postgresql+psycopg://testuser:secret@localhost:5432/wenlingo" not in message
 
 
 def test_playwright_alpha_seed_accepts_disposable_database_urls(monkeypatch):
@@ -68,4 +82,10 @@ def test_playwright_alpha_seed_accepts_disposable_database_urls(monkeypatch):
     )
     seed_playwright_alpha._assert_playwright_alpha_seed_is_safe(
         "postgresql+psycopg://wenlingo:wenlingo@localhost:5433/wenlingo_test"
+    )
+    seed_playwright_alpha._assert_playwright_alpha_seed_is_safe(
+        "sqlite:////tmp/playwright-e2e.db"
+    )
+    seed_playwright_alpha._assert_playwright_alpha_seed_is_safe(
+        "postgresql+psycopg://wenlingo:wenlingo@127.0.0.1:5433/playwright_e2e"
     )

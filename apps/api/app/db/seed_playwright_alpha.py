@@ -1,4 +1,5 @@
 import os
+from pathlib import PurePosixPath
 from datetime import datetime, timezone
 
 from sqlalchemy import delete
@@ -23,7 +24,8 @@ LEGACY_PARENT_EMAIL = "legacy-e2e-parent@example.com"
 LEGACY_INVITE_CODE = "LEGACY-E2E"
 PLAYWRIGHT_ALPHA_SEED_FLAG = "PLAYWRIGHT_ALPHA_SEED"
 DEFAULT_PLAYWRIGHT_DATABASE_URL = "sqlite:///./playwright-e2e.db"
-DISPOSABLE_DATABASE_MARKERS = ("playwright", "test")
+ALLOWED_SQLITE_DATABASE_BASENAME = "playwright-e2e.db"
+ALLOWED_POSTGRES_DATABASE_NAMES = {"wenlingo_test", "playwright_e2e"}
 LOCAL_DATABASE_HOSTS = {"", "localhost", "127.0.0.1", "::1"}
 
 
@@ -38,22 +40,28 @@ def _is_disposable_e2e_database_url(database_url: str) -> bool:
         return False
 
     backend_name = parsed_url.get_backend_name()
-    marker_text = " ".join(
-        part
-        for part in (
-            normalized,
-            (parsed_url.database or "").lower(),
-        )
-        if part
-    )
-    has_disposable_marker = any(
-        marker in marker_text for marker in DISPOSABLE_DATABASE_MARKERS
-    )
+    database_name = (parsed_url.database or "").lower()
     if backend_name == "sqlite":
-        return has_disposable_marker
+        return PurePosixPath(database_name).name == ALLOWED_SQLITE_DATABASE_BASENAME
     if backend_name == "postgresql":
-        return (parsed_url.host or "").lower() in LOCAL_DATABASE_HOSTS and has_disposable_marker
+        return (
+            (parsed_url.host or "").lower() in LOCAL_DATABASE_HOSTS
+            and database_name in ALLOWED_POSTGRES_DATABASE_NAMES
+        )
     return False
+
+
+def _safe_database_target(database_url: str) -> str:
+    try:
+        parsed_url = make_url(database_url)
+    except Exception:
+        return "unparseable database URL"
+
+    backend_name = parsed_url.get_backend_name()
+    database_name = parsed_url.database or ""
+    if backend_name == "sqlite":
+        database_name = PurePosixPath(database_name).name
+    return f"{backend_name}:{database_name or '<none>'}"
 
 
 def _assert_playwright_alpha_seed_is_safe(database_url: str | None = None) -> None:
@@ -65,7 +73,8 @@ def _assert_playwright_alpha_seed_is_safe(database_url: str | None = None) -> No
     target_database_url = database_url or get_settings().database_url
     if not _is_disposable_e2e_database_url(target_database_url):
         raise SystemExit(
-            f"Refusing to seed non-disposable database URL: {target_database_url}"
+            "Refusing to seed non-disposable database target: "
+            f"{_safe_database_target(target_database_url)}"
         )
 
 
