@@ -51,6 +51,15 @@ def main() -> None:
         if parent.account_id and parent.account_id != account.id:
             raise SystemExit("parent is already linked to another account")
 
+        existing_parent_for_account = session.exec(
+            select(ParentUser).where(
+                ParentUser.account_id == account.id,
+                ParentUser.id != parent.id,
+            )
+        ).first()
+        if existing_parent_for_account:
+            raise SystemExit("account is already linked to another parent")
+
         parent.account_id = account.id
         parent.account_linked_at = parent.account_linked_at or now
         session.add(parent)

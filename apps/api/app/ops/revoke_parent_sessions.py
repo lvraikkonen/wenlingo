@@ -34,6 +34,10 @@ def main() -> None:
             if not account:
                 raise SystemExit("account not found")
             account_id = account.id
+        else:
+            account = session.get(ParentAccount, account_id)
+            if not account:
+                raise SystemExit("account not found")
 
         now = utcnow()
         sessions = session.exec(
