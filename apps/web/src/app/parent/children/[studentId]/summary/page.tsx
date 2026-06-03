@@ -4,8 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
 import { ParentSummaryFeedback } from "../../../../../components/ParentSummaryFeedback";
-import { getAlphaChildSummary, recordAlphaEvent } from "../../../../../lib/api";
-import { getStoredAlphaParentId } from "../../../../../lib/alphaParent";
+import {
+  getMyAlphaChildSummary,
+  isUnauthorizedError,
+  recordAlphaEvent,
+} from "../../../../../lib/api";
 import { getStoredAlphaSessionId } from "../../../../../lib/alphaSession";
 import type { AlphaChildSummary } from "../../../../../lib/types";
 
@@ -21,37 +24,34 @@ export default function ParentChildSummaryPage({ params }: SummaryPageProps) {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const storedParentId = getStoredAlphaParentId();
     setData(null);
     setError("");
     setIsLoading(true);
 
-    if (!storedParentId) {
-      replace("/alpha/start");
-      return;
-    }
-
-    recordAlphaEvent({
-      event_type: "summary_viewed",
-      parent_id: storedParentId,
-      student_id: studentId,
-      alpha_session_id: getStoredAlphaSessionId(),
-      payload: {
-        path: `/parent/children/${studentId}/summary`,
-        status: "viewed",
-      },
-    });
-
     let isMounted = true;
-    getAlphaChildSummary(storedParentId, studentId)
+    getMyAlphaChildSummary(studentId)
       .then((response) => {
         if (isMounted) {
           setData(response);
+          recordAlphaEvent({
+            event_type: "summary_viewed",
+            parent_id: response.parent_id,
+            student_id: studentId,
+            alpha_session_id: getStoredAlphaSessionId(),
+            payload: {
+              path: `/parent/children/${studentId}/summary`,
+              status: "viewed",
+            },
+          });
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (isMounted) {
-          setError("成长摘要加载失败，请稍后再试。");
+          if (isUnauthorizedError(error)) {
+            replace("/alpha/start");
+          } else {
+            setError("成长摘要加载失败，请稍后再试。");
+          }
         }
       })
       .finally(() => {

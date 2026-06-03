@@ -3,8 +3,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { getAlphaChildren, recordAlphaEvent } from "../../../lib/api";
-import { getStoredAlphaParentId } from "../../../lib/alphaParent";
+import {
+  getMyAlphaChildren,
+  isUnauthorizedError,
+  recordAlphaEvent,
+} from "../../../lib/api";
 import { getStoredAlphaSessionId } from "../../../lib/alphaSession";
 import type { AlphaChildrenResponse } from "../../../lib/types";
 
@@ -15,29 +18,26 @@ export default function ParentChildrenPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const parentId = getStoredAlphaParentId();
-    if (!parentId) {
-      router.replace("/alpha/start");
-      return;
-    }
-
-    recordAlphaEvent({
-      event_type: "parent_children_viewed",
-      parent_id: parentId,
-      alpha_session_id: getStoredAlphaSessionId(),
-      payload: { path: "/parent/children", status: "viewed" },
-    });
-
     let isMounted = true;
-    getAlphaChildren(parentId)
+    getMyAlphaChildren()
       .then((response) => {
         if (isMounted) {
           setData(response);
+          recordAlphaEvent({
+            event_type: "parent_children_viewed",
+            parent_id: response.parent.id,
+            alpha_session_id: getStoredAlphaSessionId(),
+            payload: { path: "/parent/children", status: "viewed" },
+          });
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (isMounted) {
-          setError("孩子列表加载失败，请稍后再试。");
+          if (isUnauthorizedError(error)) {
+            router.replace("/alpha/start");
+          } else {
+            setError("孩子列表加载失败，请稍后再试。");
+          }
         }
       })
       .finally(() => {

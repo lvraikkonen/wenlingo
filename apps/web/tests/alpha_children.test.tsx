@@ -3,8 +3,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { beforeEach, expect, test, vi } from "vitest";
 import ParentChildrenPage from "../src/app/parent/children/page";
 import NewChildPage from "../src/app/parent/children/new/page";
-import { createAlphaChild, getAlphaChildren, recordAlphaEvent } from "../src/lib/api";
-import { ALPHA_PARENT_STORAGE_KEY } from "../src/lib/alphaParent";
+import {
+  createMyAlphaChild,
+  getMyAlphaChildren,
+  recordAlphaEvent,
+} from "../src/lib/api";
 import { ALPHA_SESSION_STORAGE_KEY } from "../src/lib/alphaSession";
 
 const push = vi.fn();
@@ -15,7 +18,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("../src/lib/api", () => ({
-  getAlphaChildren: vi.fn(async () => ({
+  getMyAlphaChildren: vi.fn(async () => ({
     parent: { id: "parent-1", display_name: "小星家长" },
     children: [
       {
@@ -31,7 +34,7 @@ vi.mock("../src/lib/api", () => ({
       },
     ],
   })),
-  createAlphaChild: vi.fn(async () => ({
+  createMyAlphaChild: vi.fn(async () => ({
     child: {
       id: "student-2",
       nickname: "小月",
@@ -44,6 +47,11 @@ vi.mock("../src/lib/api", () => ({
     dashboard_url: "/children/student-2",
     summary_url: "/parent/children/student-2/summary",
   })),
+  isUnauthorizedError: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    error.status === 401,
   recordAlphaEvent: vi.fn(async () => undefined),
 }));
 
@@ -52,25 +60,26 @@ beforeEach(() => {
   window.localStorage.clear();
   push.mockClear();
   replace.mockClear();
-  vi.mocked(getAlphaChildren).mockClear();
-  vi.mocked(createAlphaChild).mockClear();
+  vi.mocked(getMyAlphaChildren).mockClear();
+  vi.mocked(createMyAlphaChild).mockClear();
   vi.mocked(recordAlphaEvent).mockClear();
 });
 
-test("children list redirects to alpha start when parent id is missing", async () => {
+test("children list redirects to alpha start when session is unauthorized", async () => {
+  vi.mocked(getMyAlphaChildren).mockRejectedValueOnce({ status: 401 });
+
   render(<ParentChildrenPage />);
 
   await waitFor(() => expect(replace).toHaveBeenCalledWith("/alpha/start"));
 });
 
 test("children list renders child card and parent actions", async () => {
-  window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "parent-1");
   window.localStorage.setItem(ALPHA_SESSION_STORAGE_KEY, "session-1");
 
   render(<ParentChildrenPage />);
 
   expect(await screen.findByRole("heading", { name: "我的孩子" })).toBeInTheDocument();
-  expect(getAlphaChildren).toHaveBeenCalledWith("parent-1");
+  expect(getMyAlphaChildren).toHaveBeenCalledWith();
   expect(screen.getByText("小星")).toBeInTheDocument();
   expect(screen.getByText("四年级")).toBeInTheDocument();
   expect(screen.getByText("等待入门小试炼")).toBeInTheDocument();
@@ -95,7 +104,6 @@ test("children list renders child card and parent actions", async () => {
 });
 
 test("children list records child handoff click with student id", async () => {
-  window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "parent-1");
   window.localStorage.setItem(ALPHA_SESSION_STORAGE_KEY, "session-1");
 
   render(<ParentChildrenPage />);
@@ -118,8 +126,6 @@ test("children list records child handoff click with student id", async () => {
 });
 
 test("new child page validates required nickname before submit", async () => {
-  window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "parent-1");
-
   render(<NewChildPage />);
   fireEvent.change(screen.getByLabelText("孩子怎么称呼？"), {
     target: { value: "   " },
@@ -127,12 +133,10 @@ test("new child page validates required nickname before submit", async () => {
   fireEvent.click(screen.getByRole("button", { name: "创建孩子档案" }));
 
   expect(await screen.findByRole("alert")).toHaveTextContent("请填写孩子昵称。");
-  expect(createAlphaChild).not.toHaveBeenCalled();
+  expect(createMyAlphaChild).not.toHaveBeenCalled();
 });
 
 test("new child page rejects nickname longer than 24 before submit", async () => {
-  window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "parent-1");
-
   render(<NewChildPage />);
   fireEvent.change(screen.getByLabelText("孩子怎么称呼？"), {
     target: { value: "一二三四五六七八九十一二三四五六七八九十一二三四五" },
@@ -140,12 +144,10 @@ test("new child page rejects nickname longer than 24 before submit", async () =>
   fireEvent.click(screen.getByRole("button", { name: "创建孩子档案" }));
 
   expect(await screen.findByRole("alert")).toHaveTextContent("孩子昵称最多 24 个字。");
-  expect(createAlphaChild).not.toHaveBeenCalled();
+  expect(createMyAlphaChild).not.toHaveBeenCalled();
 });
 
 test("new child page rejects invalid grade before submit", async () => {
-  window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "parent-1");
-
   render(<NewChildPage />);
   fireEvent.change(screen.getByLabelText("孩子怎么称呼？"), {
     target: { value: "小月" },
@@ -156,12 +158,10 @@ test("new child page rejects invalid grade before submit", async () => {
   fireEvent.click(screen.getByRole("button", { name: "创建孩子档案" }));
 
   expect(await screen.findByRole("alert")).toHaveTextContent("请选择 3-6 年级。");
-  expect(createAlphaChild).not.toHaveBeenCalled();
+  expect(createMyAlphaChild).not.toHaveBeenCalled();
 });
 
 test("new child page creates child and shows handoff confirmation", async () => {
-  window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "parent-1");
-
   render(<NewChildPage />);
   fireEvent.change(screen.getByLabelText("孩子怎么称呼？"), {
     target: { value: "小月" },
@@ -172,7 +172,7 @@ test("new child page creates child and shows handoff confirmation", async () => 
   fireEvent.click(screen.getByRole("button", { name: "创建孩子档案" }));
 
   await waitFor(() => {
-    expect(createAlphaChild).toHaveBeenCalledWith("parent-1", {
+    expect(createMyAlphaChild).toHaveBeenCalledWith({
       nickname: "小月",
       grade: 5,
     });

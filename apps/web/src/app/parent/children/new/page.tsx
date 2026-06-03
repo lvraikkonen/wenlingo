@@ -2,14 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { FormEvent } from "react";
-import { createAlphaChild } from "../../../../lib/api";
-import { getStoredAlphaParentId } from "../../../../lib/alphaParent";
+import { createMyAlphaChild, isUnauthorizedError } from "../../../../lib/api";
 
 export default function NewChildPage() {
   const router = useRouter();
-  const [parentId] = useState(() => getStoredAlphaParentId());
   const [nickname, setNickname] = useState("");
   const [grade, setGrade] = useState("4");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -18,12 +16,6 @@ export default function NewChildPage() {
     name: string;
     dashboardUrl: string;
   } | null>(null);
-
-  useEffect(() => {
-    if (!parentId) {
-      router.replace("/alpha/start");
-    }
-  }, [parentId, router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -45,15 +37,10 @@ export default function NewChildPage() {
       setError("请选择 3-6 年级。");
       return;
     }
-    if (!parentId) {
-      router.replace("/alpha/start");
-      return;
-    }
-
     setIsSubmitting(true);
     setError("");
     try {
-      const response = await createAlphaChild(parentId, {
+      const response = await createMyAlphaChild({
         nickname: trimmedNickname,
         grade: gradeNumber,
       });
@@ -61,8 +48,12 @@ export default function NewChildPage() {
         name: response.child.name,
         dashboardUrl: response.dashboard_url,
       });
-    } catch {
-      setError("创建孩子档案失败，请稍后再试。");
+    } catch (requestError: unknown) {
+      if (isUnauthorizedError(requestError)) {
+        router.replace("/alpha/start");
+      } else {
+        setError("创建孩子档案失败，请稍后再试。");
+      }
     } finally {
       setIsSubmitting(false);
     }

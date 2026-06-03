@@ -1,7 +1,8 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { saveParentSummaryFeedback } from "../lib/api";
+import { isUnauthorizedError, saveMyParentSummaryFeedback } from "../lib/api";
 import { getStoredAlphaSessionId } from "../lib/alphaSession";
 import type { ParentSummaryUsefulness } from "../lib/types";
 
@@ -21,6 +22,7 @@ export function ParentSummaryFeedback({
   studentId,
   initialUsefulness = null,
 }: ParentSummaryFeedbackProps) {
+  const router = useRouter();
   const targetKey = `${parentId}:${studentId}`;
   const activeTargetKey = useRef(targetKey);
   const [selected, setSelected] = useState<ParentSummaryUsefulness | null>(
@@ -50,7 +52,7 @@ export function ParentSummaryFeedback({
     const saveTargetKey = targetKey;
 
     try {
-      const response = await saveParentSummaryFeedback(parentId, studentId, {
+      const response = await saveMyParentSummaryFeedback(studentId, {
         usefulness,
         alpha_session_id: getStoredAlphaSessionId(),
       });
@@ -58,8 +60,12 @@ export function ParentSummaryFeedback({
         return;
       }
       setLastConfirmedUsefulness(response.feedback.usefulness);
-    } catch {
+    } catch (requestError: unknown) {
       if (activeTargetKey.current !== saveTargetKey) {
+        return;
+      }
+      if (isUnauthorizedError(requestError)) {
+        router.replace("/alpha/start");
         return;
       }
       setSelected(lastConfirmedUsefulness);

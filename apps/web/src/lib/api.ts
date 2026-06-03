@@ -18,6 +18,20 @@ import type {
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
+export class ApiRequestError extends Error {
+  status: number;
+
+  constructor(status: number) {
+    super(`Request failed: ${status}`);
+    this.name = "ApiRequestError";
+    this.status = status;
+  }
+}
+
+export function isUnauthorizedError(error: unknown): boolean {
+  return error instanceof ApiRequestError && error.status === 401;
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
@@ -26,7 +40,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    throw new ApiRequestError(response.status);
   }
 
   return response.json() as Promise<T>;
@@ -287,6 +301,10 @@ export function getAlphaChildren(parentId: string): Promise<AlphaChildrenRespons
   );
 }
 
+export function getMyAlphaChildren(): Promise<AlphaChildrenResponse> {
+  return requestJson<AlphaChildrenResponse>("/api/alpha/parents/me/children");
+}
+
 export function createAlphaChild(
   parentId: string,
   payload: { nickname: string; grade: number },
@@ -301,12 +319,34 @@ export function createAlphaChild(
   );
 }
 
+export function createMyAlphaChild(payload: {
+  nickname: string;
+  grade: number;
+}): Promise<AlphaChildCreateResponse> {
+  return requestJson<AlphaChildCreateResponse>(
+    "/api/alpha/parents/me/children",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 export function getAlphaChildSummary(
   parentId: string,
   studentId: string,
 ): Promise<AlphaChildSummary> {
   return requestJson<AlphaChildSummary>(
     `/api/alpha/parents/${parentId}/children/${studentId}/summary`,
+  );
+}
+
+export function getMyAlphaChildSummary(
+  studentId: string,
+): Promise<AlphaChildSummary> {
+  return requestJson<AlphaChildSummary>(
+    `/api/alpha/parents/me/children/${studentId}/summary`,
   );
 }
 
@@ -339,6 +379,23 @@ export function saveParentSummaryFeedback(
 ): Promise<{ feedback: { usefulness: ParentSummaryUsefulness } }> {
   return requestJson<{ feedback: { usefulness: ParentSummaryUsefulness } }>(
     `/api/alpha/parents/${parentId}/children/${studentId}/summary-feedback`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function saveMyParentSummaryFeedback(
+  studentId: string,
+  payload: {
+    usefulness: ParentSummaryUsefulness;
+    alpha_session_id: string;
+  },
+): Promise<{ feedback: { usefulness: ParentSummaryUsefulness } }> {
+  return requestJson<{ feedback: { usefulness: ParentSummaryUsefulness } }>(
+    `/api/alpha/parents/me/children/${studentId}/summary-feedback`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },

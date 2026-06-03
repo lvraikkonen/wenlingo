@@ -16,7 +16,6 @@ import SentencePage from "../src/app/children/[studentId]/sentence/page";
 import ParentChildSummaryPage from "../src/app/parent/children/[studentId]/summary/page";
 import { FeedbackReaction } from "../src/components/FeedbackReaction";
 import { ParentSummaryFeedback } from "../src/components/ParentSummaryFeedback";
-import { ALPHA_PARENT_STORAGE_KEY } from "../src/lib/alphaParent";
 import { ALPHA_SESSION_STORAGE_KEY } from "../src/lib/alphaSession";
 
 function deferred<T>() {
@@ -35,11 +34,12 @@ const apiMocks = vi.hoisted(() => ({
   createSentenceTraining: vi.fn(),
   createEssay: vi.fn(),
   submitEssayRevision: vi.fn(),
+  demoLogin: vi.fn(),
   getAlphaChildren: vi.fn(),
-  getAlphaChildSummary: vi.fn(),
+  getMyAlphaChildSummary: vi.fn(),
   recordAlphaEvent: vi.fn(async () => undefined),
   saveFeedbackReaction: vi.fn(),
-  saveParentSummaryFeedback: vi.fn(),
+  saveMyParentSummaryFeedback: vi.fn(),
 }));
 
 const replace = vi.fn();
@@ -53,11 +53,17 @@ vi.mock("../src/lib/api", () => ({
   createSentenceTraining: apiMocks.createSentenceTraining,
   createEssay: apiMocks.createEssay,
   submitEssayRevision: apiMocks.submitEssayRevision,
+  demoLogin: apiMocks.demoLogin,
   getAlphaChildren: apiMocks.getAlphaChildren,
-  getAlphaChildSummary: apiMocks.getAlphaChildSummary,
+  getMyAlphaChildSummary: apiMocks.getMyAlphaChildSummary,
+  isUnauthorizedError: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    error.status === 401,
   recordAlphaEvent: apiMocks.recordAlphaEvent,
   saveFeedbackReaction: apiMocks.saveFeedbackReaction,
-  saveParentSummaryFeedback: apiMocks.saveParentSummaryFeedback,
+  saveMyParentSummaryFeedback: apiMocks.saveMyParentSummaryFeedback,
 }));
 
 const summaryChild = {
@@ -74,7 +80,6 @@ const summaryChild = {
 beforeEach(() => {
   window.localStorage.clear();
   window.localStorage.setItem(ALPHA_SESSION_STORAGE_KEY, "session-1");
-  window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "parent-1");
   replace.mockClear();
   apiMocks.createAssessment.mockResolvedValue({
     assessment: {
@@ -143,7 +148,15 @@ beforeEach(() => {
       evidence: { completed_task_count: 1 },
     },
   });
-  apiMocks.getAlphaChildSummary.mockResolvedValue({
+  apiMocks.demoLogin.mockResolvedValue({
+    parent: {
+      id: "parent-1",
+      email: "demo@example.com",
+      display_name: "演示家长",
+    },
+    students: [summaryChild],
+  });
+  apiMocks.getMyAlphaChildSummary.mockResolvedValue({
     parent_id: "parent-1",
     child: summaryChild,
     assessment_completed: true,
@@ -171,7 +184,7 @@ beforeEach(() => {
       reaction: "positive",
     },
   });
-  apiMocks.saveParentSummaryFeedback.mockResolvedValue({
+  apiMocks.saveMyParentSummaryFeedback.mockResolvedValue({
     feedback: { usefulness: "helpful" },
   });
 });
@@ -444,8 +457,8 @@ test("ParentSummaryFeedback initializes selected state from persisted usefulness
 });
 
 test("ParentSummaryFeedback disables buttons while saving and ignores rapid clicks", async () => {
-  const save = deferred<Awaited<ReturnType<typeof apiMocks.saveParentSummaryFeedback>>>();
-  apiMocks.saveParentSummaryFeedback.mockReturnValueOnce(save.promise);
+  const save = deferred<Awaited<ReturnType<typeof apiMocks.saveMyParentSummaryFeedback>>>();
+  apiMocks.saveMyParentSummaryFeedback.mockReturnValueOnce(save.promise);
   render(<ParentSummaryFeedback parentId="parent-1" studentId="s1" />);
 
   await userEvent.click(screen.getByRole("button", { name: "有帮助" }));
@@ -454,7 +467,7 @@ test("ParentSummaryFeedback disables buttons while saving and ignores rapid clic
   expect(screen.getByRole("button", { name: "没帮助" })).toBeDisabled();
 
   await userEvent.click(screen.getByRole("button", { name: "没帮助" }));
-  expect(apiMocks.saveParentSummaryFeedback).toHaveBeenCalledTimes(1);
+  expect(apiMocks.saveMyParentSummaryFeedback).toHaveBeenCalledTimes(1);
 
   save.resolve({ feedback: { usefulness: "helpful" } });
   await waitFor(() =>
@@ -463,7 +476,7 @@ test("ParentSummaryFeedback disables buttons while saving and ignores rapid clic
 });
 
 test("ParentSummaryFeedback save failure reverts to last confirmed usefulness", async () => {
-  apiMocks.saveParentSummaryFeedback
+  apiMocks.saveMyParentSummaryFeedback
     .mockResolvedValueOnce({ feedback: { usefulness: "not_helpful" } })
     .mockRejectedValueOnce(new Error("network"));
   render(
@@ -499,8 +512,8 @@ test("ParentSummaryFeedback save failure reverts to last confirmed usefulness", 
 });
 
 test("ParentSummaryFeedback resets on parent change and ignores stale save completions", async () => {
-  const firstSave = deferred<Awaited<ReturnType<typeof apiMocks.saveParentSummaryFeedback>>>();
-  apiMocks.saveParentSummaryFeedback.mockReturnValueOnce(firstSave.promise);
+  const firstSave = deferred<Awaited<ReturnType<typeof apiMocks.saveMyParentSummaryFeedback>>>();
+  apiMocks.saveMyParentSummaryFeedback.mockReturnValueOnce(firstSave.promise);
   const { rerender } = render(
     <ParentSummaryFeedback
       parentId="parent-1"
@@ -527,7 +540,7 @@ test("ParentSummaryFeedback resets on parent change and ignores stale save compl
   expect(screen.getByRole("button", { name: "没帮助" })).toBeEnabled();
 
   firstSave.resolve({ feedback: { usefulness: "not_helpful" } });
-  apiMocks.saveParentSummaryFeedback.mockRejectedValueOnce(new Error("network"));
+  apiMocks.saveMyParentSummaryFeedback.mockRejectedValueOnce(new Error("network"));
 
   await userEvent.click(screen.getByRole("button", { name: "没帮助" }));
 
@@ -543,8 +556,7 @@ test("ParentSummaryFeedback posts parent summary usefulness with alpha session i
 
   await userEvent.click(screen.getByRole("button", { name: "没帮助" }));
 
-  expect(apiMocks.saveParentSummaryFeedback).toHaveBeenCalledWith(
-    "parent-1",
+  expect(apiMocks.saveMyParentSummaryFeedback).toHaveBeenCalledWith(
     "s1",
     {
       usefulness: "not_helpful",
@@ -557,6 +569,15 @@ test("ParentSummaryFeedback posts parent summary usefulness with alpha session i
       "true",
     ),
   );
+});
+
+test("ParentSummaryFeedback redirects to alpha start when save is unauthorized", async () => {
+  apiMocks.saveMyParentSummaryFeedback.mockRejectedValueOnce({ status: 401 });
+  render(<ParentSummaryFeedback parentId="parent-1" studentId="s1" />);
+
+  await userEvent.click(screen.getByRole("button", { name: "有帮助" }));
+
+  await waitFor(() => expect(replace).toHaveBeenCalledWith("/alpha/start"));
 });
 
 test("assessment page renders a feedback reaction after assessment result with assessment id", async () => {
@@ -1033,8 +1054,7 @@ test("summary page renders parent feedback after summary loads", async () => {
   expect(await screen.findByText("这份成长摘要对你有帮助吗？")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "有帮助" }));
 
-  expect(apiMocks.saveParentSummaryFeedback).toHaveBeenCalledWith(
-    "parent-1",
+  expect(apiMocks.saveMyParentSummaryFeedback).toHaveBeenCalledWith(
     "s1",
     {
       usefulness: "helpful",
@@ -1044,7 +1064,7 @@ test("summary page renders parent feedback after summary loads", async () => {
 });
 
 test("summary page passes persisted usefulness from summary response", async () => {
-  apiMocks.getAlphaChildSummary.mockResolvedValue({
+  apiMocks.getMyAlphaChildSummary.mockResolvedValue({
     parent_id: "parent-1",
     child: summaryChild,
     usefulness: "not_helpful",
@@ -1074,8 +1094,8 @@ test("summary page passes persisted usefulness from summary response", async () 
 });
 
 test("summary page clears previous child feedback while a new child summary loads", async () => {
-  const secondSummary = deferred<Awaited<ReturnType<typeof apiMocks.getAlphaChildSummary>>>();
-  apiMocks.getAlphaChildSummary
+  const secondSummary = deferred<Awaited<ReturnType<typeof apiMocks.getMyAlphaChildSummary>>>();
+  apiMocks.getMyAlphaChildSummary
     .mockResolvedValueOnce({
       parent_id: "parent-1",
       child: summaryChild,
@@ -1115,10 +1135,7 @@ test("summary page clears previous child feedback while a new child summary load
   });
 
   await waitFor(() =>
-    expect(apiMocks.getAlphaChildSummary).toHaveBeenLastCalledWith(
-      "parent-1",
-      "s2",
-    ),
+    expect(apiMocks.getMyAlphaChildSummary).toHaveBeenLastCalledWith("s2"),
   );
   expect(screen.getByRole("status")).toHaveTextContent("正在加载成长摘要...");
   expect(screen.queryByText("这份成长摘要对你有帮助吗？")).not.toBeInTheDocument();
