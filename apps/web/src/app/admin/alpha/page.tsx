@@ -17,6 +17,14 @@ function formatReactionCounts(counts: Record<string, number>): string {
   return entries.map(([reaction, count]) => `${reaction}: ${count}`).join(", ");
 }
 
+function formatAccountStatus(row: AdminAlphaOverviewRow): string {
+  return row.account_linked ? "Account linked" : "No account";
+}
+
+function formatPhoneStatus(row: AdminAlphaOverviewRow): string {
+  return row.phone_bound ? "Phone bound" : "Phone not bound";
+}
+
 export default function AdminAlphaPage() {
   const [token, setToken] = useState("");
   const [tokenInput, setTokenInput] = useState("");
@@ -134,9 +142,10 @@ export default function AdminAlphaPage() {
             ) : null}
 
             <div className="overflow-hidden rounded-lg border border-[var(--wen-border)] bg-white">
-              <div className="grid grid-cols-[1.2fr_1fr_1fr_0.7fr_1.2fr_1fr_1.5fr] gap-3 border-b border-[var(--wen-border)] bg-[var(--wen-bg)] px-4 py-3 text-xs font-bold uppercase text-[var(--wen-muted)]">
+              <div className="grid grid-cols-[1.2fr_1fr_1.3fr_1fr_0.7fr_1.2fr_1fr_1.5fr] gap-3 border-b border-[var(--wen-border)] bg-[var(--wen-bg)] px-4 py-3 text-xs font-bold uppercase text-[var(--wen-muted)]">
                 <span>Invite</span>
                 <span>Family</span>
+                <span>Account</span>
                 <span>Funnel</span>
                 <span>Children</span>
                 <span>Reactions</span>
@@ -149,7 +158,7 @@ export default function AdminAlphaPage() {
                   type="button"
                   onClick={() => void selectFamily(row)}
                   disabled={!row.parent_id}
-                  className="grid w-full grid-cols-[1.2fr_1fr_1fr_0.7fr_1.2fr_1fr_1.5fr] gap-3 border-b border-[var(--wen-border)] px-4 py-3 text-left text-sm last:border-b-0 disabled:cursor-not-allowed disabled:text-[var(--wen-muted)]"
+                  className="grid w-full grid-cols-[1.2fr_1fr_1.3fr_1fr_0.7fr_1.2fr_1fr_1.5fr] gap-3 border-b border-[var(--wen-border)] px-4 py-3 text-left text-sm last:border-b-0 disabled:cursor-not-allowed disabled:text-[var(--wen-muted)]"
                 >
                   <span>
                     <strong>{row.invite_label}</strong>
@@ -158,6 +167,18 @@ export default function AdminAlphaPage() {
                     </span>
                   </span>
                   <span>{row.parent_display_name ?? "Unclaimed"}</span>
+                  <span>
+                    <strong>{formatAccountStatus(row)}</strong>
+                    <span className="mt-1 block text-xs text-[var(--wen-muted)]">
+                      {row.account_email_masked ?? "email none"}
+                    </span>
+                    <span className="mt-1 block text-xs text-[var(--wen-muted)]">
+                      {formatPhoneStatus(row)}
+                    </span>
+                    <span className="mt-1 block text-xs text-[var(--wen-muted)]">
+                      {row.last_login_at ?? "last login none"}
+                    </span>
+                  </span>
                   <span>{row.funnel_stage}</span>
                   <span>{row.child_count} child</span>
                   <span>{formatReactionCounts(row.reaction_counts)}</span>

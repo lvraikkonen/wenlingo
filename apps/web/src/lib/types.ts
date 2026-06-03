@@ -163,6 +163,10 @@ export type AdminAlphaOverviewRow = {
   reaction_counts: Record<string, number>;
   latest_parent_feedback: string | null;
   last_event_at: string | null;
+  account_linked: boolean;
+  account_email_masked: string | null;
+  phone_bound: boolean;
+  last_login_at: string | null;
 };
 
 export type AdminAlphaEvent = {

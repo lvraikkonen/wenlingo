@@ -29,6 +29,10 @@ const overview = {
       reaction_counts: { positive: 2, negative: 1 },
       latest_parent_feedback: "helpful",
       last_event_at: "2026-05-29T10:00:00+08:00",
+      account_linked: true,
+      account_email_masked: "pa***@example.com",
+      phone_bound: true,
+      last_login_at: "2026-05-29T09:30:00+08:00",
     },
   ],
 };
@@ -97,6 +101,20 @@ test("overview table renders invite family funnel and last activity", async () =
   expect(row).toHaveTextContent("positive: 2");
   expect(row).toHaveTextContent("helpful");
   expect(row).toHaveTextContent("2026-05-29T10:00:00+08:00");
+});
+
+test("overview table renders minimal account fields", async () => {
+  window.sessionStorage.setItem("wenlingo_alpha_admin_token", "secret");
+
+  render(<AdminAlphaPage />);
+
+  const row = await screen.findByRole("button", { name: /家庭 01/ });
+  expect(row).toHaveTextContent("Account linked");
+  expect(row).toHaveTextContent("pa***@example.com");
+  expect(row).toHaveTextContent("Phone bound");
+  expect(row).toHaveTextContent("2026-05-29T09:30:00+08:00");
+  expect(row).not.toHaveTextContent("active sessions");
+  expect(row).not.toHaveTextContent("migration conflicts");
 });
 
 test("clicking a family row renders simple timeline", async () => {

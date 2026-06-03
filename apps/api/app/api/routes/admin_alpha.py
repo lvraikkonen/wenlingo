@@ -12,11 +12,13 @@ from app.domain.models import (
     AlphaInviteCode,
     Assessment,
     FeedbackReaction,
+    ParentAccount,
     ParentFeedback,
     ParentUser,
     ProductEvent,
     StudentProfile,
 )
+from app.services.auth_security import mask_email
 
 router = APIRouter(prefix="/api/admin/alpha", tags=["admin-alpha"])
 
@@ -102,6 +104,11 @@ def alpha_admin_overview(session: Session = Depends(get_db_session)):
             if invite.consumed_by_parent_id
             else None
         )
+        account = (
+            session.get(ParentAccount, parent.account_id)
+            if parent and parent.account_id
+            else None
+        )
         children = _children_for_parent(session, parent.id) if parent else []
         child_ids = {child.id for child in children}
         reactions = (
@@ -155,6 +162,14 @@ def alpha_admin_overview(session: Session = Depends(get_db_session)):
                 "reaction_counts": _reaction_counts(reactions),
                 "latest_parent_feedback": _latest_parent_feedback(feedback_rows),
                 "last_event_at": _serialize_dt(last_event_at),
+                "account_linked": account is not None,
+                "account_email_masked": mask_email(account.email_normalized)
+                if account
+                else None,
+                "phone_bound": bool(account and account.phone_bound_at),
+                "last_login_at": _serialize_dt(
+                    account.last_login_at if account else None
+                ),
             }
         )
 

@@ -16,10 +16,12 @@ from app.domain.models import (
     EssayVersion,
     FeedbackReaction,
     ParentFeedback,
+    ParentAccount,
     ParentUser,
     ProductEvent,
     SentenceTraining,
     StudentProfile,
+    utcnow,
 )
 from app.main import create_app
 
@@ -1073,6 +1075,40 @@ def test_admin_overview_returns_family_funnel_without_sensitive_body(
     assert "作文正文不能出现在管理端" not in serialized
     assert "AI feedback body should stay private" not in serialized
     assert "Essay AI feedback body should stay private" not in serialized
+
+
+def test_admin_overview_includes_minimal_account_fields_only(
+    session, client, monkeypatch
+):
+    monkeypatch.setenv("ALPHA_ADMIN_TOKEN", "admin-secret")
+    parent = create_parent(client, session, code="ALPHA-ADMIN-AUTH")
+    account = ParentAccount(
+        email_normalized="parent@example.com",
+        email_verified_at=utcnow(),
+        phone_e164="+8613800001234",
+        phone_bound_at=utcnow(),
+        last_login_at=utcnow(),
+    )
+    session.add(account)
+    session.flush()
+    saved_parent = session.get(ParentUser, parent["id"])
+    saved_parent.account_id = account.id
+    saved_parent.account_linked_at = utcnow()
+    session.add(saved_parent)
+    session.commit()
+
+    response = client.get(
+        "/api/admin/alpha/overview",
+        headers={"X-Alpha-Admin-Token": "admin-secret"},
+    )
+
+    assert response.status_code == 200
+    row = response.json()["families"][0]
+    assert row["account_linked"] is True
+    assert row["account_email_masked"] == "pa***@example.com"
+    assert row["phone_bound"] is True
+    assert "session_count_active" not in row
+    assert "migration_conflict_count" not in row
 
 
 def test_admin_family_detail_returns_privacy_safe_timeline(session, monkeypatch):
