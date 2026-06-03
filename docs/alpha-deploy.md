@@ -43,6 +43,69 @@ Privacy boundary:
 Admin Alpha Lite and ProductEvent must not show or store child writing text, upgraded sentence text, essay text, AI feedback body, full invite code, real full name, school, address, phone, or photo.
 ```
 
+## V0.5a Alpha User Foundation
+
+V0.5a adds parent account auth, Magic Code login, legacy parent migration, parent sessions, and auth boundary checks. Keep the V0.4.1b feedback/observation checks above in the rollout; this section extends the same Alpha deployment rather than replacing it.
+
+Required backend env:
+
+| Variable | Railway value |
+| --- | --- |
+| `AUTH_REQUIRED_FOR_ALPHA` | Start as `false`; switch staging to `true` before QA, then production to `true` after QA passes. |
+| `AUTH_SECRET_PEPPER` | Strong production secret used for auth token/code hashing. Keep stable across deploys. |
+| `AUTH_SESSION_COOKIE_NAME` | `wenlingo_parent_session` unless a production rename is required. |
+| `AUTH_SESSION_COOKIE_SECURE` | `true` for Railway HTTPS production and staging. |
+| `AUTH_SESSION_DAYS` | `30` unless product explicitly changes session length. |
+| `AUTH_SESSION_LAST_SEEN_THROTTLE_MINUTES` | `15` unless ops needs a different session write throttle. |
+| `AUTH_ALLOWED_ORIGINS` | Staging/production web HTTPS origins allowed for authenticated non-GET requests, comma-separated with no trailing slash. |
+| `MAGIC_CODE_TTL_MINUTES` | `10`. |
+| `MAGIC_CODE_MAX_ATTEMPTS` | `5`. |
+| `MAGIC_CODE_EMAIL_RATE_LIMIT` | `3`. |
+| `MAGIC_CODE_IP_RATE_LIMIT` | `20`. |
+| `MAGIC_CODE_ALPHA_SESSION_RATE_LIMIT` | `5`. |
+| `MAGIC_CODE_FROM_EMAIL` | Verified sender address from the production email provider. |
+| `MAGIC_CODE_EMAIL_PROVIDER` | Production Magic Code email provider identifier/config marker. Must be configured before auth is enabled. |
+| `MAGIC_CODE_DEV_ECHO` | `false` in production. `true` is only for local/dev test flows. |
+| `LEGACY_BIND_WINDOW_DAYS` | `14` unless the migration window is deliberately changed. |
+
+Production must not run with `MAGIC_CODE_DEV_ECHO=true`. Before enabling `AUTH_REQUIRED_FOR_ALPHA=true`, confirm the deployed production API either fails startup or returns 503 for Magic Code requests when production email provider configuration is missing. Do not use dev echo as a production fallback.
+
+Rollout order:
+
+1. Confirm the production database backup/export is available.
+2. Run `uv run alembic upgrade head` against the target database to create V0.5a auth tables and columns.
+3. Deploy API and web with `AUTH_REQUIRED_FOR_ALPHA=false`; confirm legacy localStorage parent flow still works.
+4. Run the smoke tests from this runbook, including invite, child, assessment, sentence, essay, feedback, summary, and admin flows.
+5. Enable `AUTH_REQUIRED_FOR_ALPHA=true` in staging, keep `MAGIC_CODE_DEV_ECHO=false`, configure Magic Code email, and run the V0.5a manual QA checklist in `qa/2026-06-01-v0.5a-alpha-user-foundation-manual-qa.md`.
+6. Enable `AUTH_REQUIRED_FOR_ALPHA=true` in production only after staging manual QA passes and email delivery is confirmed.
+7. After production auth is enabled, run a production smoke with one invited family and one legacy migration account.
+
+Rollback order:
+
+1. Set `AUTH_REQUIRED_FOR_ALPHA=false` and redeploy/restart the API so legacy localStorage parent flow works again.
+2. If the app bundle itself is broken, rollback the API and/or web service to the previous working deployment while keeping PostgreSQL intact.
+3. Re-run the rollback checklist: legacy parent flow, invite, assessment, sentence, essay, feedback, summary, and admin flow still work.
+4. Do not drop auth tables or auth columns after real migration. They may contain verified parent accounts, sessions, and linkage state needed for a later re-enable.
+5. Do not delete learning rows while rolling back auth. Protect `ParentUser`, `StudentProfile`, assessments, sentence work, essays, reactions, summaries, feedback, invites, and product events.
+
+Ops scripts:
+
+```bash
+cd apps/api
+
+# Existing V0.4.1b invite tooling remains available.
+uv run python -m app.ops.create_alpha_invites --count 5 --label-prefix "Alpha Family" --issued-to-note "June 2026 invited family"
+uv run python -m app.ops.bind_alpha_invite --parent-id <parent-id> --code <raw-code> --note "Legacy Alpha family"
+
+# V0.5a migration/account tooling.
+uv run python -m app.ops.list_unlinked_alpha_parents
+uv run python -m app.ops.bind_parent_account --parent-id <parent-id> --email <parent-email>
+uv run python -m app.ops.revoke_parent_sessions --email <parent-email>
+uv run python -m app.ops.revoke_parent_sessions --account-id <account-id>
+```
+
+Use `list_unlinked_alpha_parents` before and after the legacy migration window to find Alpha parents that still need account binding. Use `bind_parent_account` only after verifying the invite label and parent identity with the inviter or support notes. Use `revoke_parent_sessions` when a parent loses access to an email address, reports a suspicious login, or needs all active browser sessions invalidated.
+
 ## Railway Project Layout
 
 Use one Railway project with three services:
