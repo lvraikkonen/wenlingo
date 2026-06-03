@@ -36,6 +36,7 @@ export default defineConfig({
         AUTH_SESSION_COOKIE_SECURE: "false",
         LLM_PROVIDER: "mock",
         MAGIC_CODE_DEV_ECHO: "true",
+        PLAYWRIGHT_ALPHA_SEED: "1",
       },
       url: `${apiBaseURL}/health`,
       reuseExistingServer,

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 
 def test_v05a_ops_scripts_exist_and_use_safe_models():
     scripts = {
@@ -32,3 +34,38 @@ def test_revoke_parent_sessions_validates_account_id_target_exists():
 
     assert "session.get(ParentAccount, account_id)" in text
     assert 'SystemExit("account not found")' in text
+
+
+def test_playwright_alpha_seed_requires_explicit_flag(monkeypatch):
+    from app.db import seed_playwright_alpha
+
+    monkeypatch.delenv("PLAYWRIGHT_ALPHA_SEED", raising=False)
+
+    with pytest.raises(SystemExit, match="PLAYWRIGHT_ALPHA_SEED"):
+        seed_playwright_alpha._assert_playwright_alpha_seed_is_safe(
+            "sqlite:///./playwright-e2e.db"
+        )
+
+
+def test_playwright_alpha_seed_rejects_unsafe_database_urls(monkeypatch):
+    from app.db import seed_playwright_alpha
+
+    monkeypatch.setenv("PLAYWRIGHT_ALPHA_SEED", "1")
+
+    with pytest.raises(SystemExit, match="Refusing"):
+        seed_playwright_alpha._assert_playwright_alpha_seed_is_safe(
+            "postgresql+psycopg://wenlingo:wenlingo@staging-db/wenlingo"
+        )
+
+
+def test_playwright_alpha_seed_accepts_disposable_database_urls(monkeypatch):
+    from app.db import seed_playwright_alpha
+
+    monkeypatch.setenv("PLAYWRIGHT_ALPHA_SEED", "1")
+
+    seed_playwright_alpha._assert_playwright_alpha_seed_is_safe(
+        "sqlite:///./playwright-e2e.db"
+    )
+    seed_playwright_alpha._assert_playwright_alpha_seed_is_safe(
+        "postgresql+psycopg://wenlingo:wenlingo@localhost:5433/wenlingo_test"
+    )

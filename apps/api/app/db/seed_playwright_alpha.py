@@ -1,9 +1,12 @@
+import os
 from datetime import datetime, timezone
 
 from sqlalchemy import delete
+from sqlalchemy.engine import make_url
 from sqlmodel import Session, select
 
 from app.api.routes.alpha import hash_invite_code
+from app.core.config import get_settings
 from app.db.session import engine
 from app.domain.models import (
     AlphaInviteCode,
@@ -18,6 +21,52 @@ NEW_ALPHA_INVITE_CODE = "ALPHA-E2E"
 LEGACY_PARENT_ID = "legacy-e2e-parent"
 LEGACY_PARENT_EMAIL = "legacy-e2e-parent@example.com"
 LEGACY_INVITE_CODE = "LEGACY-E2E"
+PLAYWRIGHT_ALPHA_SEED_FLAG = "PLAYWRIGHT_ALPHA_SEED"
+DEFAULT_PLAYWRIGHT_DATABASE_URL = "sqlite:///./playwright-e2e.db"
+DISPOSABLE_DATABASE_MARKERS = ("playwright", "test")
+LOCAL_DATABASE_HOSTS = {"", "localhost", "127.0.0.1", "::1"}
+
+
+def _is_disposable_e2e_database_url(database_url: str) -> bool:
+    normalized = database_url.strip().lower()
+    if normalized == DEFAULT_PLAYWRIGHT_DATABASE_URL:
+        return True
+
+    try:
+        parsed_url = make_url(database_url)
+    except Exception:
+        return False
+
+    backend_name = parsed_url.get_backend_name()
+    marker_text = " ".join(
+        part
+        for part in (
+            normalized,
+            (parsed_url.database or "").lower(),
+        )
+        if part
+    )
+    has_disposable_marker = any(
+        marker in marker_text for marker in DISPOSABLE_DATABASE_MARKERS
+    )
+    if backend_name == "sqlite":
+        return has_disposable_marker
+    if backend_name == "postgresql":
+        return (parsed_url.host or "").lower() in LOCAL_DATABASE_HOSTS and has_disposable_marker
+    return False
+
+
+def _assert_playwright_alpha_seed_is_safe(database_url: str | None = None) -> None:
+    if os.environ.get(PLAYWRIGHT_ALPHA_SEED_FLAG) != "1":
+        raise SystemExit(
+            f"{PLAYWRIGHT_ALPHA_SEED_FLAG}=1 is required to run Playwright alpha seed."
+        )
+
+    target_database_url = database_url or get_settings().database_url
+    if not _is_disposable_e2e_database_url(target_database_url):
+        raise SystemExit(
+            f"Refusing to seed non-disposable database URL: {target_database_url}"
+        )
 
 
 def _ensure_invite(
@@ -46,6 +95,8 @@ def _ensure_invite(
 
 
 def seed_playwright_alpha() -> None:
+    _assert_playwright_alpha_seed_is_safe()
+
     with Session(engine) as session:
         accounts = session.exec(
             select(ParentAccount).where(
