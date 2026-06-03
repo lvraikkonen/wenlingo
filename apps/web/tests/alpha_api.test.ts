@@ -47,7 +47,7 @@ describe("alpha api client", () => {
     expect(result.parent.id).toBe("parent-1");
     expect(fetch).toHaveBeenCalledWith(
       "http://localhost:8000/api/alpha/parents",
-      {
+      expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -56,7 +56,8 @@ describe("alpha api client", () => {
           alpha_session_id: "session-1",
         }),
         cache: "no-store",
-      },
+        credentials: "include",
+      }),
     );
   });
 
@@ -86,12 +87,13 @@ describe("alpha api client", () => {
     expect(result.valid).toBe(true);
     expect(fetch).toHaveBeenCalledWith(
       "http://localhost:8000/api/alpha/invites/validate",
-      {
+      expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: "ALPHA-001", alpha_session_id: "session-1" }),
         cache: "no-store",
-      },
+        credentials: "include",
+      }),
     );
   });
 
@@ -114,23 +116,27 @@ describe("alpha api client", () => {
       },
     });
 
-    expect(fetch).toHaveBeenCalledWith("http://localhost:8000/api/alpha/events", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        event_type: "child_handoff_clicked",
-        parent_id: "parent-1",
-        student_id: "student-1",
-        alpha_session_id: "session-1",
-        payload: {
-          path: "/parent/children",
-          status: "clicked",
-          child_count: 1,
-          has_completed_assessment: false,
-        },
+    expect(fetch).toHaveBeenCalledWith(
+      "http://localhost:8000/api/alpha/events",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event_type: "child_handoff_clicked",
+          parent_id: "parent-1",
+          student_id: "student-1",
+          alpha_session_id: "session-1",
+          payload: {
+            path: "/parent/children",
+            status: "clicked",
+            child_count: 1,
+            has_completed_assessment: false,
+          },
+        }),
+        cache: "no-store",
+        credentials: "include",
       }),
-      cache: "no-store",
-    });
+    );
   });
 
   test("recordAlphaEvent resolves without throwing when fetch fails", async () => {
@@ -211,7 +217,10 @@ describe("alpha api client", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "http://localhost:8000/api/alpha/parents/parent-1/children",
-      { cache: "no-store" },
+      expect.objectContaining({
+        cache: "no-store",
+        credentials: "include",
+      }),
     );
   });
 
@@ -240,12 +249,13 @@ describe("alpha api client", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "http://localhost:8000/api/alpha/parents/parent-1/children",
-      {
+      expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nickname: "小星", grade: 4 }),
         cache: "no-store",
-      },
+        credentials: "include",
+      }),
     );
   });
 
@@ -284,7 +294,10 @@ describe("alpha api client", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "http://localhost:8000/api/alpha/parents/parent-1/children/student-1/summary",
-      { cache: "no-store" },
+      expect.objectContaining({
+        cache: "no-store",
+        credentials: "include",
+      }),
     );
   });
 

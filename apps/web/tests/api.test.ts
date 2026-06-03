@@ -78,7 +78,10 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "http://localhost:8000/api/students/s1/dashboard",
-      { cache: "no-store" },
+      expect.objectContaining({
+        cache: "no-store",
+        credentials: "include",
+      }),
     );
   });
 
@@ -114,12 +117,13 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "http://localhost:8000/api/students/s1/assessment",
-      {
+      expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
         cache: "no-store",
-      },
+        credentials: "include",
+      }),
     );
   });
 
@@ -144,12 +148,13 @@ describe("api client", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "http://localhost:8000/api/students/s1/sentences",
-      {
+      expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
         cache: "no-store",
-      },
+        credentials: "include",
+      }),
     );
   });
 

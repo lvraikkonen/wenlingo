@@ -109,7 +109,41 @@ export default function AlphaStartPage() {
   }, [router]);
 
   const isLegacyMigration =
-    authSession?.authenticated === false && Boolean(storedParentId);
+    Boolean(storedParentId) &&
+    (authSession?.authenticated === false ||
+      (authSession?.authenticated === true && !authSession.parent));
+  const isVerifiedLegacyMigration =
+    Boolean(storedParentId) &&
+    authSession?.authenticated === true &&
+    !authSession.parent;
+
+  function resetRequestedCode() {
+    setCodeRequested(false);
+    setCode("");
+  }
+
+  function handleEmailChange(value: string) {
+    setEmail(value);
+    resetRequestedCode();
+  }
+
+  function handleInviteCodeChange(value: string) {
+    setInviteCode(value);
+    if (!isLegacyMigration) {
+      resetRequestedCode();
+    }
+  }
+
+  async function finishLegacyBind() {
+    if (!storedParentId) {
+      return false;
+    }
+
+    const response = await bindLegacyParent(storedParentId);
+    setStoredAlphaParentId(response.parent.id);
+    router.push("/parent/children");
+    return true;
+  }
 
   async function handleRequestCode() {
     if (isRequestingCode) {
@@ -129,12 +163,14 @@ export default function AlphaStartPage() {
 
     setIsRequestingCode(true);
     setError("");
+    let inviteValidated = false;
     try {
       if (!isLegacyMigration) {
         await validateAlphaInvite({
           code: trimmedInviteCode,
           alpha_session_id: alphaSessionId,
         });
+        inviteValidated = true;
       }
       await requestMagicCode({
         email: trimmedEmail,
@@ -145,7 +181,9 @@ export default function AlphaStartPage() {
       setError(
         isLegacyMigration
           ? "验证码发送失败，请稍后再试。"
-          : "邀请码无效或已失效，请检查后再试。",
+          : inviteValidated
+            ? "验证码发送失败，请稍后再试。"
+            : "邀请码无效或已失效，请检查后再试。",
       );
     } finally {
       setIsRequestingCode(false);
@@ -161,10 +199,24 @@ export default function AlphaStartPage() {
     const trimmedEmail = email.trim();
     const trimmedCode = code.trim();
     const trimmedInviteCode = inviteCode.trim();
-    if (!trimmedEmail) {
+    if (!isVerifiedLegacyMigration && !trimmedEmail) {
       setError("请输入邮箱。");
       return;
     }
+
+    if (isVerifiedLegacyMigration) {
+      setIsSubmitting(true);
+      setError("");
+      try {
+        await finishLegacyBind();
+      } catch {
+        setError("绑定失败，请稍后再试。");
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
     if (!trimmedCode) {
       setError("请输入 6 位验证码。");
       return;
@@ -183,10 +235,12 @@ export default function AlphaStartPage() {
         return;
       }
 
+      if (verifiedSession.authenticated) {
+        setAuthSession(verifiedSession);
+      }
+
       if (isLegacyMigration && storedParentId) {
-        const response = await bindLegacyParent(storedParentId);
-        setStoredAlphaParentId(response.parent.id);
-        router.push("/parent/children");
+        await finishLegacyBind();
         return;
       }
 
@@ -234,39 +288,45 @@ export default function AlphaStartPage() {
             <div className="rounded-lg border border-[var(--wen-border)] bg-[var(--wen-bg)] p-4">
               <p className="font-semibold">绑定邮箱继续使用当前 Alpha 家庭</p>
             </div>
-            <label className="block font-semibold">
-              邮箱
-              <input
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                type="email"
-                className="mt-2 w-full rounded-lg border border-[var(--wen-border)] p-3"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={handleRequestCode}
-              disabled={isRequestingCode}
-              className="rounded-lg border border-[var(--wen-border)] bg-white px-5 py-3 font-semibold disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              获取验证码
-            </button>
-            {codeRequested ? (
-              <label className="block font-semibold">
-                6 位验证码
-                <input
-                  value={code}
-                  onChange={(event) => setCode(event.target.value)}
-                  inputMode="numeric"
-                  maxLength={6}
-                  className="mt-2 w-full rounded-lg border border-[var(--wen-border)] p-3"
-                />
-              </label>
-            ) : null}
+            {isVerifiedLegacyMigration ? null : (
+              <>
+                <label className="block font-semibold">
+                  邮箱
+                  <input
+                    value={email}
+                    onChange={(event) => handleEmailChange(event.target.value)}
+                    type="email"
+                    className="mt-2 w-full rounded-lg border border-[var(--wen-border)] p-3"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={handleRequestCode}
+                  disabled={isRequestingCode}
+                  className="rounded-lg border border-[var(--wen-border)] bg-white px-5 py-3 font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  获取验证码
+                </button>
+                {codeRequested ? (
+                  <label className="block font-semibold">
+                    6 位验证码
+                    <input
+                      value={code}
+                      onChange={(event) => setCode(event.target.value)}
+                      inputMode="numeric"
+                      maxLength={6}
+                      className="mt-2 w-full rounded-lg border border-[var(--wen-border)] p-3"
+                    />
+                  </label>
+                ) : null}
+              </>
+            )}
             <div className="flex flex-wrap gap-3">
               <button
                 type="submit"
-                disabled={isSubmitting || !codeRequested}
+                disabled={
+                  isSubmitting || (!isVerifiedLegacyMigration && !codeRequested)
+                }
                 className="rounded-lg bg-[var(--wen-orange)] px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
               >
                 绑定并继续
@@ -313,7 +373,7 @@ export default function AlphaStartPage() {
                 内测邀请码
                 <input
                   value={inviteCode}
-                  onChange={(event) => setInviteCode(event.target.value)}
+                  onChange={(event) => handleInviteCodeChange(event.target.value)}
                   maxLength={40}
                   className="mt-2 w-full rounded-lg border border-[var(--wen-border)] p-3"
                 />
@@ -322,7 +382,7 @@ export default function AlphaStartPage() {
                 邮箱
                 <input
                   value={email}
-                  onChange={(event) => setEmail(event.target.value)}
+                  onChange={(event) => handleEmailChange(event.target.value)}
                   type="email"
                   className="mt-2 w-full rounded-lg border border-[var(--wen-border)] p-3"
                 />
