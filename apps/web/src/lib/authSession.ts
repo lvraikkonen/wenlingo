@@ -47,3 +47,14 @@ export function verifyMagicCode(payload: {
     body: JSON.stringify(payload),
   });
 }
+
+export function bindPhone(payload: { phone: string }): Promise<{
+  phone_masked: string;
+  phone_bound: boolean;
+}> {
+  return authRequestJson("/api/auth/account/phone", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}

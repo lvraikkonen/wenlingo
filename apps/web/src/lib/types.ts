@@ -96,6 +96,11 @@ export type AlphaChild = {
 
 export type AlphaChildrenResponse = {
   parent: AlphaParent;
+  account?: {
+    email_masked: string;
+    phone_bound: boolean;
+    phone_masked?: string | null;
+  };
   children: AlphaChild[];
 };
 

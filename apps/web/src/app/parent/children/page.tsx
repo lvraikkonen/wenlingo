@@ -9,6 +9,7 @@ import {
   recordAlphaEvent,
 } from "../../../lib/api";
 import { getStoredAlphaSessionId } from "../../../lib/alphaSession";
+import { bindPhone } from "../../../lib/authSession";
 import type { AlphaChildrenResponse } from "../../../lib/types";
 
 export default function ParentChildrenPage() {
@@ -16,6 +17,12 @@ export default function ParentChildrenPage() {
   const [data, setData] = useState<AlphaChildrenResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [phone, setPhone] = useState("");
+  const [phoneMasked, setPhoneMasked] = useState("");
+  const [phoneError, setPhoneError] = useState("");
+  const [isSavingPhone, setIsSavingPhone] = useState(false);
+
+  const boundPhoneMasked = phoneMasked || data?.account?.phone_masked || "";
 
   useEffect(() => {
     let isMounted = true;
@@ -51,6 +58,35 @@ export default function ParentChildrenPage() {
     };
   }, [router]);
 
+  async function handlePhoneSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmedPhone = phone.trim();
+    setPhoneError("");
+    setIsSavingPhone(true);
+
+    try {
+      const response = await bindPhone({ phone: trimmedPhone });
+      setPhoneMasked(response.phone_masked);
+      setData((current) =>
+        current
+          ? {
+              ...current,
+              account: {
+                email_masked: current.account?.email_masked ?? "",
+                phone_bound: response.phone_bound,
+                phone_masked: response.phone_masked,
+              },
+            }
+          : current,
+      );
+      setPhone("");
+    } catch {
+      setPhoneError("手机号保存失败，请稍后再试。");
+    } finally {
+      setIsSavingPhone(false);
+    }
+  }
+
   return (
     <main className="min-h-screen px-5 py-8 sm:px-8">
       <section className="mx-auto max-w-4xl">
@@ -64,6 +100,45 @@ export default function ParentChildrenPage() {
               <p className="mt-2 text-[var(--wen-muted)]">
                 {data.parent.display_name}，可以从这里进入孩子空间或查看成长摘要。
               </p>
+            ) : null}
+            {data ? (
+              <form className="mt-4 max-w-md" onSubmit={handlePhoneSubmit}>
+                <label
+                  className="text-sm font-semibold text-[var(--wen-muted)]"
+                  htmlFor="parent-phone"
+                >
+                  手机号（可选）
+                </label>
+                <p className="mt-1 text-sm text-[var(--wen-muted)]">
+                  可选填写，V0.5a 不用于短信登录。
+                </p>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <input
+                    id="parent-phone"
+                    className="min-w-0 flex-1 rounded-lg border border-[var(--wen-border)] bg-white px-3 py-2"
+                    inputMode="tel"
+                    value={phone}
+                    onChange={(event) => setPhone(event.target.value)}
+                  />
+                  <button
+                    className="rounded-lg bg-[var(--wen-orange)] px-4 py-2 font-semibold text-white disabled:opacity-60"
+                    disabled={isSavingPhone}
+                    type="submit"
+                  >
+                    {isSavingPhone ? "保存中..." : "保存手机号"}
+                  </button>
+                </div>
+                {boundPhoneMasked ? (
+                  <p className="mt-2 text-sm font-semibold text-emerald-700">
+                    已绑定 {boundPhoneMasked}
+                  </p>
+                ) : null}
+                {phoneError ? (
+                  <p className="mt-2 text-sm font-semibold text-red-700" role="alert">
+                    {phoneError}
+                  </p>
+                ) : null}
+              </form>
             ) : null}
           </div>
           <Link
