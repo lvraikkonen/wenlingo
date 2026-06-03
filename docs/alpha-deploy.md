@@ -51,7 +51,7 @@ Required backend env:
 
 | Variable | Railway value |
 | --- | --- |
-| `AUTH_REQUIRED_FOR_ALPHA` | Start as `false`; switch staging to `true` before QA, then production to `true` after QA passes. |
+| `AUTH_REQUIRED_FOR_ALPHA` | Start as `false`; switch staging to `true` only for controlled QA. Production must remain `false` until a real production Magic Code email sender/provider integration is shipped and smoke-tested. |
 | `AUTH_SECRET_PEPPER` | Strong production secret used for auth token/code hashing. Keep stable across deploys. |
 | `AUTH_SESSION_COOKIE_NAME` | `wenlingo_parent_session` unless a production rename is required. |
 | `AUTH_SESSION_COOKIE_SECURE` | `true` for Railway HTTPS production and staging. |
@@ -63,12 +63,14 @@ Required backend env:
 | `MAGIC_CODE_EMAIL_RATE_LIMIT` | `3`. |
 | `MAGIC_CODE_IP_RATE_LIMIT` | `20`. |
 | `MAGIC_CODE_ALPHA_SESSION_RATE_LIMIT` | `5`. |
-| `MAGIC_CODE_FROM_EMAIL` | Verified sender address from the production email provider. |
-| `MAGIC_CODE_EMAIL_PROVIDER` | Production Magic Code email provider identifier/config marker. Must be configured before auth is enabled. |
-| `MAGIC_CODE_DEV_ECHO` | `false` in production. `true` is only for local/dev test flows. |
+| `MAGIC_CODE_FROM_EMAIL` | Reserved for the real production email sender/provider integration. Current V0.5a implementation does not send production email. |
+| `MAGIC_CODE_EMAIL_PROVIDER` | Reserved for the real production email sender/provider integration. Current V0.5a implementation returns 503 unless `MAGIC_CODE_DEV_ECHO=true`. |
+| `MAGIC_CODE_DEV_ECHO` | `false` in production. `true` is only for local/dev or tightly controlled staging E2E smoke where captured codes are expected. |
 | `LEGACY_BIND_WINDOW_DAYS` | `14` unless the migration window is deliberately changed. |
 
-Production must not run with `MAGIC_CODE_DEV_ECHO=true`. Before enabling `AUTH_REQUIRED_FOR_ALPHA=true`, confirm the deployed production API either fails startup or returns 503 for Magic Code requests when production email provider configuration is missing. Do not use dev echo as a production fallback.
+Current build status: `get_email_sender()` returns `DisabledProductionEmailSender` unless `MAGIC_CODE_DEV_ECHO=true`. That means production auth enablement is blocked in this build. Ship and smoke-test a real production email sender/provider integration with `MAGIC_CODE_DEV_ECHO=false` before setting `AUTH_REQUIRED_FOR_ALPHA=true` in production. Staging may use `MAGIC_CODE_DEV_ECHO=true` only for controlled E2E/dev smoke where captured codes are not exposed to real families.
+
+Production must not run with `MAGIC_CODE_DEV_ECHO=true`. The current app does not fail startup automatically when dev echo is enabled; treat `MAGIC_CODE_DEV_ECHO=false` as a manual deployment gate and config audit unless a future startup guard is added. With the current implementation and `MAGIC_CODE_DEV_ECHO=false`, Magic Code requests return 503 because the production email sender is disabled.
 
 Rollout order:
 
@@ -76,9 +78,16 @@ Rollout order:
 2. Run `uv run alembic upgrade head` against the target database to create V0.5a auth tables and columns.
 3. Deploy API and web with `AUTH_REQUIRED_FOR_ALPHA=false`; confirm legacy localStorage parent flow still works.
 4. Run the smoke tests from this runbook, including invite, child, assessment, sentence, essay, feedback, summary, and admin flows.
-5. Enable `AUTH_REQUIRED_FOR_ALPHA=true` in staging, keep `MAGIC_CODE_DEV_ECHO=false`, configure Magic Code email, and run the V0.5a manual QA checklist in `qa/2026-06-01-v0.5a-alpha-user-foundation-manual-qa.md`.
-6. Enable `AUTH_REQUIRED_FOR_ALPHA=true` in production only after staging manual QA passes and email delivery is confirmed.
-7. After production auth is enabled, run a production smoke with one invited family and one legacy migration account.
+5. Enable `AUTH_REQUIRED_FOR_ALPHA=true` in staging and run the V0.5a manual QA checklist in `qa/2026-06-01-v0.5a-alpha-user-foundation-manual-qa.md`. Staging may use `MAGIC_CODE_DEV_ECHO=true` only for controlled E2E/dev smoke; any real-family staging smoke must use the real email sender once it exists.
+6. Keep production `AUTH_REQUIRED_FOR_ALPHA=false` until a real production Magic Code email sender/provider integration exists, is configured with `MAGIC_CODE_DEV_ECHO=false`, and passes email delivery smoke.
+7. Enable `AUTH_REQUIRED_FOR_ALPHA=true` in production only after that email integration ships, staging manual QA passes, email delivery is confirmed with `MAGIC_CODE_DEV_ECHO=false`, and the security boundary checklist below passes.
+8. After the future production auth gate is satisfied and `AUTH_REQUIRED_FOR_ALPHA=true` is deployed, run a production smoke with one invited family and one legacy migration account.
+
+Security boundary rollout gate:
+
+- Verify invalid `Origin` or `Referer` is rejected for authenticated state-changing endpoints: `POST /api/alpha/parents`, `POST /api/alpha/legacy-parent-bind`, `POST /api/alpha/parents/me/children`, `POST /api/alpha/parents/{parent_id}/children`, `POST /api/students/{student_id}/feedback-reactions`, `POST /api/alpha/parents/me/children/{student_id}/summary-feedback`, `POST /api/alpha/parents/{parent_id}/children/{student_id}/summary-feedback`, `POST /api/students/{student_id}/essays`, and `POST /api/essays/{essay_id}/revision`.
+- Verify non-JSON authenticated state-changing requests are rejected for the same JSON-body endpoints.
+- Explicit blocker until guarded and verified: `POST /api/auth/logout` and `PATCH /api/auth/account/phone` mutate auth/account state and must reject invalid `Origin` or `Referer`; `PATCH /api/auth/account/phone` must also reject non-JSON bodies.
 
 Rollback order:
 
