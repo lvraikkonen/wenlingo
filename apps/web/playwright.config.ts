@@ -26,7 +26,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: `uv run python -m app.db.init_db && uv run python -m app.db.seed_playwright_alpha && uv run uvicorn app.main:app --host 127.0.0.1 --port ${apiPort}`,
+      command: `uv run python -m app.db.init_playwright_alpha && uv run uvicorn app.main:app --host 127.0.0.1 --port ${apiPort}`,
       cwd: "../api",
       env: {
         DATABASE_URL: process.env.PLAYWRIGHT_DATABASE_URL ?? "sqlite:///./playwright-e2e.db",

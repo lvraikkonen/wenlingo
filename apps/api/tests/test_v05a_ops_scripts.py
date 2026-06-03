@@ -89,3 +89,19 @@ def test_playwright_alpha_seed_accepts_disposable_database_urls(monkeypatch):
     seed_playwright_alpha._assert_playwright_alpha_seed_is_safe(
         "postgresql+psycopg://wenlingo:wenlingo@127.0.0.1:5433/playwright_e2e"
     )
+
+
+def test_playwright_alpha_startup_config_uses_guarded_init_module():
+    text = Path("../web/playwright.config.ts").read_text(encoding="utf-8")
+
+    assert "app.db.init_playwright_alpha" in text
+    assert "app.db.init_db && uv run python -m app.db.seed_playwright_alpha" not in text
+
+
+def test_playwright_alpha_db_init_guards_before_any_db_operation():
+    text = Path("app/db/init_playwright_alpha.py").read_text(encoding="utf-8")
+
+    guard_index = text.index("_assert_playwright_alpha_seed_is_safe()")
+    init_index = text.index("create_db_and_tables()")
+    seed_index = text.index("seed_playwright_alpha()")
+    assert guard_index < init_index < seed_index
