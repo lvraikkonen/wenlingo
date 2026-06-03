@@ -85,9 +85,8 @@ Rollout order:
 
 Security boundary rollout gate:
 
-- Verify invalid `Origin` or `Referer` is rejected for authenticated state-changing endpoints: `POST /api/alpha/parents`, `POST /api/alpha/legacy-parent-bind`, `POST /api/alpha/parents/me/children`, `POST /api/alpha/parents/{parent_id}/children`, `POST /api/students/{student_id}/feedback-reactions`, `POST /api/alpha/parents/me/children/{student_id}/summary-feedback`, `POST /api/alpha/parents/{parent_id}/children/{student_id}/summary-feedback`, `POST /api/students/{student_id}/essays`, and `POST /api/essays/{essay_id}/revision`.
-- Verify non-JSON authenticated state-changing requests are rejected for the same JSON-body endpoints.
-- Explicit blocker until guarded and verified: `POST /api/auth/logout` and `PATCH /api/auth/account/phone` mutate auth/account state and must reject invalid `Origin` or `Referer`; `PATCH /api/auth/account/phone` must also reject non-JSON bodies.
+- Expected guarded/pass checks: verify invalid `Origin` or `Referer` and non-JSON authenticated state-changing requests are rejected for routes that currently use the auth state-change guard: `POST /api/alpha/parents`, `POST /api/alpha/legacy-parent-bind`, `POST /api/students/{student_id}/assessment`, `POST /api/students/{student_id}/sentences`, `POST /api/students/{student_id}/readings`, `POST /api/students/{student_id}/reports`, `POST /api/students/{student_id}/feedback-reactions`, `POST /api/students/{student_id}/essays`, and `POST /api/essays/{essay_id}/revision`.
+- Known production auth blockers until guarded and verified: `POST /api/auth/logout`, `PATCH /api/auth/account/phone`, `POST /api/alpha/parents/me/children`, `POST /api/alpha/parents/{parent_id}/children`, `POST /api/alpha/parents/me/children/{student_id}/summary-feedback`, and `POST /api/alpha/parents/{parent_id}/children/{student_id}/summary-feedback` mutate authenticated state but do not currently have complete Origin/Referer and JSON-body guard coverage. QA must fail production auth enablement if any of these accept invalid `Origin`/`Referer`; JSON-body routes must also reject non-JSON bodies before production auth is enabled.
 
 Rollback order:
 
