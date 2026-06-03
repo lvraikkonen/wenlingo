@@ -1,3 +1,4 @@
+from datetime import datetime
 from hashlib import sha256
 
 from fastapi.testclient import TestClient
@@ -1069,6 +1070,10 @@ def test_admin_overview_returns_family_funnel_without_sensitive_body(
     assert row["reaction_counts"] == {"negative": 1, "positive": 1}
     assert row["latest_parent_feedback"] == "helpful"
     assert row["last_event_at"] is not None
+    assert row["account_linked"] is False
+    assert row["account_email_masked"] is None
+    assert row["phone_bound"] is False
+    assert row["last_login_at"] is None
 
     serialized = str(body)
     assert "孩子写作正文不能出现在管理端" not in serialized
@@ -1082,12 +1087,13 @@ def test_admin_overview_includes_minimal_account_fields_only(
 ):
     monkeypatch.setenv("ALPHA_ADMIN_TOKEN", "admin-secret")
     parent = create_parent(client, session, code="ALPHA-ADMIN-AUTH")
+    last_login_at = datetime(2026, 5, 29, 1, 30)
     account = ParentAccount(
         email_normalized="parent@example.com",
         email_verified_at=utcnow(),
         phone_e164="+8613800001234",
         phone_bound_at=utcnow(),
-        last_login_at=utcnow(),
+        last_login_at=last_login_at,
     )
     session.add(account)
     session.flush()
@@ -1107,6 +1113,7 @@ def test_admin_overview_includes_minimal_account_fields_only(
     assert row["account_linked"] is True
     assert row["account_email_masked"] == "pa***@example.com"
     assert row["phone_bound"] is True
+    assert row["last_login_at"] == "2026-05-29T01:30:00"
     assert "session_count_active" not in row
     assert "migration_conflict_count" not in row
 

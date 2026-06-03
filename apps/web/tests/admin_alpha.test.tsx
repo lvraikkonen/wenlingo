@@ -117,6 +117,29 @@ test("overview table renders minimal account fields", async () => {
   expect(row).not.toHaveTextContent("migration conflicts");
 });
 
+test("overview table renders clear account fallbacks", async () => {
+  apiMocks.getAdminAlphaOverview.mockResolvedValueOnce({
+    families: [
+      {
+        ...overview.families[0],
+        account_linked: false,
+        account_email_masked: null,
+        phone_bound: false,
+        last_login_at: null,
+      },
+    ],
+  });
+  window.sessionStorage.setItem("wenlingo_alpha_admin_token", "secret");
+
+  render(<AdminAlphaPage />);
+
+  const row = await screen.findByRole("button", { name: /家庭 01/ });
+  expect(row).toHaveTextContent("No account");
+  expect(row).toHaveTextContent("No email");
+  expect(row).toHaveTextContent("Phone not bound");
+  expect(row).toHaveTextContent("No last login");
+});
+
 test("clicking a family row renders simple timeline", async () => {
   window.sessionStorage.setItem("wenlingo_alpha_admin_token", "secret");
 

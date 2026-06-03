@@ -170,13 +170,13 @@ export default function AdminAlphaPage() {
                   <span>
                     <strong>{formatAccountStatus(row)}</strong>
                     <span className="mt-1 block text-xs text-[var(--wen-muted)]">
-                      {row.account_email_masked ?? "email none"}
+                      {row.account_email_masked ?? "No email"}
                     </span>
                     <span className="mt-1 block text-xs text-[var(--wen-muted)]">
                       {formatPhoneStatus(row)}
                     </span>
                     <span className="mt-1 block text-xs text-[var(--wen-muted)]">
-                      {row.last_login_at ?? "last login none"}
+                      {row.last_login_at ?? "No last login"}
                     </span>
                   </span>
                   <span>{row.funnel_stage}</span>
