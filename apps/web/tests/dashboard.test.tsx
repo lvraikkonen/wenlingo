@@ -1,8 +1,14 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import DashboardPage from "../src/app/children/[studentId]/page";
 import { getDashboard } from "../src/lib/api";
+
+const replace = vi.fn();
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace }),
+}));
 
 vi.mock("../src/lib/api", () => ({
   demoLogin: vi.fn(async () => ({
@@ -77,10 +83,14 @@ vi.mock("../src/lib/api", () => ({
 }));
 
 test("renders child dashboard as an action entry", async () => {
-  render(await DashboardPage({ params: Promise.resolve({ studentId: "s1" }) }));
+  const element = await DashboardPage({ params: Promise.resolve({ studentId: "s1" }) });
 
-  expect(getDashboard).toHaveBeenCalledWith("s1");
-  expect(screen.getByRole("heading", { name: "小宇的小文星球" })).toBeInTheDocument();
+  expect(getDashboard).not.toHaveBeenCalled();
+
+  render(element);
+
+  await waitFor(() => expect(getDashboard).toHaveBeenCalledWith("s1"));
+  expect(await screen.findByRole("heading", { name: "小宇的小文星球" })).toBeInTheDocument();
   expect(screen.getByText("今日推荐")).toBeInTheDocument();
   expect(
     screen.getByRole("heading", { name: "作文城堡" }),
