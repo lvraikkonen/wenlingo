@@ -105,3 +105,25 @@ def test_playwright_alpha_db_init_guards_before_any_db_operation():
     init_index = text.index("create_db_and_tables()")
     seed_index = text.index("seed_playwright_alpha()")
     assert guard_index < init_index < seed_index
+
+
+def test_playwright_alpha_db_init_resets_existing_sqlite_e2e_db(tmp_path):
+    from app.db.init_playwright_alpha import _reset_sqlite_playwright_database
+
+    disposable_db = tmp_path / "playwright-e2e.db"
+    disposable_db.write_text("old schema", encoding="utf-8")
+
+    _reset_sqlite_playwright_database(f"sqlite:///{disposable_db.as_posix()}")
+
+    assert not disposable_db.exists()
+
+
+def test_playwright_alpha_db_init_does_not_reset_other_sqlite_db(tmp_path):
+    from app.db.init_playwright_alpha import _reset_sqlite_playwright_database
+
+    non_e2e_db = tmp_path / "app.db"
+    non_e2e_db.write_text("keep me", encoding="utf-8")
+
+    _reset_sqlite_playwright_database(f"sqlite:///{non_e2e_db.as_posix()}")
+
+    assert non_e2e_db.read_text(encoding="utf-8") == "keep me"
