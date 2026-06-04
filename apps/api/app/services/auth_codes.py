@@ -11,6 +11,7 @@ from app.services.email_sender import EmailSender
 GENERIC_REQUEST_MESSAGE = "如果邮箱可用，我们已经发送验证码。"
 GENERIC_VERIFY_ERROR = "验证码无效或已过期。"
 RATE_LIMIT_ERROR = "验证码请求过于频繁，请稍后再试。"
+DISABLED_ACCOUNT_ERROR = "账号暂不可用，请联系邀请人。"
 _CODE_PURPOSE = "magic-code"
 _LOGIN_PURPOSE = "parent_login"
 _REQUEST_IP_PURPOSE = "request-ip"
@@ -75,6 +76,12 @@ def _check_rate_limits(
         raise HTTPException(status_code=429, detail=RATE_LIMIT_ERROR)
 
 
+def _account_for_email(session: Session, email_normalized: str) -> ParentAccount | None:
+    return session.exec(
+        select(ParentAccount).where(ParentAccount.email_normalized == email_normalized)
+    ).first()
+
+
 def request_magic_code(
     session: Session,
     settings,
@@ -95,6 +102,10 @@ def request_magic_code(
         alpha_session_id=alpha_session_id,
         request_ip_hash=request_ip_hash,
     )
+
+    existing_account = _account_for_email(session, email_normalized)
+    if existing_account and existing_account.status == "disabled":
+        return {"message": GENERIC_REQUEST_MESSAGE}
 
     now = utcnow()
     previous_codes = session.exec(
@@ -166,9 +177,9 @@ def verify_magic_code(session: Session, settings, email: str, code: str) -> Pare
         _reject_code(session, magic_code, settings)
 
     now = utcnow()
-    account = session.exec(
-        select(ParentAccount).where(ParentAccount.email_normalized == email_normalized)
-    ).first()
+    account = _account_for_email(session, email_normalized)
+    if account and account.status == "disabled":
+        raise HTTPException(status_code=403, detail=DISABLED_ACCOUNT_ERROR)
     if account is None:
         account = ParentAccount(email_normalized=email_normalized, email_verified_at=now)
     elif account.email_verified_at is None:
