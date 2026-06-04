@@ -39,7 +39,7 @@ def create_parent_session(
         max_age=settings.auth_session_days * 24 * 60 * 60,
         httponly=True,
         secure=settings.auth_session_cookie_secure,
-        samesite="lax",
+        samesite=settings.auth_session_cookie_samesite,
         path="/",
     )
     return token

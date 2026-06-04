@@ -166,6 +166,24 @@ def test_create_parent_session_cookie_uses_configured_security_attributes(sessio
     assert "Secure" in set_cookie
 
 
+def test_create_parent_session_cookie_uses_configured_samesite(session):
+    account = create_account(session)
+    settings = Settings(
+        auth_secret_pepper="test-pepper",
+        auth_session_cookie_secure=True,
+        auth_session_cookie_samesite="none",
+    )
+
+    from starlette.responses import Response
+
+    response = Response()
+    issue_parent_session(db=session, settings=settings, account=account, response=response)
+
+    set_cookie = response.headers["set-cookie"]
+    assert "SameSite=none" in set_cookie
+    assert "Secure" in set_cookie
+
+
 def test_patch_account_phone_with_valid_cookie_binds_normalized_phone(client, session):
     account = create_account(session)
     create_parent_session(session, account)
