@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     magic_code_from_email: str = ""
     magic_code_email_provider: str = ""
     magic_code_dev_echo: bool = False
+    smtp_host: str = ""
+    smtp_port: int = 465
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_use_ssl: bool = True
+    smtp_use_starttls: bool = False
+    smtp_timeout_seconds: int = 10
     legacy_bind_window_days: int = 14
     auth_allowed_origins: str = ""
 
