@@ -7,7 +7,7 @@ def test_v05a_alpha_user_foundation_has_additive_migration():
     )
     text = migration_path.read_text(encoding="utf-8")
 
-    assert 'revision = "20260601_v05a_alpha_user_foundation"' in text
+    assert 'revision = "20260601_v05a_user_foundation"' in text
     assert 'down_revision = "20260527_alpha_feedback_obs"' in text
     assert "parentaccount" in text
     assert "authmagiccode" in text

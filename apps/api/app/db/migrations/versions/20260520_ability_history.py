@@ -5,7 +5,7 @@ from alembic import op
 
 
 revision = "20260520_ability_history"
-down_revision = "20260515_family_test_llm_student_usage"
+down_revision = "20260515_llm_student_usage"
 branch_labels = None
 depends_on = None
 

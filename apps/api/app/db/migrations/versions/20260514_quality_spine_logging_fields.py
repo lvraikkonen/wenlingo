@@ -4,8 +4,8 @@ import sqlalchemy as sa
 from alembic import op
 
 
-revision = "20260514_quality_spine_logging_fields"
-down_revision = "20260507_essay_version_uniqueness"
+revision = "20260514_quality_spine_logs"
+down_revision = "20260507_essay_version_unique"
 branch_labels = None
 depends_on = None
 

@@ -7,7 +7,7 @@ applying this migration.
 from alembic import op
 
 
-revision = "20260507_essay_version_uniqueness"
+revision = "20260507_essay_version_unique"
 down_revision = None
 branch_labels = None
 depends_on = None

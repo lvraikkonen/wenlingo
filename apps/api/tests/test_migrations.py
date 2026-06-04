@@ -1,4 +1,23 @@
 from pathlib import Path
+import re
+
+
+def test_alembic_revision_ids_fit_default_version_column():
+    versions_dir = Path("app/db/migrations/versions")
+    revision_ids = []
+
+    for path in versions_dir.glob("*.py"):
+        migration_text = path.read_text(encoding="utf-8")
+        match = re.search(r'^revision = "([^"]+)"', migration_text, re.MULTILINE)
+        if match:
+            revision_ids.append((path.name, match.group(1)))
+
+    too_long = [
+        f"{name}: {revision_id} ({len(revision_id)})"
+        for name, revision_id in revision_ids
+        if len(revision_id) > 32
+    ]
+    assert too_long == []
 
 
 def test_essay_version_unique_constraint_has_migration():
@@ -17,8 +36,8 @@ def test_quality_spine_logging_fields_have_migration():
     )
     migration_text = migration_path.read_text(encoding="utf-8")
 
-    assert "20260514_quality_spine_logging_fields" in migration_text
-    assert 'down_revision = "20260507_essay_version_uniqueness"' in migration_text
+    assert "20260514_quality_spine_logs" in migration_text
+    assert 'down_revision = "20260507_essay_version_unique"' in migration_text
     assert "llmcalllog" in migration_text
     assert "essayversion" in migration_text
     assert "raw_response" in migration_text
@@ -37,7 +56,7 @@ def test_family_test_llm_student_usage_has_migration():
     versions_dir = Path("app/db/migrations/versions")
     migration_text = "\n".join(path.read_text(encoding="utf-8") for path in versions_dir.glob("*.py"))
 
-    assert "20260515_family_test_llm_student_usage" in migration_text
+    assert "20260515_llm_student_usage" in migration_text
     assert "llmcalllog" in migration_text
     assert "student_id" in migration_text
     assert "task_name" in migration_text
@@ -60,7 +79,7 @@ def test_ability_history_has_migration():
     assert "ix_abilityhistory_source_id" in migration_text
     assert "ix_abilityhistory_student_id" in migration_text
     assert "fk_abilityhistory_student_id_studentprofile" in migration_text
-    assert 'down_revision = "20260515_family_test_llm_student_usage"' in migration_text
+    assert 'down_revision = "20260515_llm_student_usage"' in migration_text
 
 
 def test_assessment_artifact_references_have_migration():
