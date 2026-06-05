@@ -213,6 +213,36 @@ def test_stage_report_handles_legacy_revision_null_task_metadata(session):
     assert content["next_suggestions"] == ["继续做 1 次句子加细节", "完成 1 次作文二稿修改"]
 
 
+def test_stage_report_handles_completed_learning_with_incomplete_revision_feedback(session):
+    parent = seed_demo_data(session)
+    student = parent_students(session, parent.id)[0]
+    essay = Essay(student_id=student.id, title="QA regression essay", status="settled")
+    session.add(essay)
+    session.flush()
+    session.add(
+        EssayVersion(
+            essay_id=essay.id,
+            version_label="revision",
+            content="二稿存在，但 AI 对比证据字段是旧格式。",
+            completed_tasks=[],
+            skipped_tasks=[],
+            ai_feedback={"evidence": None},
+        )
+    )
+    session.commit()
+
+    with client_without_server_exceptions(session) as client:
+        response = client.post(
+            f"/api/students/{student.id}/reports",
+            json={"report_type": "stage"},
+        )
+
+    assert response.status_code == 201
+    content = response.json()["content"]
+    assert content["best_revision"] == "二稿存在，但 AI 对比证据字段是旧格式。"
+    assert content["ability_changes"] == ["会修改力有新的练习证据"]
+
+
 def test_report_returns_404_when_student_ability_is_missing(session):
     parent = seed_demo_data(session)
     student = parent_students(session, parent.id)[0]

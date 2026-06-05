@@ -9,6 +9,15 @@ from app.services.auth_security import hash_secret
 GENERIC_REQUEST_MESSAGE = "如果邮箱可用，我们已经发送验证码。"
 GENERIC_VERIFY_ERROR = "验证码无效或已过期。"
 RATE_LIMIT_ERROR = "验证码请求过于频繁，请稍后再试。"
+DISABLED_ACCOUNT_ERROR = "账号暂不可用，请联系邀请人。"
+
+
+class RecordingSender:
+    def __init__(self):
+        self.sent = []
+
+    def send_magic_code(self, *, to_email: str, code: str, ttl_minutes: int):
+        self.sent.append((to_email, code, ttl_minutes))
 
 
 @pytest.fixture(autouse=True)
@@ -183,3 +192,63 @@ def test_wrong_code_on_fourth_attempt_increments_to_five_and_consumes_code(clien
     session.refresh(magic_code)
     assert magic_code.attempt_count == 5
     assert magic_code.consumed_at is not None
+
+
+def test_request_magic_code_for_disabled_account_returns_generic_without_sending(
+    session,
+    monkeypatch,
+):
+    from app.services import auth_codes
+
+    monkeypatch.setenv("MAGIC_CODE_DEV_ECHO", "false")
+    account = ParentAccount(
+        email_normalized="disabled@example.com",
+        email_verified_at=utcnow(),
+        status="disabled",
+    )
+    session.add(account)
+    session.commit()
+    sender = RecordingSender()
+
+    response = auth_codes.request_magic_code(
+        session,
+        auth_codes_settings := type(
+            "Settings",
+            (),
+            {
+                "auth_secret_pepper": "test-pepper",
+                "magic_code_email_rate_limit": 3,
+                "magic_code_ip_rate_limit": 20,
+                "magic_code_alpha_session_rate_limit": 5,
+                "magic_code_dev_echo": False,
+                "magic_code_ttl_minutes": 10,
+            },
+        )(),
+        "disabled@example.com",
+        "alpha-disabled",
+        "127.0.0.1",
+        sender,
+    )
+
+    assert response == {"message": GENERIC_REQUEST_MESSAGE}
+    assert sender.sent == []
+    assert _stored_codes(session) == []
+
+
+def test_verify_magic_code_rejects_disabled_account_with_alpha_message(client, session):
+    session.add(
+        ParentAccount(
+            email_normalized="disabled@example.com",
+            email_verified_at=utcnow(),
+            status="disabled",
+        )
+    )
+    _insert_code(session, email="disabled@example.com")
+
+    response = client.post(
+        "/api/auth/magic-codes/verify",
+        json={"email": "disabled@example.com", "code": "123456"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": DISABLED_ACCOUNT_ERROR}

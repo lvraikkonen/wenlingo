@@ -17,11 +17,13 @@ def build_stage_report_content(session: Session, student_id: str) -> ReportConte
         .where(Essay.student_id == student_id, EssayVersion.version_label == "revision")
         .order_by(EssayVersion.created_at.desc(), EssayVersion.id.desc())
     ).first()
-    completed_tasks = (revision.completed_tasks or []) if revision else []
-    skipped_tasks = (revision.skipped_tasks or []) if revision else []
+    completed_tasks = revision.completed_tasks if revision and isinstance(revision.completed_tasks, list) else []
+    skipped_tasks = revision.skipped_tasks if revision and isinstance(revision.skipped_tasks, list) else []
     comparison_evidence = []
     if revision and isinstance(revision.ai_feedback, dict):
-        comparison_evidence = revision.ai_feedback.get("evidence", [])
+        raw_evidence = revision.ai_feedback.get("evidence", [])
+        if isinstance(raw_evidence, list):
+            comparison_evidence = [str(item) for item in raw_evidence if item]
     ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
     if not ability:
         raise LookupError("report context not found")

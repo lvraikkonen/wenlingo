@@ -169,6 +169,43 @@ export type AdminAlphaOverviewRow = {
   last_login_at: string | null;
 };
 
+export type AdminAlphaAccountRow = {
+  account_id: string;
+  email_masked: string;
+  status: "active" | "disabled" | string;
+  parent_id: string | null;
+  parent_display_name: string | null;
+  children_count: number;
+  last_login_at: string | null;
+  active_session_count: number;
+  created_at: string | null;
+};
+
+export type AdminAlphaInviteCreateResponse = {
+  invites: Array<{
+    invite_id: string;
+    label: string;
+    status: string;
+    raw_code: string;
+  }>;
+};
+
+export type AdminAlphaInviteActionResponse = {
+  invite: {
+    invite_id: string;
+    label: string;
+    status: string;
+  };
+};
+
+export type AdminAlphaAccountActionResponse = {
+  account: {
+    account_id: string;
+    status: string;
+    revoked_session_count?: number;
+  };
+};
+
 export type AdminAlphaEvent = {
   id: string;
   event_type: string;
