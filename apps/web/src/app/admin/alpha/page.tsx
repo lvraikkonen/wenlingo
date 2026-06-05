@@ -35,6 +35,10 @@ function formatPhoneStatus(row: AdminAlphaOverviewRow): string {
   return row.phone_bound ? "Phone bound" : "Phone not bound";
 }
 
+function canRevokeInvite(row: AdminAlphaOverviewRow): boolean {
+  return row.invite_status === "issued" && !row.parent_id;
+}
+
 export default function AdminAlphaPage() {
   const [token, setToken] = useState("");
   const [tokenInput, setTokenInput] = useState("");
@@ -150,6 +154,19 @@ export default function AdminAlphaPage() {
     }
   }
 
+  async function handleRevokeInvite(row: AdminAlphaOverviewRow) {
+    if (!token) {
+      return;
+    }
+    setError("");
+    try {
+      await revokeAdminAlphaInvite(token, row.invite_id);
+      await loadOverview(token);
+    } catch {
+      setError("Invite revoke failed.");
+    }
+  }
+
   async function selectFamily(row: AdminAlphaOverviewRow) {
     if (!row.parent_id || !token) {
       return;
@@ -162,6 +179,37 @@ export default function AdminAlphaPage() {
     } catch {
       setError("Family timeline unavailable.");
     }
+  }
+
+  function renderOverviewCells(row: AdminAlphaOverviewRow) {
+    return (
+      <>
+        <span>
+          <strong>{row.invite_label}</strong>
+          <span className="mt-1 block text-xs text-[var(--wen-muted)]">
+            {row.invite_status}
+          </span>
+        </span>
+        <span>{row.parent_display_name ?? "Unclaimed"}</span>
+        <span>
+          <strong>{formatAccountStatus(row)}</strong>
+          <span className="mt-1 block text-xs text-[var(--wen-muted)]">
+            {row.account_email_masked ?? "No email"}
+          </span>
+          <span className="mt-1 block text-xs text-[var(--wen-muted)]">
+            {formatPhoneStatus(row)}
+          </span>
+          <span className="mt-1 block text-xs text-[var(--wen-muted)]">
+            {row.last_login_at ?? "No last login"}
+          </span>
+        </span>
+        <span>{row.funnel_stage}</span>
+        <span>{row.child_count} child</span>
+        <span>{formatReactionCounts(row.reaction_counts)}</span>
+        <span>{row.latest_parent_feedback ?? "none"}</span>
+        <span>{row.last_event_at ?? "none"}</span>
+      </>
+    );
   }
 
   return (
@@ -310,7 +358,7 @@ export default function AdminAlphaPage() {
             </section>
 
             <div className="overflow-hidden rounded-lg border border-[var(--wen-border)] bg-white">
-              <div className="grid grid-cols-[1.2fr_1fr_1.3fr_1fr_0.7fr_1.2fr_1fr_1.5fr] gap-3 border-b border-[var(--wen-border)] bg-[var(--wen-bg)] px-4 py-3 text-xs font-bold uppercase text-[var(--wen-muted)]">
+              <div className="grid grid-cols-[1.2fr_1fr_1.3fr_1fr_0.7fr_1.2fr_1fr_1.5fr_auto] gap-3 border-b border-[var(--wen-border)] bg-[var(--wen-bg)] px-4 py-3 text-xs font-bold uppercase text-[var(--wen-muted)]">
                 <span>Invite</span>
                 <span>Family</span>
                 <span>Account</span>
@@ -319,41 +367,38 @@ export default function AdminAlphaPage() {
                 <span>Reactions</span>
                 <span>Feedback</span>
                 <span>Last activity</span>
+                <span>Actions</span>
               </div>
-              {families.map((row) => (
-                <button
-                  key={row.invite_id}
-                  type="button"
-                  onClick={() => void selectFamily(row)}
-                  disabled={!row.parent_id}
-                  className="grid w-full grid-cols-[1.2fr_1fr_1.3fr_1fr_0.7fr_1.2fr_1fr_1.5fr] gap-3 border-b border-[var(--wen-border)] px-4 py-3 text-left text-sm last:border-b-0 disabled:cursor-not-allowed disabled:text-[var(--wen-muted)]"
-                >
-                  <span>
-                    <strong>{row.invite_label}</strong>
-                    <span className="mt-1 block text-xs text-[var(--wen-muted)]">
-                      {row.invite_status}
+              {families.map((row) =>
+                canRevokeInvite(row) ? (
+                  <div
+                    key={row.invite_id}
+                    className="grid w-full grid-cols-[1.2fr_1fr_1.3fr_1fr_0.7fr_1.2fr_1fr_1.5fr_auto] gap-3 border-b border-[var(--wen-border)] px-4 py-3 text-left text-sm last:border-b-0"
+                  >
+                    {renderOverviewCells(row)}
+                    <span>
+                      <button
+                        type="button"
+                        onClick={() => void handleRevokeInvite(row)}
+                        className="rounded-lg border border-[var(--wen-border)] px-3 py-2 font-semibold"
+                      >
+                        Revoke invite
+                      </button>
                     </span>
-                  </span>
-                  <span>{row.parent_display_name ?? "Unclaimed"}</span>
-                  <span>
-                    <strong>{formatAccountStatus(row)}</strong>
-                    <span className="mt-1 block text-xs text-[var(--wen-muted)]">
-                      {row.account_email_masked ?? "No email"}
-                    </span>
-                    <span className="mt-1 block text-xs text-[var(--wen-muted)]">
-                      {formatPhoneStatus(row)}
-                    </span>
-                    <span className="mt-1 block text-xs text-[var(--wen-muted)]">
-                      {row.last_login_at ?? "No last login"}
-                    </span>
-                  </span>
-                  <span>{row.funnel_stage}</span>
-                  <span>{row.child_count} child</span>
-                  <span>{formatReactionCounts(row.reaction_counts)}</span>
-                  <span>{row.latest_parent_feedback ?? "none"}</span>
-                  <span>{row.last_event_at ?? "none"}</span>
-                </button>
-              ))}
+                  </div>
+                ) : (
+                  <button
+                    key={row.invite_id}
+                    type="button"
+                    onClick={() => void selectFamily(row)}
+                    disabled={!row.parent_id}
+                    className="grid w-full grid-cols-[1.2fr_1fr_1.3fr_1fr_0.7fr_1.2fr_1fr_1.5fr_auto] gap-3 border-b border-[var(--wen-border)] px-4 py-3 text-left text-sm last:border-b-0 disabled:cursor-not-allowed disabled:text-[var(--wen-muted)]"
+                  >
+                    {renderOverviewCells(row)}
+                    <span />
+                  </button>
+                ),
+              )}
             </div>
           </div>
         ) : null}

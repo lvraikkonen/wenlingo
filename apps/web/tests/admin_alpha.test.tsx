@@ -307,3 +307,68 @@ test("admin renders account list and disables then enables account", async () =>
     "account-1",
   );
 });
+
+test("admin revokes an issued invite and refreshes overview", async () => {
+  apiMocks.getAdminAlphaOverview.mockResolvedValueOnce({
+    families: [
+      ...overview.families,
+      {
+        ...overview.families[0],
+        invite_id: "invite-issued",
+        invite_label: "Alpha QA 01",
+        invite_status: "issued",
+        parent_id: null,
+        parent_display_name: null,
+        child_count: 0,
+        funnel_stage: "invited",
+        assessment_completed_count: 0,
+        summary_viewed: false,
+        reaction_counts: {},
+        latest_parent_feedback: null,
+        last_event_at: null,
+        account_linked: false,
+        account_email_masked: null,
+        phone_bound: false,
+        last_login_at: null,
+      },
+    ],
+  });
+  apiMocks.getAdminAlphaOverview.mockResolvedValueOnce({
+    families: [
+      {
+        ...overview.families[0],
+        invite_id: "invite-issued",
+        invite_label: "Alpha QA 01",
+        invite_status: "revoked",
+        parent_id: null,
+        parent_display_name: null,
+        child_count: 0,
+        funnel_stage: "revoked",
+        assessment_completed_count: 0,
+        summary_viewed: false,
+        reaction_counts: {},
+        latest_parent_feedback: null,
+        last_event_at: null,
+        account_linked: false,
+        account_email_masked: null,
+        phone_bound: false,
+        last_login_at: null,
+      },
+    ],
+  });
+  window.sessionStorage.setItem("wenlingo_alpha_admin_token", "secret");
+
+  render(<AdminAlphaPage />);
+
+  expect(await screen.findByText("Alpha QA 01")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Revoke invite" }));
+
+  expect(apiMocks.revokeAdminAlphaInvite).toHaveBeenCalledWith(
+    "secret",
+    "invite-issued",
+  );
+  await waitFor(() =>
+    expect(apiMocks.getAdminAlphaOverview).toHaveBeenCalledTimes(2),
+  );
+  expect(await screen.findAllByText("revoked")).not.toHaveLength(0);
+});
