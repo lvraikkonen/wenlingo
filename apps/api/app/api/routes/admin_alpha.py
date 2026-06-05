@@ -1,12 +1,15 @@
 from collections import Counter
 from datetime import datetime
+import secrets
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
+from app.api.auth_deps import require_allowed_origin, require_json_state_change
 from app.api.deps import get_db_session
-from app.api.routes.alpha import sanitize_event_payload
+from app.api.routes.alpha import hash_invite_code, sanitize_event_payload
 from app.core.config import Settings, get_settings
 from app.domain.models import (
     AlphaInviteCode,
@@ -14,9 +17,11 @@ from app.domain.models import (
     FeedbackReaction,
     ParentAccount,
     ParentFeedback,
+    ParentSession,
     ParentUser,
     ProductEvent,
     StudentProfile,
+    utcnow,
 )
 from app.services.auth_security import mask_email
 
@@ -31,10 +36,67 @@ def require_alpha_admin_token(
         raise HTTPException(status_code=403, detail="admin token required")
 
 
+class AdminInviteCreate(BaseModel):
+    count: int = Field(ge=1, le=20)
+    label_prefix: str = Field(min_length=1, max_length=80)
+    issued_to_note: str = Field(default="", max_length=240)
+
+
+class EmptyAdminAction(BaseModel):
+    pass
+
+
+def require_alpha_admin_state_change(
+    request: Request,
+    x_alpha_admin_token: str = Header(default=""),
+    settings: Settings = Depends(get_settings),
+) -> None:
+    require_alpha_admin_token(
+        x_alpha_admin_token=x_alpha_admin_token,
+        settings=settings,
+    )
+    require_allowed_origin(request, settings)
+    require_json_state_change(request)
+
+
 def _serialize_dt(value: datetime | None) -> str | None:
     if value is None:
         return None
     return value.isoformat()
+
+
+def _generate_invite_code() -> str:
+    return f"ALPHA-{secrets.token_urlsafe(9).upper().replace('-', '').replace('_', '')}"
+
+
+def _generate_unique_invite_code(reserved_hashes: set[str]) -> tuple[str, str]:
+    for _ in range(100):
+        raw_code = _generate_invite_code()
+        code_hash = hash_invite_code(raw_code)
+        if code_hash not in reserved_hashes:
+            reserved_hashes.add(code_hash)
+            return raw_code, code_hash
+    raise HTTPException(status_code=500, detail="could not generate unique invite code")
+
+
+def _active_session_count(session: Session, account_id: str) -> int:
+    now = utcnow()
+    return len(
+        session.exec(
+            select(ParentSession).where(
+                ParentSession.account_id == account_id,
+                ParentSession.revoked_at.is_(None),
+                ParentSession.expires_at > now,
+            )
+        ).all()
+    )
+
+
+def _is_demo_or_system_account(session: Session, account: ParentAccount) -> bool:
+    if account.email_normalized == "demo@wenlingo.local":
+        return True
+    parent = session.exec(select(ParentUser).where(ParentUser.account_id == account.id)).first()
+    return bool(parent and parent.email.startswith("demo@wenlingo.local"))
 
 
 def _reaction_counts(reactions: list[FeedbackReaction]) -> dict[str, int]:
@@ -91,6 +153,163 @@ def _children_for_parent(session: Session, parent_id: str) -> list[StudentProfil
         select(StudentProfile).where(StudentProfile.parent_id == parent_id)
     ).all()
     return sorted(children, key=lambda child: (child.created_at, child.id))
+
+
+@router.post(
+    "/invites",
+    status_code=201,
+    dependencies=[Depends(require_alpha_admin_state_change)],
+)
+def create_admin_alpha_invites(
+    request: AdminInviteCreate,
+    session: Session = Depends(get_db_session),
+):
+    rows: list[dict[str, str]] = []
+    reserved_hashes = set(session.exec(select(AlphaInviteCode.code_hash)).all())
+    for index in range(1, request.count + 1):
+        raw_code, code_hash = _generate_unique_invite_code(reserved_hashes)
+        invite = AlphaInviteCode(
+            code_hash=code_hash,
+            label=f"{request.label_prefix} {index:02d}",
+            status="issued",
+            issued_to_note=request.issued_to_note,
+        )
+        session.add(invite)
+        session.flush()
+        rows.append(
+            {
+                "invite_id": invite.id,
+                "label": invite.label,
+                "status": invite.status,
+                "raw_code": raw_code,
+            }
+        )
+    session.commit()
+    return {"invites": rows}
+
+
+@router.post(
+    "/invites/{invite_id}/revoke",
+    dependencies=[Depends(require_alpha_admin_state_change)],
+)
+def revoke_admin_alpha_invite(
+    invite_id: str,
+    request: EmptyAdminAction,
+    session: Session = Depends(get_db_session),
+):
+    invite = session.get(AlphaInviteCode, invite_id)
+    if not invite:
+        raise HTTPException(status_code=404, detail="invite not found")
+    if invite.status != "issued" or invite.consumed_by_parent_id or invite.consumed_at:
+        raise HTTPException(status_code=409, detail="invite is not revocable")
+
+    invite.status = "revoked"
+    session.add(invite)
+    session.commit()
+    session.refresh(invite)
+    return {
+        "invite": {
+            "invite_id": invite.id,
+            "label": invite.label,
+            "status": invite.status,
+        }
+    }
+
+
+@router.get("/accounts", dependencies=[Depends(require_alpha_admin_token)])
+def list_admin_alpha_accounts(session: Session = Depends(get_db_session)):
+    accounts = sorted(
+        session.exec(select(ParentAccount)).all(),
+        key=lambda account: (account.created_at, account.id),
+    )
+    rows: list[dict[str, Any]] = []
+    for account in accounts:
+        parent = session.exec(
+            select(ParentUser).where(ParentUser.account_id == account.id)
+        ).first()
+        rows.append(
+            {
+                "account_id": account.id,
+                "email_masked": mask_email(account.email_normalized),
+                "status": account.status,
+                "parent_id": parent.id if parent else None,
+                "parent_display_name": parent.display_name if parent else None,
+                "children_count": len(_children_for_parent(session, parent.id))
+                if parent
+                else 0,
+                "active_session_count": _active_session_count(session, account.id),
+                "created_at": _serialize_dt(account.created_at),
+                "updated_at": _serialize_dt(account.updated_at),
+                "last_login_at": _serialize_dt(account.last_login_at),
+            }
+        )
+    return {"accounts": rows}
+
+
+@router.post(
+    "/accounts/{account_id}/disable",
+    dependencies=[Depends(require_alpha_admin_state_change)],
+)
+def disable_admin_alpha_account(
+    account_id: str,
+    request: EmptyAdminAction,
+    session: Session = Depends(get_db_session),
+):
+    account = session.get(ParentAccount, account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="account not found")
+    if _is_demo_or_system_account(session, account):
+        raise HTTPException(status_code=409, detail="demo/system account cannot be disabled")
+
+    now = utcnow()
+    account.status = "disabled"
+    account.updated_at = now
+    active_sessions = session.exec(
+        select(ParentSession).where(
+            ParentSession.account_id == account.id,
+            ParentSession.revoked_at.is_(None),
+            ParentSession.expires_at > now,
+        )
+    ).all()
+    for parent_session in active_sessions:
+        parent_session.revoked_at = now
+        session.add(parent_session)
+    session.add(account)
+    session.commit()
+    session.refresh(account)
+    return {
+        "account": {
+            "account_id": account.id,
+            "status": account.status,
+            "revoked_session_count": len(active_sessions),
+        }
+    }
+
+
+@router.post(
+    "/accounts/{account_id}/enable",
+    dependencies=[Depends(require_alpha_admin_state_change)],
+)
+def enable_admin_alpha_account(
+    account_id: str,
+    request: EmptyAdminAction,
+    session: Session = Depends(get_db_session),
+):
+    account = session.get(ParentAccount, account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="account not found")
+
+    account.status = "active"
+    account.updated_at = utcnow()
+    session.add(account)
+    session.commit()
+    session.refresh(account)
+    return {
+        "account": {
+            "account_id": account.id,
+            "status": account.status,
+        }
+    }
 
 
 @router.get("/overview", dependencies=[Depends(require_alpha_admin_token)])
