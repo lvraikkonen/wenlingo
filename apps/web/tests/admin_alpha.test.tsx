@@ -242,3 +242,68 @@ test("overview does not render writing text or AI feedback body", async () => {
   expect(screen.queryByText("AI feedback body should stay private")).not.toBeInTheDocument();
 });
 
+test("admin generates invites and shows one-time warning without browser storage", async () => {
+  window.sessionStorage.setItem("wenlingo_alpha_admin_token", "secret");
+  render(<AdminAlphaPage />);
+
+  await screen.findByRole("button", { name: /家庭 01/ });
+  await userEvent.clear(screen.getByLabelText("Invite count"));
+  await userEvent.type(screen.getByLabelText("Invite count"), "1");
+  await userEvent.clear(screen.getByLabelText("Label prefix"));
+  await userEvent.type(screen.getByLabelText("Label prefix"), "Alpha QA");
+  await userEvent.type(screen.getByLabelText("Issued note"), "June QA");
+  await userEvent.click(screen.getByRole("button", { name: "生成邀请码" }));
+
+  expect(apiMocks.createAdminAlphaInvites).toHaveBeenCalledWith("secret", {
+    count: 1,
+    label_prefix: "Alpha QA",
+    issued_to_note: "June QA",
+  });
+  expect(await screen.findByText("ALPHA-NEWCODE")).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      "这些邀请码只显示一次。关闭页面后无法再次查看，请立即复制并安全保存。",
+    ),
+  ).toBeInTheDocument();
+  expect(window.sessionStorage.getItem("wenlingo_alpha_admin_token")).toBe(
+    "secret",
+  );
+  const sessionStorageContents = JSON.stringify({ ...window.sessionStorage });
+  const localStorageContents = JSON.stringify({ ...window.localStorage });
+  expect(sessionStorageContents).not.toContain("ALPHA-NEWCODE");
+  expect(localStorageContents).not.toContain("ALPHA-NEWCODE");
+});
+
+test("admin renders account list and disables then enables account", async () => {
+  window.sessionStorage.setItem("wenlingo_alpha_admin_token", "secret");
+  render(<AdminAlphaPage />);
+
+  expect(await screen.findAllByText("pa***@example.com")).not.toHaveLength(0);
+  expect(screen.getByText("1 active session")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Disable account" }));
+  expect(apiMocks.disableAdminAlphaAccount).toHaveBeenCalledWith(
+    "secret",
+    "account-1",
+  );
+
+  apiMocks.getAdminAlphaAccounts.mockResolvedValueOnce({
+    accounts: [
+      {
+        account_id: "account-1",
+        email_masked: "pa***@example.com",
+        status: "disabled",
+        parent_id: "parent-1",
+        parent_display_name: "小星家长",
+        children_count: 1,
+        last_login_at: "2026-05-29T09:30:00+08:00",
+        active_session_count: 0,
+        created_at: "2026-05-28T09:30:00+08:00",
+      },
+    ],
+  });
+  await userEvent.click(await screen.findByRole("button", { name: "Enable account" }));
+  expect(apiMocks.enableAdminAlphaAccount).toHaveBeenCalledWith(
+    "secret",
+    "account-1",
+  );
+});

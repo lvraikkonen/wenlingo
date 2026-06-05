@@ -1,9 +1,19 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { getAdminAlphaFamily, getAdminAlphaOverview } from "../../../lib/api";
+import {
+  createAdminAlphaInvites,
+  disableAdminAlphaAccount,
+  enableAdminAlphaAccount,
+  getAdminAlphaAccounts,
+  getAdminAlphaFamily,
+  getAdminAlphaOverview,
+  revokeAdminAlphaInvite,
+} from "../../../lib/api";
 import type {
+  AdminAlphaAccountRow,
   AdminAlphaFamilyDetail,
+  AdminAlphaInviteCreateResponse,
   AdminAlphaOverviewRow,
 } from "../../../lib/types";
 
@@ -29,6 +39,13 @@ export default function AdminAlphaPage() {
   const [token, setToken] = useState("");
   const [tokenInput, setTokenInput] = useState("");
   const [families, setFamilies] = useState<AdminAlphaOverviewRow[]>([]);
+  const [accounts, setAccounts] = useState<AdminAlphaAccountRow[]>([]);
+  const [generatedInvites, setGeneratedInvites] = useState<
+    AdminAlphaInviteCreateResponse["invites"]
+  >([]);
+  const [inviteCount, setInviteCount] = useState(1);
+  const [inviteLabelPrefix, setInviteLabelPrefix] = useState("Alpha QA");
+  const [inviteNote, setInviteNote] = useState("");
   const [selectedParentId, setSelectedParentId] = useState<string | null>(null);
   const [familyDetail, setFamilyDetail] = useState<AdminAlphaFamilyDetail | null>(
     null,
@@ -48,8 +65,12 @@ export default function AdminAlphaPage() {
     setIsLoading(true);
     setError("");
     try {
-      const response = await getAdminAlphaOverview(nextToken);
-      setFamilies(response.families);
+      const [overviewResponse, accountResponse] = await Promise.all([
+        getAdminAlphaOverview(nextToken),
+        getAdminAlphaAccounts(nextToken),
+      ]);
+      setFamilies(overviewResponse.families);
+      setAccounts(accountResponse.accounts);
       setToken(nextToken);
       window.sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, nextToken);
       return true;
@@ -58,6 +79,8 @@ export default function AdminAlphaPage() {
       setToken("");
       window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
       setFamilies([]);
+      setAccounts([]);
+      setGeneratedInvites([]);
       setFamilyDetail(null);
       return false;
     } finally {
@@ -73,6 +96,58 @@ export default function AdminAlphaPage() {
       return;
     }
     await loadOverview(nextToken);
+  }
+
+  async function refreshAccounts() {
+    if (!token) {
+      return;
+    }
+    const response = await getAdminAlphaAccounts(token);
+    setAccounts(response.accounts);
+  }
+
+  async function handleGenerateInvites(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token) {
+      return;
+    }
+    setError("");
+    try {
+      const response = await createAdminAlphaInvites(token, {
+        count: inviteCount,
+        label_prefix: inviteLabelPrefix,
+        issued_to_note: inviteNote,
+      });
+      setGeneratedInvites(response.invites);
+      await loadOverview(token);
+    } catch {
+      setError("Invite generation failed.");
+    }
+  }
+
+  async function handleAccountAction(account: AdminAlphaAccountRow) {
+    if (!token) {
+      return;
+    }
+    setError("");
+    try {
+      const nextStatus = account.status === "disabled" ? "active" : "disabled";
+      if (account.status === "disabled") {
+        await enableAdminAlphaAccount(token, account.account_id);
+      } else {
+        await disableAdminAlphaAccount(token, account.account_id);
+      }
+      await refreshAccounts();
+      setAccounts((currentAccounts) =>
+        currentAccounts.map((currentAccount) =>
+          currentAccount.account_id === account.account_id
+            ? { ...currentAccount, status: nextStatus }
+            : currentAccount,
+        ),
+      );
+    } catch {
+      setError("Account action failed.");
+    }
   }
 
   async function selectFamily(row: AdminAlphaOverviewRow) {
@@ -140,6 +215,99 @@ export default function AdminAlphaPage() {
                 Loading overview...
               </p>
             ) : null}
+
+            <section className="mb-6 rounded-lg border border-[var(--wen-border)] bg-white p-5">
+              <div className="flex flex-wrap items-start justify-between gap-6">
+                <form
+                  onSubmit={handleGenerateInvites}
+                  className="grid min-w-64 flex-1 gap-3 sm:grid-cols-[8rem_1fr_1fr_auto]"
+                >
+                  <label className="flex flex-col gap-1 text-sm font-semibold">
+                    Invite count
+                    <input
+                      type="number"
+                      min={1}
+                      value={inviteCount}
+                      onChange={(event) =>
+                        setInviteCount(Number(event.target.value))
+                      }
+                      className="rounded-lg border border-[var(--wen-border)] px-3 py-2 font-normal"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm font-semibold">
+                    Label prefix
+                    <input
+                      type="text"
+                      value={inviteLabelPrefix}
+                      onChange={(event) =>
+                        setInviteLabelPrefix(event.target.value)
+                      }
+                      className="rounded-lg border border-[var(--wen-border)] px-3 py-2 font-normal"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm font-semibold">
+                    Issued note
+                    <input
+                      type="text"
+                      value={inviteNote}
+                      onChange={(event) => setInviteNote(event.target.value)}
+                      className="rounded-lg border border-[var(--wen-border)] px-3 py-2 font-normal"
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    className="self-end rounded-lg bg-[var(--wen-orange)] px-4 py-2 font-semibold text-white"
+                  >
+                    生成邀请码
+                  </button>
+                </form>
+              </div>
+
+              {generatedInvites.length > 0 ? (
+                <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                  <p className="font-semibold text-amber-900">
+                    这些邀请码只显示一次。关闭页面后无法再次查看，请立即复制并安全保存。
+                  </p>
+                  <ul className="mt-3 grid gap-2">
+                    {generatedInvites.map((invite) => (
+                      <li
+                        key={invite.invite_id}
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-white px-3 py-2 text-sm"
+                      >
+                        <span className="font-semibold">{invite.label}</span>
+                        <code>{invite.raw_code}</code>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              <div className="mt-5 grid gap-3">
+                {accounts.map((account) => (
+                  <div
+                    key={account.account_id}
+                    className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--wen-border)] pt-3 text-sm"
+                  >
+                    <div>
+                      <strong>{account.email_masked}</strong>
+                      <span className="ml-3 text-[var(--wen-muted)]">
+                        {account.active_session_count} active session
+                        {account.active_session_count === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleAccountAction(account)}
+                      className="rounded-lg border border-[var(--wen-border)] px-3 py-2 font-semibold"
+                    >
+                      {account.status === "disabled"
+                        ? "Enable account"
+                        : "Disable account"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
 
             <div className="overflow-hidden rounded-lg border border-[var(--wen-border)] bg-white">
               <div className="grid grid-cols-[1.2fr_1fr_1.3fr_1fr_0.7fr_1.2fr_1fr_1.5fr] gap-3 border-b border-[var(--wen-border)] bg-[var(--wen-bg)] px-4 py-3 text-xs font-bold uppercase text-[var(--wen-muted)]">
