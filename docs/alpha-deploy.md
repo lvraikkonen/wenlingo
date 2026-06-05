@@ -115,6 +115,39 @@ uv run python -m app.ops.revoke_parent_sessions --account-id <account-id>
 
 Use `list_unlinked_alpha_parents` before and after the legacy migration window to find Alpha parents that still need account binding. Use `bind_parent_account` only after verifying the invite label and parent identity with the inviter or support notes. Use `revoke_parent_sessions` when a parent loses access to an email address, reports a suspicious login, or needs all active browser sessions invalidated.
 
+## V0.5a.1 Alpha Dev Hardening
+
+V0.5a.1 hardens Railway Dev auth/admin operations for low-volume Alpha smoke. Railway Dev may use QQ Mail SMTP for low-volume Magic Code delivery with `MAGIC_CODE_DEV_ECHO=false`. Use a QQ Mail authorization code for SMTP auth; do not use the QQ account password.
+
+Required backend env:
+
+| Variable | Railway Dev value |
+| --- | --- |
+| `MAGIC_CODE_DEV_ECHO` | `false` |
+| `MAGIC_CODE_EMAIL_PROVIDER` | `smtp` |
+| `MAGIC_CODE_FROM_EMAIL` | `<your@qq.com>` |
+| `SMTP_HOST` | `smtp.qq.com` |
+| `SMTP_PORT` | `465` |
+| `SMTP_USERNAME` | `<your@qq.com>` |
+| `SMTP_PASSWORD` | QQ Mail authorization code, not account password |
+| `SMTP_USE_SSL` | `true` |
+| `SMTP_USE_STARTTLS` | `false` |
+| `SMTP_TIMEOUT_SECONDS` | `10` |
+
+Smoke checklist:
+
+1. Request Magic Code with `MAGIC_CODE_DEV_ECHO=false`.
+2. Confirm QQ inbox arrival.
+3. Generate one invite from `/admin/alpha`.
+4. Create family with generated invite.
+5. Disable account and confirm active sessions lose access.
+6. Re-enable and confirm Magic Code login works.
+7. Revoke unused invite and confirm it cannot validate.
+8. Confirm consumed invites cannot be revoked.
+9. Open parent report page and confirm no server error page appears.
+
+As part of the Railway Dev rollout, run the full QA checklist in `qa/2026-06-04-v0.5a.1-alpha-dev-hardening-manual-qa.md` after the smoke checklist.
+
 ## Railway Project Layout
 
 Use one Railway project with three services:
