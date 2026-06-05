@@ -5,7 +5,11 @@ import type {
   AlphaEventCreate,
   AlphaInviteValidationResponse,
   AlphaParentResponse,
+  AdminAlphaAccountActionResponse,
+  AdminAlphaAccountRow,
   AdminAlphaFamilyDetail,
+  AdminAlphaInviteActionResponse,
+  AdminAlphaInviteCreateResponse,
   AdminAlphaOverviewRow,
   DashboardResponse,
   DemoLoginResponse,
@@ -423,6 +427,89 @@ export function getAdminAlphaFamily(
     `/api/admin/alpha/families/${parentId}`,
     {
       headers: { "X-Alpha-Admin-Token": token },
+    },
+  );
+}
+
+export function getAdminAlphaAccounts(
+  token: string,
+): Promise<{ accounts: AdminAlphaAccountRow[] }> {
+  return requestJson<{ accounts: AdminAlphaAccountRow[] }>(
+    "/api/admin/alpha/accounts",
+    {
+      headers: { "X-Alpha-Admin-Token": token },
+    },
+  );
+}
+
+export function createAdminAlphaInvites(
+  token: string,
+  payload: {
+    count: number;
+    label_prefix: string;
+    issued_to_note: string;
+  },
+): Promise<AdminAlphaInviteCreateResponse> {
+  return requestJson<AdminAlphaInviteCreateResponse>(
+    "/api/admin/alpha/invites",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Alpha-Admin-Token": token,
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function revokeAdminAlphaInvite(
+  token: string,
+  inviteId: string,
+): Promise<AdminAlphaInviteActionResponse> {
+  return requestJson<AdminAlphaInviteActionResponse>(
+    `/api/admin/alpha/invites/${inviteId}/revoke`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Alpha-Admin-Token": token,
+      },
+      body: JSON.stringify({}),
+    },
+  );
+}
+
+export function disableAdminAlphaAccount(
+  token: string,
+  accountId: string,
+): Promise<AdminAlphaAccountActionResponse> {
+  return requestJson<AdminAlphaAccountActionResponse>(
+    `/api/admin/alpha/accounts/${accountId}/disable`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Alpha-Admin-Token": token,
+      },
+      body: JSON.stringify({}),
+    },
+  );
+}
+
+export function enableAdminAlphaAccount(
+  token: string,
+  accountId: string,
+): Promise<AdminAlphaAccountActionResponse> {
+  return requestJson<AdminAlphaAccountActionResponse>(
+    `/api/admin/alpha/accounts/${accountId}/enable`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Alpha-Admin-Token": token,
+      },
+      body: JSON.stringify({}),
     },
   );
 }

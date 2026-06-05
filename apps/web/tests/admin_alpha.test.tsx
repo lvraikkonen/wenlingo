@@ -7,11 +7,21 @@ import AdminAlphaPage from "../src/app/admin/alpha/page";
 const apiMocks = vi.hoisted(() => ({
   getAdminAlphaOverview: vi.fn(),
   getAdminAlphaFamily: vi.fn(),
+  getAdminAlphaAccounts: vi.fn(),
+  createAdminAlphaInvites: vi.fn(),
+  revokeAdminAlphaInvite: vi.fn(),
+  disableAdminAlphaAccount: vi.fn(),
+  enableAdminAlphaAccount: vi.fn(),
 }));
 
 vi.mock("../src/lib/api", () => ({
   getAdminAlphaOverview: apiMocks.getAdminAlphaOverview,
   getAdminAlphaFamily: apiMocks.getAdminAlphaFamily,
+  getAdminAlphaAccounts: apiMocks.getAdminAlphaAccounts,
+  createAdminAlphaInvites: apiMocks.createAdminAlphaInvites,
+  revokeAdminAlphaInvite: apiMocks.revokeAdminAlphaInvite,
+  disableAdminAlphaAccount: apiMocks.disableAdminAlphaAccount,
+  enableAdminAlphaAccount: apiMocks.enableAdminAlphaAccount,
 }));
 
 const overview = {
@@ -62,6 +72,51 @@ beforeEach(() => {
   window.sessionStorage.clear();
   apiMocks.getAdminAlphaOverview.mockResolvedValue(overview);
   apiMocks.getAdminAlphaFamily.mockResolvedValue(familyDetail);
+  apiMocks.getAdminAlphaAccounts.mockResolvedValue({
+    accounts: [
+      {
+        account_id: "account-1",
+        email_masked: "pa***@example.com",
+        status: "active",
+        parent_id: "parent-1",
+        parent_display_name: "小星家长",
+        children_count: 1,
+        last_login_at: "2026-05-29T09:30:00+08:00",
+        active_session_count: 1,
+        created_at: "2026-05-28T09:30:00+08:00",
+      },
+    ],
+  });
+  apiMocks.createAdminAlphaInvites.mockResolvedValue({
+    invites: [
+      {
+        invite_id: "invite-new",
+        label: "Alpha QA 01",
+        status: "issued",
+        raw_code: "ALPHA-NEWCODE",
+      },
+    ],
+  });
+  apiMocks.revokeAdminAlphaInvite.mockResolvedValue({
+    invite: {
+      invite_id: "invite-new",
+      label: "Alpha QA 01",
+      status: "revoked",
+    },
+  });
+  apiMocks.disableAdminAlphaAccount.mockResolvedValue({
+    account: {
+      account_id: "account-1",
+      status: "disabled",
+      revoked_session_count: 1,
+    },
+  });
+  apiMocks.enableAdminAlphaAccount.mockResolvedValue({
+    account: {
+      account_id: "account-1",
+      status: "active",
+    },
+  });
 });
 
 afterEach(() => {
@@ -186,3 +241,4 @@ test("overview does not render writing text or AI feedback body", async () => {
   expect(screen.queryByText("孩子写作正文不能出现在管理端")).not.toBeInTheDocument();
   expect(screen.queryByText("AI feedback body should stay private")).not.toBeInTheDocument();
 });
+
