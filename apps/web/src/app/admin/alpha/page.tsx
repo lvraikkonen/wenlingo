@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import {
   createAdminAlphaInvites,
+  deleteAdminAlphaTestAccounts,
   disableAdminAlphaAccount,
   enableAdminAlphaAccount,
   getAdminAlphaAccounts,
@@ -56,6 +57,13 @@ export default function AdminAlphaPage() {
   );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [pendingAccountActionIds, setPendingAccountActionIds] = useState<
+    string[]
+  >([]);
+  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [isDeletingTestAccounts, setIsDeletingTestAccounts] = useState(false);
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     const storedToken = window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY);
@@ -133,7 +141,16 @@ export default function AdminAlphaPage() {
     if (!token) {
       return;
     }
+    if (pendingAccountActionIds.includes(account.account_id)) {
+      return;
+    }
+    setPendingAccountActionIds((currentAccountIds) =>
+      currentAccountIds.includes(account.account_id)
+        ? currentAccountIds
+        : [...currentAccountIds, account.account_id],
+    );
     setError("");
+    setNotice("");
     try {
       const nextStatus = account.status === "disabled" ? "active" : "disabled";
       if (account.status === "disabled") {
@@ -151,6 +168,51 @@ export default function AdminAlphaPage() {
       );
     } catch {
       setError("Account action failed.");
+    } finally {
+      setPendingAccountActionIds((currentAccountIds) =>
+        currentAccountIds.filter(
+          (currentAccountId) => currentAccountId !== account.account_id,
+        ),
+      );
+    }
+  }
+
+  function toggleSelectedAccount(accountId: string) {
+    setSelectedAccountIds((currentAccountIds) =>
+      currentAccountIds.includes(accountId)
+        ? currentAccountIds.filter((currentAccountId) => currentAccountId !== accountId)
+        : [...currentAccountIds, accountId],
+    );
+  }
+
+  async function handleDeleteTestAccounts() {
+    if (
+      !token ||
+      selectedAccountIds.length === 0 ||
+      deleteConfirmation !== "DELETE TEST ACCOUNTS"
+    ) {
+      return;
+    }
+    setIsDeletingTestAccounts(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await deleteAdminAlphaTestAccounts(token, {
+        account_ids: selectedAccountIds,
+        confirm: deleteConfirmation,
+      });
+      setSelectedAccountIds([]);
+      setDeleteConfirmation("");
+      setNotice(
+        `Deleted ${response.deleted_count} test account${
+          response.deleted_count === 1 ? "" : "s"
+        }.`,
+      );
+      await loadOverview(token);
+    } catch {
+      setError("Test account delete failed.");
+    } finally {
+      setIsDeletingTestAccounts(false);
     }
   }
 
@@ -256,6 +318,12 @@ export default function AdminAlphaPage() {
           </p>
         ) : null}
 
+        {notice ? (
+          <p className="mt-5 rounded-lg border border-green-200 bg-green-50 p-4 font-semibold text-green-800">
+            {notice}
+          </p>
+        ) : null}
+
         {token ? (
           <div className="mt-6">
             {isLoading ? (
@@ -331,29 +399,82 @@ export default function AdminAlphaPage() {
               ) : null}
 
               <div className="mt-5 grid gap-3">
-                {accounts.map((account) => (
-                  <div
-                    key={account.account_id}
-                    className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--wen-border)] pt-3 text-sm"
-                  >
-                    <div>
-                      <strong>{account.email_masked}</strong>
-                      <span className="ml-3 text-[var(--wen-muted)]">
-                        {account.active_session_count} active session
-                        {account.active_session_count === 1 ? "" : "s"}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => void handleAccountAction(account)}
-                      className="rounded-lg border border-[var(--wen-border)] px-3 py-2 font-semibold"
+                {accounts.map((account) => {
+                  const isPending =
+                    pendingAccountActionIds.includes(account.account_id);
+                  const isDisabledAccount = account.status === "disabled";
+                  return (
+                    <div
+                      key={account.account_id}
+                      className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--wen-border)] pt-3 text-sm"
                     >
-                      {account.status === "disabled"
-                        ? "Enable account"
-                        : "Disable account"}
-                    </button>
-                  </div>
-                ))}
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${account.email_masked}`}
+                          checked={selectedAccountIds.includes(
+                            account.account_id,
+                          )}
+                          onChange={() =>
+                            toggleSelectedAccount(account.account_id)
+                          }
+                        />
+                        <div>
+                          <strong>{account.email_masked}</strong>
+                          <span className="ml-3 text-[var(--wen-muted)]">
+                            {account.active_session_count} active session
+                            {account.active_session_count === 1 ? "" : "s"}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void handleAccountAction(account)}
+                        disabled={isPending}
+                        className="rounded-lg border border-[var(--wen-border)] px-3 py-2 font-semibold disabled:cursor-not-allowed disabled:text-[var(--wen-muted)]"
+                      >
+                        {isPending
+                          ? isDisabledAccount
+                            ? "Enabling..."
+                            : "Disabling..."
+                          : isDisabledAccount
+                            ? "Enable account"
+                            : "Disable account"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="mt-5 grid gap-3 border-t border-[var(--wen-border)] pt-4">
+                <p className="text-sm text-[var(--wen-muted)]">
+                  Permanently delete selected Dev/QA test accounts only.
+                </p>
+                <label className="flex max-w-md flex-col gap-1 text-sm font-semibold">
+                  Delete confirmation
+                  <input
+                    type="text"
+                    value={deleteConfirmation}
+                    onChange={(event) =>
+                      setDeleteConfirmation(event.target.value)
+                    }
+                    className="rounded-lg border border-[var(--wen-border)] px-3 py-2 font-normal"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void handleDeleteTestAccounts()}
+                  disabled={
+                    isDeletingTestAccounts ||
+                    selectedAccountIds.length === 0 ||
+                    deleteConfirmation !== "DELETE TEST ACCOUNTS"
+                  }
+                  className="w-fit rounded-lg border border-red-200 px-3 py-2 font-semibold text-red-700 disabled:cursor-not-allowed disabled:text-[var(--wen-muted)]"
+                >
+                  {isDeletingTestAccounts
+                    ? "Deleting..."
+                    : "Delete selected test accounts"}
+                </button>
               </div>
             </section>
 

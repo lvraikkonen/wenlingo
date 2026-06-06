@@ -12,6 +12,7 @@ const apiMocks = vi.hoisted(() => ({
   revokeAdminAlphaInvite: vi.fn(),
   disableAdminAlphaAccount: vi.fn(),
   enableAdminAlphaAccount: vi.fn(),
+  deleteAdminAlphaTestAccounts: vi.fn(),
 }));
 
 vi.mock("../src/lib/api", () => ({
@@ -22,6 +23,7 @@ vi.mock("../src/lib/api", () => ({
   revokeAdminAlphaInvite: apiMocks.revokeAdminAlphaInvite,
   disableAdminAlphaAccount: apiMocks.disableAdminAlphaAccount,
   enableAdminAlphaAccount: apiMocks.enableAdminAlphaAccount,
+  deleteAdminAlphaTestAccounts: apiMocks.deleteAdminAlphaTestAccounts,
 }));
 
 const overview = {
@@ -116,6 +118,19 @@ beforeEach(() => {
       account_id: "account-1",
       status: "active",
     },
+  });
+  apiMocks.deleteAdminAlphaTestAccounts.mockResolvedValue({
+    deleted_count: 1,
+    accounts: [
+      {
+        account_id: "account-1",
+        email_masked: "pa***@example.com",
+        parent_ids: ["parent-1"],
+        child_count: 1,
+        deleted_session_count: 0,
+        deleted_invite_count: 1,
+      },
+    ],
   });
 });
 
@@ -371,4 +386,119 @@ test("admin revokes an issued invite and refreshes overview", async () => {
     expect(apiMocks.getAdminAlphaOverview).toHaveBeenCalledTimes(2),
   );
   expect(await screen.findAllByText("revoked")).not.toHaveLength(0);
+});
+
+test("admin account action shows per-row pending state", async () => {
+  window.sessionStorage.setItem("wenlingo_alpha_admin_token", "secret");
+  let resolveDisable: (value: unknown) => void = () => undefined;
+  apiMocks.disableAdminAlphaAccount.mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolveDisable = resolve;
+    }),
+  );
+
+  render(<AdminAlphaPage />);
+
+  const button = await screen.findByRole("button", { name: "Disable account" });
+  await userEvent.click(button);
+
+  expect(screen.getByRole("button", { name: "Disabling..." })).toBeDisabled();
+
+  resolveDisable({
+    account: { account_id: "account-1", status: "disabled", revoked_session_count: 1 },
+  });
+
+  await waitFor(() =>
+    expect(apiMocks.disableAdminAlphaAccount).toHaveBeenCalledWith("secret", "account-1"),
+  );
+});
+
+test("admin account actions keep independent pending states", async () => {
+  window.sessionStorage.setItem("wenlingo_alpha_admin_token", "secret");
+  apiMocks.getAdminAlphaAccounts.mockResolvedValue({
+    accounts: [
+      {
+        account_id: "account-1",
+        email_masked: "pa***@example.com",
+        status: "active",
+        parent_id: "parent-1",
+        parent_display_name: "小星家长",
+        children_count: 1,
+        last_login_at: "2026-05-29T09:30:00+08:00",
+        active_session_count: 1,
+        created_at: "2026-05-28T09:30:00+08:00",
+      },
+      {
+        account_id: "account-2",
+        email_masked: "qa***@example.com",
+        status: "active",
+        parent_id: "parent-2",
+        parent_display_name: "QA 家长",
+        children_count: 1,
+        last_login_at: "2026-05-30T09:30:00+08:00",
+        active_session_count: 1,
+        created_at: "2026-05-28T09:30:00+08:00",
+      },
+    ],
+  });
+  let resolveFirstDisable: (value: unknown) => void = () => undefined;
+  let resolveSecondDisable: (value: unknown) => void = () => undefined;
+  apiMocks.disableAdminAlphaAccount.mockImplementation(
+    (_token: string, accountId: string) =>
+      new Promise((resolve) => {
+        if (accountId === "account-1") {
+          resolveFirstDisable = resolve;
+          return;
+        }
+        resolveSecondDisable = resolve;
+      }),
+  );
+
+  render(<AdminAlphaPage />);
+
+  const buttons = await screen.findAllByRole("button", { name: "Disable account" });
+  await userEvent.click(buttons[0]);
+  await userEvent.click(buttons[1]);
+
+  const pendingButtons = screen.getAllByRole("button", { name: "Disabling..." });
+  expect(pendingButtons).toHaveLength(2);
+  pendingButtons.forEach((pendingButton) => expect(pendingButton).toBeDisabled());
+
+  resolveFirstDisable({
+    account: { account_id: "account-1", status: "disabled", revoked_session_count: 1 },
+  });
+
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Enable account" })).toBeInTheDocument(),
+  );
+  expect(screen.getByRole("button", { name: "Disabling..." })).toBeDisabled();
+
+  resolveSecondDisable({
+    account: { account_id: "account-2", status: "disabled", revoked_session_count: 1 },
+  });
+
+  await waitFor(() =>
+    expect(apiMocks.disableAdminAlphaAccount).toHaveBeenCalledWith("secret", "account-2"),
+  );
+});
+
+test("admin deletes selected test accounts only after confirmation", async () => {
+  window.sessionStorage.setItem("wenlingo_alpha_admin_token", "secret");
+  render(<AdminAlphaPage />);
+
+  await screen.findAllByText("pa***@example.com");
+  await userEvent.click(screen.getByRole("checkbox", { name: /select pa\*\*\*@example\.com/i }));
+
+  const deleteButton = screen.getByRole("button", { name: "Delete selected test accounts" });
+  expect(deleteButton).toBeDisabled();
+
+  await userEvent.type(screen.getByLabelText("Delete confirmation"), "DELETE TEST ACCOUNTS");
+  expect(deleteButton).toBeEnabled();
+  await userEvent.click(deleteButton);
+
+  expect(apiMocks.deleteAdminAlphaTestAccounts).toHaveBeenCalledWith("secret", {
+    account_ids: ["account-1"],
+    confirm: "DELETE TEST ACCOUNTS",
+  });
+  expect(await screen.findByText("Deleted 1 test account.")).toBeInTheDocument();
 });

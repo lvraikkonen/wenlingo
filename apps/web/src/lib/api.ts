@@ -11,6 +11,7 @@ import type {
   AdminAlphaInviteActionResponse,
   AdminAlphaInviteCreateResponse,
   AdminAlphaOverviewRow,
+  AdminAlphaTestAccountDeleteResponse,
   DashboardResponse,
   DemoLoginResponse,
   FeedbackReactionTargetType,
@@ -510,6 +511,23 @@ export function enableAdminAlphaAccount(
         "X-Alpha-Admin-Token": token,
       },
       body: JSON.stringify({}),
+    },
+  );
+}
+
+export function deleteAdminAlphaTestAccounts(
+  token: string,
+  payload: { account_ids: string[]; confirm: string },
+): Promise<AdminAlphaTestAccountDeleteResponse> {
+  return requestJson<AdminAlphaTestAccountDeleteResponse>(
+    "/api/admin/alpha/accounts/delete-test",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Alpha-Admin-Token": token,
+      },
+      body: JSON.stringify(payload),
     },
   );
 }

@@ -206,6 +206,18 @@ export type AdminAlphaAccountActionResponse = {
   };
 };
 
+export type AdminAlphaTestAccountDeleteResponse = {
+  deleted_count: number;
+  accounts: Array<{
+    account_id: string;
+    email_masked: string;
+    parent_ids: string[];
+    child_count: number;
+    deleted_session_count: number;
+    deleted_invite_count: number;
+  }>;
+};
+
 export type AdminAlphaEvent = {
   id: string;
   event_type: string;
