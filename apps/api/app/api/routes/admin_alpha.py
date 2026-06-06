@@ -24,6 +24,7 @@ from app.domain.models import (
     utcnow,
 )
 from app.services.auth_security import mask_email
+from app.services.admin_test_account_cleanup import delete_test_accounts
 
 router = APIRouter(prefix="/api/admin/alpha", tags=["admin-alpha"])
 
@@ -44,6 +45,11 @@ class AdminInviteCreate(BaseModel):
 
 class EmptyAdminAction(BaseModel):
     pass
+
+
+class AdminAccountDeleteTestRequest(BaseModel):
+    account_ids: list[str] = Field(min_length=1, max_length=20)
+    confirm: str
 
 
 def require_alpha_admin_state_change(
@@ -309,6 +315,35 @@ def enable_admin_alpha_account(
             "account_id": account.id,
             "status": account.status,
         }
+    }
+
+
+@router.post(
+    "/accounts/delete-test",
+    dependencies=[Depends(require_alpha_admin_state_change)],
+)
+def delete_admin_alpha_test_accounts(
+    request: AdminAccountDeleteTestRequest,
+    session: Session = Depends(get_db_session),
+):
+    result = delete_test_accounts(
+        session,
+        account_ids=request.account_ids,
+        confirm=request.confirm,
+    )
+    return {
+        "deleted_count": result.deleted_count,
+        "accounts": [
+            {
+                "account_id": row.account_id,
+                "email_masked": row.email_masked,
+                "parent_ids": row.parent_ids,
+                "child_count": row.child_count,
+                "deleted_session_count": row.deleted_session_count,
+                "deleted_invite_count": row.deleted_invite_count,
+            }
+            for row in result.deleted_accounts
+        ],
     }
 
 
