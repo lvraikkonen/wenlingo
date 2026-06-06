@@ -15,6 +15,7 @@ import {
 } from "../../../lib/alphaParent";
 import { getStoredAlphaSessionId } from "../../../lib/alphaSession";
 import {
+  AuthRequestError,
   getAuthSession,
   requestMagicCode,
   verifyMagicCode,
@@ -24,6 +25,15 @@ import type { AuthSession } from "../../../lib/types";
 const ALPHA_PARENT_STORAGE_EVENT = "wenlingo-alpha-parent-storage";
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const DISABLED_ACCOUNT_MESSAGE = "账号暂不可用，请联系邀请人。";
+
+function isDisabledAccountError(error: unknown): boolean {
+  return (
+    error instanceof AuthRequestError &&
+    error.status === 403 &&
+    error.detail === DISABLED_ACCOUNT_MESSAGE
+  );
+}
 
 function subscribeToAlphaParentStorage(onStoreChange: () => void) {
   window.addEventListener("storage", onStoreChange);
@@ -145,6 +155,23 @@ export default function AlphaStartPage() {
     return true;
   }
 
+  async function recoverLinkedSessionAfterBindFailure() {
+    try {
+      const session = await getAuthSession();
+      if (session.authenticated && session.parent) {
+        setStoredAlphaParentId(session.parent.id);
+        router.push("/parent/children");
+        return true;
+      }
+      if (session.authenticated) {
+        setAuthSession(session);
+      }
+    } catch {
+      return false;
+    }
+    return false;
+  }
+
   async function handleRequestCode() {
     if (isRequestingCode) {
       return;
@@ -210,6 +237,9 @@ export default function AlphaStartPage() {
       try {
         await finishLegacyBind();
       } catch {
+        if (await recoverLinkedSessionAfterBindFailure()) {
+          return;
+        }
         setError("绑定失败，请稍后再试。");
       } finally {
         setIsSubmitting(false);
@@ -256,10 +286,17 @@ export default function AlphaStartPage() {
       });
       setStoredAlphaParentId(response.parent.id);
       router.push(response.children_url);
-    } catch {
+    } catch (error) {
+      if (isDisabledAccountError(error)) {
+        setError(DISABLED_ACCOUNT_MESSAGE);
+        return;
+      }
+      if (isLegacyMigration && (await recoverLinkedSessionAfterBindFailure())) {
+        return;
+      }
       setError(
         isLegacyMigration
-          ? "绑定失败，请检查验证码后再试。"
+          ? "绑定失败，请稍后再试。"
           : "登录或创建失败，请检查后再试。",
       );
     } finally {

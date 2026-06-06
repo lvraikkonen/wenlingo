@@ -3,6 +3,27 @@ import type { AuthSession } from "./types";
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
+export class AuthRequestError extends Error {
+  status: number;
+  detail: string;
+
+  constructor(status: number, detail = "") {
+    super(detail || `Request failed: ${status}`);
+    this.name = "AuthRequestError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+async function responseDetail(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { detail?: unknown };
+    return typeof body.detail === "string" ? body.detail : "";
+  } catch {
+    return "";
+  }
+}
+
 async function authRequestJson<T>(
   path: string,
   init?: RequestInit,
@@ -14,7 +35,7 @@ async function authRequestJson<T>(
   });
 
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    throw new AuthRequestError(response.status, await responseDetail(response));
   }
 
   return response.json() as Promise<T>;
