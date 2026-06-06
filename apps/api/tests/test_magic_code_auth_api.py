@@ -252,3 +252,4 @@ def test_verify_magic_code_rejects_disabled_account_with_alpha_message(client, s
 
     assert response.status_code == 403
     assert response.json() == {"detail": DISABLED_ACCOUNT_ERROR}
+    assert response.cookies.get("wenlingo_parent_session") is None
