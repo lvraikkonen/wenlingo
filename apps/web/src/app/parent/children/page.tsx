@@ -21,6 +21,7 @@ export default function ParentChildrenPage() {
   const [phoneMasked, setPhoneMasked] = useState("");
   const [phoneError, setPhoneError] = useState("");
   const [isSavingPhone, setIsSavingPhone] = useState(false);
+  const [isEditingPhone, setIsEditingPhone] = useState(false);
 
   const boundPhoneMasked = phoneMasked || data?.account?.phone_masked || "";
 
@@ -80,11 +81,18 @@ export default function ParentChildrenPage() {
           : current,
       );
       setPhone("");
+      setIsEditingPhone(false);
     } catch {
       setPhoneError("手机号保存失败，请稍后再试。");
     } finally {
       setIsSavingPhone(false);
     }
+  }
+
+  function cancelPhoneEdit() {
+    setPhone("");
+    setPhoneError("");
+    setIsEditingPhone(false);
   }
 
   return (
@@ -102,43 +110,71 @@ export default function ParentChildrenPage() {
               </p>
             ) : null}
             {data ? (
-              <form className="mt-4 max-w-md" onSubmit={handlePhoneSubmit}>
-                <label
-                  className="text-sm font-semibold text-[var(--wen-muted)]"
-                  htmlFor="parent-phone"
-                >
-                  手机号（可选）
-                </label>
-                <p className="mt-1 text-sm text-[var(--wen-muted)]">
-                  可选填写，V0.5a 不用于短信登录。
-                </p>
-                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                  <input
-                    id="parent-phone"
-                    className="min-w-0 flex-1 rounded-lg border border-[var(--wen-border)] bg-white px-3 py-2"
-                    inputMode="tel"
-                    value={phone}
-                    onChange={(event) => setPhone(event.target.value)}
-                  />
-                  <button
-                    className="rounded-lg bg-[var(--wen-orange)] px-4 py-2 font-semibold text-white disabled:opacity-60"
-                    disabled={isSavingPhone}
-                    type="submit"
-                  >
-                    {isSavingPhone ? "保存中..." : "保存手机号"}
-                  </button>
-                </div>
-                {boundPhoneMasked ? (
+              boundPhoneMasked && !isEditingPhone ? (
+                <div className="mt-4 max-w-md">
                   <p className="mt-2 text-sm font-semibold text-emerald-700">
                     已绑定 {boundPhoneMasked}
                   </p>
-                ) : null}
-                {phoneError ? (
-                  <p className="mt-2 text-sm font-semibold text-red-700" role="alert">
-                    {phoneError}
+                  <button
+                    className="mt-3 rounded-lg border border-[var(--wen-border)] bg-white px-4 py-2 font-semibold"
+                    type="button"
+                    onClick={() => setIsEditingPhone(true)}
+                  >
+                    修改手机号
+                  </button>
+                </div>
+              ) : (
+                <form className="mt-4 max-w-md" onSubmit={handlePhoneSubmit}>
+                  <label
+                    className="text-sm font-semibold text-[var(--wen-muted)]"
+                    htmlFor="parent-phone"
+                  >
+                    手机号（可选）
+                  </label>
+                  <p className="mt-1 text-sm text-[var(--wen-muted)]">
+                    可选填写，V0.5a 不用于短信登录。
                   </p>
-                ) : null}
-              </form>
+                  <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                    <input
+                      id="parent-phone"
+                      className="min-w-0 flex-1 rounded-lg border border-[var(--wen-border)] bg-white px-3 py-2"
+                      inputMode="tel"
+                      value={phone}
+                      onChange={(event) => setPhone(event.target.value)}
+                    />
+                    <button
+                      className="rounded-lg bg-[var(--wen-orange)] px-4 py-2 font-semibold text-white disabled:opacity-60"
+                      disabled={isSavingPhone}
+                      type="submit"
+                    >
+                      {isSavingPhone ? "保存中..." : "保存手机号"}
+                    </button>
+                    {boundPhoneMasked ? (
+                      <button
+                        className="rounded-lg border border-[var(--wen-border)] bg-white px-4 py-2 font-semibold disabled:opacity-60"
+                        disabled={isSavingPhone}
+                        type="button"
+                        onClick={cancelPhoneEdit}
+                      >
+                        取消
+                      </button>
+                    ) : null}
+                  </div>
+                  {boundPhoneMasked ? (
+                    <p className="mt-2 text-sm font-semibold text-emerald-700">
+                      已绑定 {boundPhoneMasked}
+                    </p>
+                  ) : null}
+                  {phoneError ? (
+                    <p
+                      className="mt-2 text-sm font-semibold text-red-700"
+                      role="alert"
+                    >
+                      {phoneError}
+                    </p>
+                  ) : null}
+                </form>
+              )
             ) : null}
           </div>
           <Link
