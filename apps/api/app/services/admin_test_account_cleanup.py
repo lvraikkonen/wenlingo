@@ -118,6 +118,11 @@ def _delete_where_in(session: Session, model, field, values: set[str]) -> int:
     return len(rows)
 
 
+def _flush_if_needed(session: Session, deleted_count: int) -> None:
+    if deleted_count:
+        session.flush()
+
+
 def delete_test_accounts(
     session: Session, *, account_ids: list[str], confirm: str
 ) -> DeleteTestAccountsResult:
@@ -155,11 +160,23 @@ def delete_test_accounts(
         )
 
         if child_ids:
-            _delete_where_in(session, Assessment, Assessment.student_id, child_ids)
-            _delete_where_in(session, EssayVersion, EssayVersion.essay_id, essay_ids)
-            _delete_where_in(session, Essay, Essay.student_id, child_ids)
-            _delete_where_in(
-                session, SentenceTraining, SentenceTraining.student_id, child_ids
+            _flush_if_needed(
+                session,
+                _delete_where_in(session, Assessment, Assessment.student_id, child_ids),
+            )
+            _flush_if_needed(
+                session,
+                _delete_where_in(session, EssayVersion, EssayVersion.essay_id, essay_ids),
+            )
+            _flush_if_needed(
+                session,
+                _delete_where_in(session, Essay, Essay.student_id, child_ids),
+            )
+            _flush_if_needed(
+                session,
+                _delete_where_in(
+                    session, SentenceTraining, SentenceTraining.student_id, child_ids
+                ),
             )
             _delete_where_in(session, ReadingSession, ReadingSession.student_id, child_ids)
             _delete_where_in(session, GameEvent, GameEvent.student_id, child_ids)
@@ -172,9 +189,13 @@ def delete_test_accounts(
             )
             _delete_where_in(session, ParentFeedback, ParentFeedback.student_id, child_ids)
             _delete_where_in(session, ProductEvent, ProductEvent.student_id, child_ids)
+            session.flush()
 
         if parent_ids:
-            _delete_where_in(session, ProductEvent, ProductEvent.parent_id, parent_ids)
+            _flush_if_needed(
+                session,
+                _delete_where_in(session, ProductEvent, ProductEvent.parent_id, parent_ids),
+            )
             invites = session.exec(
                 select(AlphaInviteCode).where(
                     AlphaInviteCode.consumed_by_parent_id.in_(parent_ids)
@@ -184,16 +205,28 @@ def delete_test_accounts(
             invites = []
         invite_ids = {invite.id for invite in invites}
         if invite_ids:
-            _delete_where_in(session, ProductEvent, ProductEvent.invite_code_id, invite_ids)
+            _flush_if_needed(
+                session,
+                _delete_where_in(
+                    session, ProductEvent, ProductEvent.invite_code_id, invite_ids
+                ),
+            )
 
         deleted_invite_count = len(invites)
         for invite in invites:
             session.delete(invite)
+        if invites:
+            session.flush()
         for child in children:
             session.delete(child)
+        if children:
+            session.flush()
         for parent in parents:
             session.delete(parent)
+        if parents:
+            session.flush()
         session.delete(account)
+        session.flush()
 
         deleted_accounts.append(
             DeletedTestAccount(

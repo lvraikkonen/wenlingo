@@ -299,6 +299,22 @@ def test_require_linked_parent_rejects_unlinked_account(session):
     assert exc_info.value.status_code == 404
 
 
+def test_session_parent_children_includes_bound_phone_account_payload(session):
+    account, parent, _, _ = create_session_family(session)
+    account.phone_e164 = "+8613800001234"
+    account.phone_bound_at = utcnow()
+    session.add(account)
+    session.commit()
+
+    payload = alpha_routes._children_payload(parent, session)
+
+    assert payload["account"] == {
+        "email_masked": "pa***@example.com",
+        "phone_bound": True,
+        "phone_masked": "138****1234",
+    }
+
+
 def test_require_json_state_change_rejects_non_json_body():
     from app.api.auth_deps import require_json_state_change
 

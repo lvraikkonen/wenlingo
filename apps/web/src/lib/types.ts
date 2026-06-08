@@ -63,6 +63,7 @@ export type AuthSession =
         id: string;
         display_name: string;
       } | null;
+      parent_id?: string | null;
     };
 
 export type AlphaInviteValidationResponse = {

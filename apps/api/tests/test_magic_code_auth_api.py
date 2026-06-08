@@ -3,7 +3,7 @@ from datetime import timedelta
 import pytest
 from sqlmodel import select
 
-from app.domain.models import AuthMagicCode, ParentAccount, ProductEvent, utcnow
+from app.domain.models import AuthMagicCode, ParentAccount, utcnow
 from app.services.auth_security import hash_secret
 
 GENERIC_REQUEST_MESSAGE = "如果邮箱可用，我们已经发送验证码。"
@@ -212,7 +212,7 @@ def test_request_magic_code_for_disabled_account_returns_generic_without_sending
 
     response = auth_codes.request_magic_code(
         session,
-        auth_codes_settings := type(
+        type(
             "Settings",
             (),
             {
@@ -248,6 +248,25 @@ def test_verify_magic_code_rejects_disabled_account_with_alpha_message(client, s
     response = client.post(
         "/api/auth/magic-codes/verify",
         json={"email": "disabled@example.com", "code": "123456"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": DISABLED_ACCOUNT_ERROR}
+
+
+def test_verify_magic_code_rejects_disabled_account_before_code_lookup(client, session):
+    session.add(
+        ParentAccount(
+            email_normalized="disabled-no-code@example.com",
+            email_verified_at=utcnow(),
+            status="disabled",
+        )
+    )
+    session.commit()
+
+    response = client.post(
+        "/api/auth/magic-codes/verify",
+        json={"email": "disabled-no-code@example.com", "code": "123456"},
     )
 
     assert response.status_code == 403

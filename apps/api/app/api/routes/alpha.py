@@ -36,6 +36,7 @@ from app.domain.models import (
     SentenceTraining,
     StudentProfile,
 )
+from app.services.auth_security import mask_email, mask_phone
 
 router = APIRouter(prefix="/api/alpha", tags=["alpha"])
 LOGGER = logging.getLogger(__name__)
@@ -338,10 +339,21 @@ def _children_payload(parent: ParentUser, session: Session):
         select(StudentProfile).where(StudentProfile.parent_id == parent.id)
     ).all()
     children = sorted(children, key=lambda child: (child.created_at, child.id))
-    return {
+    payload = {
         "parent": _parent_payload(parent),
         "children": [_student_payload(child, session=session) for child in children],
     }
+    if parent.account_id:
+        account = session.get(ParentAccount, parent.account_id)
+        if account:
+            account_payload = {
+                "email_masked": mask_email(account.email_normalized),
+                "phone_bound": bool(account.phone_bound_at),
+            }
+            if account.phone_e164:
+                account_payload["phone_masked"] = mask_phone(account.phone_e164)
+            payload["account"] = account_payload
+    return payload
 
 
 def _create_child_payload(parent: ParentUser, request: AlphaChildCreate, session: Session):

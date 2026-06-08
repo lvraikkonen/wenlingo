@@ -4,6 +4,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 import AlphaStartPage from "../src/app/alpha/start/page";
 import {
   createAlphaParent,
+  getMyAlphaChildren,
   recordAlphaEvent,
   validateAlphaInvite,
 } from "../src/lib/api";
@@ -27,6 +28,11 @@ vi.mock("../src/lib/api", () => ({
     parent: { id: "parent-1", email: "alpha@example.com", display_name: "小星家长" },
     children_url: "/parent/children",
   })),
+  getMyAlphaChildren: vi.fn(async () => ({
+    parent: { id: "legacy-parent-1", email: "parent@example.com", display_name: "旧 Alpha 家庭" },
+    account: { email_masked: "p***@example.com", phone_bound: false },
+    children: [],
+  })),
   recordAlphaEvent: vi.fn(async () => undefined),
 }));
 
@@ -43,6 +49,7 @@ beforeEach(() => {
   push.mockClear();
   vi.mocked(validateAlphaInvite).mockClear();
   vi.mocked(createAlphaParent).mockClear();
+  vi.mocked(getMyAlphaChildren).mockClear();
   vi.mocked(recordAlphaEvent).mockClear();
   vi.unstubAllGlobals();
 });
@@ -212,6 +219,7 @@ test("requests code, verifies code, binds legacy parent, then routes to children
 test("retries legacy bind after verified login without verifying code again", async () => {
   window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "legacy-parent-1");
   window.localStorage.setItem(ALPHA_SESSION_STORAGE_KEY, "session-1");
+  vi.mocked(getMyAlphaChildren).mockRejectedValue(new Error("not linked yet"));
   const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
   let bindAttempts = 0;
 
@@ -364,6 +372,73 @@ test("routes to children when legacy bind fails after verify but session is link
         return new Response(JSON.stringify({ detail: "alpha parent already linked" }), {
           status: 409,
           headers: { "Content-Type": "application/json" },
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }),
+  );
+
+  render(<AlphaStartPage />);
+
+  fireEvent.change(await screen.findByLabelText("邮箱"), {
+    target: { value: "parent@example.com" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "获取验证码" }));
+  fireEvent.change(await screen.findByLabelText("6 位验证码"), {
+    target: { value: "123456" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "绑定并继续" }));
+
+  await waitFor(() => {
+    expect(push).toHaveBeenCalledWith("/parent/children");
+  });
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+test("routes to children when legacy bind fails but session parent children is reachable", async () => {
+  window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "legacy-parent-1");
+
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.endsWith("/api/auth/session")) {
+        return jsonResponse({ authenticated: false });
+      }
+      if (url.endsWith("/api/auth/magic-codes/request")) {
+        return jsonResponse({ message: "sent" });
+      }
+      if (url.endsWith("/api/auth/magic-codes/verify")) {
+        return jsonResponse({
+          authenticated: true,
+          account: {
+            email_masked: "p***@example.com",
+            phone_bound: true,
+            phone_masked: "138****1234",
+            last_login_at: null,
+          },
+          parent_id: "legacy-parent-1",
+        });
+      }
+      if (url.endsWith("/api/alpha/legacy-parent-bind")) {
+        return new Response(JSON.stringify({ detail: "already linked" }), {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.endsWith("/api/alpha/parents/me/children")) {
+        return jsonResponse({
+          parent: {
+            id: "legacy-parent-1",
+            email: "parent@example.com",
+            display_name: "旧 Alpha 家庭",
+          },
+          account: {
+            email_masked: "p***@example.com",
+            phone_bound: true,
+            phone_masked: "138****1234",
+          },
+          children: [],
         });
       }
       throw new Error(`Unexpected fetch: ${url}`);

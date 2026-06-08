@@ -5,6 +5,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import type { FormEvent } from "react";
 import {
   createAlphaParent,
+  getMyAlphaChildren,
   recordAlphaEvent,
   validateAlphaInvite,
 } from "../../../lib/api";
@@ -33,6 +34,13 @@ function isDisabledAccountError(error: unknown): boolean {
     error.status === 403 &&
     error.detail === DISABLED_ACCOUNT_MESSAGE
   );
+}
+
+function linkedParentId(session: AuthSession): string | null {
+  if (!session.authenticated) {
+    return null;
+  }
+  return session.parent?.id ?? session.parent_id ?? null;
 }
 
 function subscribeToAlphaParentStorage(onStoreChange: () => void) {
@@ -98,7 +106,7 @@ export default function AlphaStartPage() {
         if (!isMounted) {
           return;
         }
-        if (session.authenticated && session.parent) {
+        if (linkedParentId(session)) {
           router.push("/parent/children");
           return;
         }
@@ -158,8 +166,9 @@ export default function AlphaStartPage() {
   async function recoverLinkedSessionAfterBindFailure() {
     try {
       const session = await getAuthSession();
-      if (session.authenticated && session.parent) {
-        setStoredAlphaParentId(session.parent.id);
+      const parentId = linkedParentId(session);
+      if (parentId) {
+        setStoredAlphaParentId(parentId);
         router.push("/parent/children");
         return true;
       }
@@ -167,9 +176,17 @@ export default function AlphaStartPage() {
         setAuthSession(session);
       }
     } catch {
+      // Fall through to the parent-children probe below.
+    }
+
+    try {
+      const children = await getMyAlphaChildren();
+      setStoredAlphaParentId(children.parent.id);
+      router.push("/parent/children");
+      return true;
+    } catch {
       return false;
     }
-    return false;
   }
 
   async function handleRequestCode() {
@@ -260,7 +277,9 @@ export default function AlphaStartPage() {
         code: trimmedCode,
       });
 
-      if (verifiedSession.authenticated && verifiedSession.parent) {
+      const verifiedParentId = linkedParentId(verifiedSession);
+      if (verifiedParentId) {
+        setStoredAlphaParentId(verifiedParentId);
         router.push("/parent/children");
         return;
       }

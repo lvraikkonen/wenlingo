@@ -164,6 +164,10 @@ def _reject_code(session: Session, magic_code: AuthMagicCode | None, settings):
 
 def verify_magic_code(session: Session, settings, email: str, code: str) -> ParentAccount:
     email_normalized = normalize_email(email)
+    account = _account_for_email(session, email_normalized)
+    if account and account.status == "disabled":
+        raise HTTPException(status_code=403, detail=DISABLED_ACCOUNT_ERROR)
+
     pepper = _require_pepper(settings)
     magic_code = _latest_unconsumed_code(session, email_normalized)
 
@@ -177,9 +181,6 @@ def verify_magic_code(session: Session, settings, email: str, code: str) -> Pare
         _reject_code(session, magic_code, settings)
 
     now = utcnow()
-    account = _account_for_email(session, email_normalized)
-    if account and account.status == "disabled":
-        raise HTTPException(status_code=403, detail=DISABLED_ACCOUNT_ERROR)
     if account is None:
         account = ParentAccount(email_normalized=email_normalized, email_verified_at=now)
     elif account.email_verified_at is None:

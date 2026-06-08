@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from app.api.deps import get_db_session
 from app.api.routes.alpha import hash_invite_code
@@ -250,6 +251,38 @@ def test_delete_test_accounts_removes_account_family_and_dependent_rows(
 ):
     monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
     account = add_account(session, "qa-delete@example.com")
+    parent, child, invite = seed_test_family_graph(session, account)
+    app = create_admin_client(session, monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/admin/alpha/accounts/delete-test",
+            headers={"X-Alpha-Admin-Token": "secret"},
+            json={
+                "account_ids": [account.id],
+                "confirm": "DELETE TEST ACCOUNTS",
+            },
+        )
+        overview = client.get(
+            "/api/admin/alpha/overview",
+            headers={"X-Alpha-Admin-Token": "secret"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["deleted_count"] == 1
+    assert session.get(ParentAccount, account.id) is None
+    assert session.get(ParentUser, parent.id) is None
+    assert session.get(StudentProfile, child.id) is None
+    assert session.get(AlphaInviteCode, invite.id) is None
+    assert overview.status_code == 200
+
+
+def test_delete_test_accounts_respects_foreign_keys_when_removing_full_family(
+    session, monkeypatch
+):
+    session.exec(text("PRAGMA foreign_keys=ON"))
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+    account = add_account(session, "qa-delete-fk@example.com")
     parent, child, invite = seed_test_family_graph(session, account)
     app = create_admin_client(session, monkeypatch)
 
