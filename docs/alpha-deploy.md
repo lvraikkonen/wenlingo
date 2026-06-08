@@ -148,6 +148,33 @@ Smoke checklist:
 
 As part of the Railway Dev rollout, run the full QA checklist in `qa/2026-06-04-v0.5a.1-alpha-dev-hardening-manual-qa.md` after the smoke checklist.
 
+## V0.5a.2 Alpha QA Closure Hardening
+
+V0.5a.2 treats real SMTP delivery on Railway Dev as a known blocked/skipped
+check. Railway Dev QA uses Magic Code Dev Echo until a later email-provider
+release changes that decision.
+
+Required Railway Dev auth env:
+
+| Variable | Railway Dev value |
+| --- | --- |
+| `MAGIC_CODE_DEV_ECHO` | `true` |
+
+Operator rules:
+
+1. Set `MAGIC_CODE_DEV_ECHO=true` on `wenlingo-api`, not `wenlingo-web`.
+2. Confirm the variable is set in the Railway environment serving the current
+   Dev web URL.
+3. Redeploy or restart `wenlingo-api` after changing the variable.
+4. Use Magic Code `123456` for controlled Dev QA.
+5. If `/alpha/start` still waits for the SMTP timeout, re-check service,
+   environment, and API redeploy state before debugging frontend code.
+
+Admin Alpha includes a permanent test-account hard delete action for Dev/QA
+cleanup. It is guarded by a test-email allowlist and the confirmation text
+`DELETE TEST ACCOUNTS`. Do not use it for real Alpha families. The action must
+reject protected demo/system accounts and any batch containing a non-test email.
+
 ## Railway Project Layout
 
 Use one Railway project with three services:
