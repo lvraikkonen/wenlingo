@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+import importlib
 
 
 PayloadBuilder = Callable[[], dict]
@@ -16,6 +17,13 @@ class PromptSpec:
 
 
 _PROMPTS: dict[str, PromptSpec] = {}
+_PROMPT_MODULES = (
+    "app.prompts.essay_feedback",
+    "app.prompts.revision_feedback",
+    "app.prompts.sentence_challenge",
+    "app.prompts.sentence_feedback",
+)
+_loaded = False
 
 
 def register_prompt(prompt: PromptSpec) -> PromptSpec:
@@ -26,7 +34,12 @@ def register_prompt(prompt: PromptSpec) -> PromptSpec:
 
 
 def ensure_prompt_registry_loaded() -> None:
-    import app.prompts  # noqa: F401
+    global _loaded
+    if _loaded:
+        return
+    for module_name in _PROMPT_MODULES:
+        importlib.import_module(module_name)
+    _loaded = True
 
 
 def get_prompt(prompt_key: str) -> PromptSpec:

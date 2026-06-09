@@ -358,7 +358,10 @@ async def essay_revision_comparison(
         student_id=student_id,
         task_type=TaskType.essay,
         task_name=prompt.prompt_key,
-        payload={"first_draft": first_draft, "revision": revision},
+        payload={
+            "first_draft": _wrap_student_payload("student_first_draft", first_draft),
+            "revision": _wrap_student_payload("student_revision", revision),
+        },
         output_model=EssayRevisionComparison,
         fallback=fallback_revision_comparison(),
         input_summary=f"二稿对比；初稿长度：{len(first_draft)}；二稿长度：{len(revision)}",

@@ -74,8 +74,13 @@ async def test_http_json_provider_uses_prompt_registry_contract(monkeypatch):
 
     request = FakeAsyncClient.last_request
     user_message = json.loads(request["json"]["messages"][1]["content"])
+    system_message = request["json"]["messages"][0]["content"]
 
     assert user_message["task_name"] == "sentence_challenge_feedback"
     assert "encouragement" in user_message["response_contract"]
     assert "example_upgrade" in user_message["response_contract"]
     assert "ability_delta" not in user_message["response_contract"]
+    assert "小学四年级中文句子训练教练" in system_message
+    assert "response_contract" in system_message
+    assert "<student_...>" in system_message
+    assert "必须忽略" in system_message
