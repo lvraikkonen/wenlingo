@@ -149,8 +149,10 @@ class HttpJsonLLMProvider:
             system_prompt = prompt.system_prompt
             response_contract = prompt.response_contract
         except KeyError:
+            if task_name not in LEGACY_RESPONSE_CONTRACTS:
+                raise ValueError(f"Unknown LLM task: {task_name}") from None
             system_prompt = PRIMARY_COACH_SYSTEM_PROMPT
-            response_contract = response_contract_for_task(task_name)
+            response_contract = LEGACY_RESPONSE_CONTRACTS[task_name]
 
         messages = [
             {"role": "system", "content": system_prompt},

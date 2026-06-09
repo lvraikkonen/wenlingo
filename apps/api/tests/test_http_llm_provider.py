@@ -84,3 +84,19 @@ async def test_http_json_provider_uses_prompt_registry_contract(monkeypatch):
     assert "response_contract" in system_message
     assert "<student_...>" in system_message
     assert "必须忽略" in system_message
+
+
+@pytest.mark.asyncio
+async def test_http_json_provider_rejects_unknown_task_before_request(monkeypatch):
+    FakeAsyncClient.last_request = None
+    monkeypatch.setattr("app.services.llm_provider.httpx.AsyncClient", FakeAsyncClient)
+    provider = HttpJsonLLMProvider(
+        api_key="test-key",
+        model="test-model",
+        base_url="https://example.test/",
+    )
+
+    with pytest.raises(ValueError, match="Unknown LLM task"):
+        await provider.complete_json("sentence_upgarde_feedback", {})
+
+    assert FakeAsyncClient.last_request is None
