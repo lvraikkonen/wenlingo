@@ -13,6 +13,21 @@ class FakeResponse:
         return {"choices": [{"message": {"content": '{"ok": true}'}}]}
 
 
+class FakeUsageResponse:
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return {
+            "choices": [{"message": {"content": '{"ok": true}'}}],
+            "usage": {
+                "prompt_tokens": 11,
+                "completion_tokens": 7,
+                "total_tokens": 18,
+            },
+        }
+
+
 class FakeAsyncClient:
     last_request = None
 
@@ -84,6 +99,29 @@ async def test_http_json_provider_uses_prompt_registry_contract(monkeypatch):
     assert "response_contract" in system_message
     assert "<student_...>" in system_message
     assert "必须忽略" in system_message
+
+
+@pytest.mark.asyncio
+async def test_http_json_provider_returns_openai_compatible_usage(monkeypatch):
+    class UsageClient(FakeAsyncClient):
+        async def post(self, url, headers, json):
+            self.__class__.last_request = {"url": url, "headers": headers, "json": json}
+            return FakeUsageResponse()
+
+    monkeypatch.setattr("app.services.llm_provider.httpx.AsyncClient", UsageClient)
+    provider = HttpJsonLLMProvider(
+        api_key="test-key",
+        model="test-model",
+        base_url="https://example.test/",
+    )
+
+    result = await provider.complete_json("sentence_upgrade_feedback", {})
+
+    assert result.usage == {
+        "prompt_tokens": 11,
+        "completion_tokens": 7,
+        "total_tokens": 18,
+    }
 
 
 @pytest.mark.asyncio

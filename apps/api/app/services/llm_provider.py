@@ -28,6 +28,7 @@ class LLMProviderResponse(Mapping[str, Any]):
     raw_response: str
     provider: str
     model: str
+    usage: dict[str, int] | None = None
 
     def __getitem__(self, key: str) -> Any:
         return self.parsed_json[key]
@@ -184,16 +185,26 @@ class HttpJsonLLMProvider:
         response.raise_for_status()
         data = response.json()
         content = data["choices"][0]["message"]["content"]
+        usage = data.get("usage")
+        normalized_usage = None
+        if isinstance(usage, dict):
+            normalized_usage = {
+                "prompt_tokens": int(usage.get("prompt_tokens") or 0),
+                "completion_tokens": int(usage.get("completion_tokens") or 0),
+                "total_tokens": int(usage.get("total_tokens") or 0),
+            }
         if isinstance(content, str):
             return LLMProviderResponse(
                 parsed_json=json.loads(content),
                 raw_response=content,
                 provider=self.provider_name,
                 model=self.model_name,
+                usage=normalized_usage,
             )
         return LLMProviderResponse(
             parsed_json=content,
             raw_response=json.dumps(content, ensure_ascii=False),
             provider=self.provider_name,
             model=self.model_name,
+            usage=normalized_usage,
         )

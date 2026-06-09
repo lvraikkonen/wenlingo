@@ -75,6 +75,8 @@ async def complete_entry_assessment(
         student_id=student.id,
         daily_limit_enabled=settings.llm_daily_limit_enabled,
         daily_limit_per_student_task=settings.llm_daily_limit_per_student_task,
+        input_cost_per_1k_tokens=settings.llm_input_cost_per_1k_tokens,
+        output_cost_per_1k_tokens=settings.llm_output_cost_per_1k_tokens,
     )
     sentence_feedback = sentence_result.output
     _raise_for_provider_failure(sentence_result.log)
@@ -105,6 +107,8 @@ async def complete_entry_assessment(
         student_id=student.id,
         daily_limit_enabled=settings.llm_daily_limit_enabled,
         daily_limit_per_student_task=settings.llm_daily_limit_per_student_task,
+        input_cost_per_1k_tokens=settings.llm_input_cost_per_1k_tokens,
+        output_cost_per_1k_tokens=settings.llm_output_cost_per_1k_tokens,
     )
     essay_output = essay_result.output
     _raise_for_provider_failure(essay_result.log)

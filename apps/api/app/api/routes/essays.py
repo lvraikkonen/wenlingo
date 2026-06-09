@@ -79,6 +79,8 @@ async def create_essay(
             student_id=student_id,
             daily_limit_enabled=settings.llm_daily_limit_enabled,
             daily_limit_per_student_task=settings.llm_daily_limit_per_student_task,
+            input_cost_per_1k_tokens=settings.llm_input_cost_per_1k_tokens,
+            output_cost_per_1k_tokens=settings.llm_output_cost_per_1k_tokens,
         )
         feedback = feedback_result.output
     except ValueError as exc:
@@ -197,6 +199,8 @@ async def submit_revision(
             student_id=essay.student_id,
             daily_limit_enabled=settings.llm_daily_limit_enabled,
             daily_limit_per_student_task=settings.llm_daily_limit_per_student_task,
+            input_cost_per_1k_tokens=settings.llm_input_cost_per_1k_tokens,
+            output_cost_per_1k_tokens=settings.llm_output_cost_per_1k_tokens,
         )
     except Exception:
         session.rollback()

@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     llm_base_url: str = ""
     llm_daily_limit_enabled: bool = False
     llm_daily_limit_per_student_task: int = 5
+    llm_input_cost_per_1k_tokens: float = 0.0
+    llm_output_cost_per_1k_tokens: float = 0.0
     auth_required_for_alpha: bool = False
     auth_session_cookie_name: str = "wenlingo_parent_session"
     auth_session_cookie_secure: bool = True

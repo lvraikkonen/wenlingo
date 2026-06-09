@@ -2,6 +2,7 @@ import html
 import re
 from dataclasses import dataclass
 from datetime import datetime, time, timezone
+from time import perf_counter
 from typing import Generic, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -95,11 +96,18 @@ def log_llm_result(
     validation_ok: bool,
     error_message: str,
     retry_count: int,
+    prompt_key: str | None = None,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    total_tokens: int = 0,
+    estimated_cost: float = 0.0,
+    latency_ms: int = 0,
 ) -> LLMCallLog:
     log = LLMCallLog(
         student_id=student_id,
         task_type=task_type,
         task_name=task_name,
+        prompt_key=prompt_key or task_name,
         provider=provider,
         model=model,
         prompt_version=prompt_version,
@@ -109,6 +117,11 @@ def log_llm_result(
         validation_ok=validation_ok,
         error_message=error_message,
         retry_count=retry_count,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        estimated_cost=estimated_cost,
+        latency_ms=latency_ms,
     )
     session.add(log)
     session.flush()
@@ -164,6 +177,23 @@ def _effective_prompt_version(prompt: PromptSpec, requested_version: str) -> str
     return requested_version
 
 
+def _token_count(usage: dict[str, int] | None, key: str) -> int:
+    if not usage:
+        return 0
+    return int(usage.get(key) or 0)
+
+
+def estimate_llm_cost(
+    prompt_tokens: int,
+    completion_tokens: int,
+    input_cost_per_1k: float,
+    output_cost_per_1k: float,
+) -> float:
+    return (prompt_tokens / 1000 * input_cost_per_1k) + (
+        completion_tokens / 1000 * output_cost_per_1k
+    )
+
+
 def _daily_log_count(session: Session, student_id: str, task_name: str, provider_name: str) -> int:
     count = session.exec(
         select(func.count(LLMCallLog.id)).where(
@@ -189,6 +219,9 @@ async def run_validated_llm_task(
     fallback: T,
     input_summary: str,
     prompt_version: str,
+    prompt_key: str | None = None,
+    input_cost_per_1k_tokens: float = 0.0,
+    output_cost_per_1k_tokens: float = 0.0,
     daily_limit_enabled: bool = False,
     daily_limit_per_student_task: int = 5,
 ) -> LLMTaskResult[T]:
@@ -211,6 +244,7 @@ async def run_validated_llm_task(
             student_id=student_id,
             task_type=task_type,
             task_name=task_name,
+            prompt_key=prompt_key or task_name,
             provider=provider_name,
             model=model_name,
             prompt_version=prompt_version,
@@ -225,7 +259,18 @@ async def run_validated_llm_task(
 
     for attempt_index in range(MAX_LLM_ATTEMPTS):
         try:
+            started_at = perf_counter()
             response = await provider.complete_json(task_name, payload)
+            latency_ms = int((perf_counter() - started_at) * 1000)
+            prompt_tokens = _token_count(response.usage, "prompt_tokens")
+            completion_tokens = _token_count(response.usage, "completion_tokens")
+            total_tokens = _token_count(response.usage, "total_tokens")
+            estimated_cost = estimate_llm_cost(
+                prompt_tokens,
+                completion_tokens,
+                input_cost_per_1k_tokens,
+                output_cost_per_1k_tokens,
+            )
             raw_response = response.raw_response
             latest_response_provider = response.provider
             latest_response_model = response.model
@@ -237,6 +282,7 @@ async def run_validated_llm_task(
                     student_id=student_id,
                     task_type=task_type,
                     task_name=task_name,
+                    prompt_key=prompt_key or task_name,
                     provider=response.provider,
                     model=response.model,
                     prompt_version=prompt_version,
@@ -246,6 +292,11 @@ async def run_validated_llm_task(
                     validation_ok=True,
                     error_message="",
                     retry_count=attempt_index,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    estimated_cost=estimated_cost,
+                    latency_ms=latency_ms,
                 )
             return LLMTaskResult(output=output, log=log)
         except ValidationError as exc:
@@ -260,6 +311,7 @@ async def run_validated_llm_task(
             student_id=student_id,
             task_type=task_type,
             task_name=task_name,
+            prompt_key=prompt_key or task_name,
             provider=latest_response_provider,
             model=latest_response_model,
             prompt_version=prompt_version,
@@ -283,6 +335,8 @@ async def sentence_upgrade_feedback(
     student_id: str | None = None,
     daily_limit_enabled: bool = False,
     daily_limit_per_student_task: int = 5,
+    input_cost_per_1k_tokens: float = 0.0,
+    output_cost_per_1k_tokens: float = 0.0,
 ) -> LLMTaskResult[SentenceFeedback]:
     prompt = get_prompt("sentence_upgrade_feedback")
     return await run_validated_llm_task(
@@ -302,9 +356,12 @@ async def sentence_upgrade_feedback(
             f"升级句长度：{len(upgraded_sentence)}；目标：{focus}"
         ),
         prompt_version=_effective_prompt_version(prompt, prompt_version),
+        prompt_key=prompt.prompt_key,
         student_id=student_id,
         daily_limit_enabled=daily_limit_enabled,
         daily_limit_per_student_task=daily_limit_per_student_task,
+        input_cost_per_1k_tokens=input_cost_per_1k_tokens,
+        output_cost_per_1k_tokens=output_cost_per_1k_tokens,
     )
 
 
@@ -317,6 +374,8 @@ async def essay_feedback(
     student_id: str | None = None,
     daily_limit_enabled: bool = False,
     daily_limit_per_student_task: int = 5,
+    input_cost_per_1k_tokens: float = 0.0,
+    output_cost_per_1k_tokens: float = 0.0,
 ) -> LLMTaskResult[EssayFeedback]:
     ghostwriting = convert_ghostwriting_request(draft)
     if ghostwriting.blocked:
@@ -336,8 +395,11 @@ async def essay_feedback(
         fallback=fallback_essay_feedback(),
         input_summary=f"作文题目：{title}；初稿长度：{len(draft)}",
         prompt_version=_effective_prompt_version(prompt, prompt_version),
+        prompt_key=prompt.prompt_key,
         daily_limit_enabled=daily_limit_enabled,
         daily_limit_per_student_task=daily_limit_per_student_task,
+        input_cost_per_1k_tokens=input_cost_per_1k_tokens,
+        output_cost_per_1k_tokens=output_cost_per_1k_tokens,
     )
 
 
@@ -350,6 +412,8 @@ async def essay_revision_comparison(
     student_id: str | None = None,
     daily_limit_enabled: bool = False,
     daily_limit_per_student_task: int = 5,
+    input_cost_per_1k_tokens: float = 0.0,
+    output_cost_per_1k_tokens: float = 0.0,
 ) -> LLMTaskResult[EssayRevisionComparison]:
     prompt = get_prompt("essay_revision_comparison")
     return await run_validated_llm_task(
@@ -366,6 +430,9 @@ async def essay_revision_comparison(
         fallback=fallback_revision_comparison(),
         input_summary=f"二稿对比；初稿长度：{len(first_draft)}；二稿长度：{len(revision)}",
         prompt_version=_effective_prompt_version(prompt, prompt_version),
+        prompt_key=prompt.prompt_key,
         daily_limit_enabled=daily_limit_enabled,
         daily_limit_per_student_task=daily_limit_per_student_task,
+        input_cost_per_1k_tokens=input_cost_per_1k_tokens,
+        output_cost_per_1k_tokens=output_cost_per_1k_tokens,
     )

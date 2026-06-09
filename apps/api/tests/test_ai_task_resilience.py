@@ -109,6 +109,31 @@ class RecordingSentenceProvider:
         )
 
 
+class UsageSentenceProvider:
+    provider_name = "http"
+    model_name = "usage-sentence"
+
+    async def complete_json(self, task_name, payload):
+        parsed = {
+            "encouragement": "你把画面写得更清楚了。",
+            "specific_improvement": "加入了可看见的细节",
+            "next_step": "再加一个动作，会更生动。",
+            "ability_delta": {"expression": 4, "observation": 4},
+            "problem_monsters": ["空泛表达"],
+        }
+        return LLMProviderResponse(
+            parsed_json=parsed,
+            raw_response=json.dumps(parsed, ensure_ascii=False),
+            provider=self.provider_name,
+            model=self.model_name,
+            usage={
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+                "total_tokens": 150,
+            },
+        )
+
+
 class AlwaysInvalidSentenceProvider:
     provider_name = "fake"
     model_name = "sentence-always-invalid"
@@ -264,6 +289,30 @@ async def test_sentence_invalid_then_valid_retries_and_logs_success(session):
     assert saved.task_name == "sentence_upgrade_feedback"
     assert saved.validation_ok is True
     assert saved.retry_count == 1
+
+
+@pytest.mark.asyncio
+async def test_sentence_success_logs_usage_latency_and_estimated_cost(session):
+    result = await sentence_upgrade_feedback(
+        provider=UsageSentenceProvider(),
+        source_sentence="公园很美。",
+        upgraded_sentence="清晨的公园里，荷叶上的水珠一闪一闪，像小灯泡。",
+        focus="加细节",
+        session=session,
+        prompt_version="test-v1",
+        student_id="s1",
+        input_cost_per_1k_tokens=0.001,
+        output_cost_per_1k_tokens=0.003,
+    )
+
+    saved = session.exec(select(LLMCallLog)).one()
+    assert result.log.id == saved.id
+    assert saved.prompt_key == "sentence_upgrade_feedback"
+    assert saved.prompt_tokens == 100
+    assert saved.completion_tokens == 50
+    assert saved.total_tokens == 150
+    assert saved.estimated_cost == 0.00025
+    assert saved.latency_ms >= 0
 
 
 @pytest.mark.asyncio
