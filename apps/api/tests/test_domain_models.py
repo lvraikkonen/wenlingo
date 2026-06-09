@@ -181,6 +181,52 @@ def test_llm_call_log_tracks_student_and_task_name():
     assert log.task_name == "sentence_upgrade_feedback"
 
 
+def test_sentence_training_can_represent_generated_challenge():
+    training = SentenceTraining(
+        student_id="student-1",
+        source_sentence="小猫跑了。",
+        upgraded_sentence="",
+        focus="动作描写",
+        status="generated",
+        challenge_prompt="请把句子写具体，加上动作和样子。",
+        hint="可以写小猫怎么跑、跑到哪里、看起来怎么样。",
+        target_skill="action_expression",
+    )
+
+    assert training.status == "generated"
+    assert training.challenge_prompt.startswith("请把句子")
+    assert training.hint.startswith("可以写")
+    assert training.target_skill == "action_expression"
+    assert training.completed_at is None
+
+
+def test_llm_call_log_records_prompt_usage_latency_and_cost():
+    log = LLMCallLog(
+        student_id="student-1",
+        task_type=TaskType.sentence,
+        task_name="sentence_challenge_generation",
+        prompt_key="sentence_challenge_generation",
+        prompt_version="v0.5b-2026-06-08",
+        provider="http",
+        model="test-model",
+        input_summary="句子挑战生成；年级：四年级",
+        raw_response="{}",
+        output_json={},
+        prompt_tokens=12,
+        completion_tokens=8,
+        total_tokens=20,
+        estimated_cost=0.0004,
+        latency_ms=321,
+    )
+
+    assert log.prompt_key == "sentence_challenge_generation"
+    assert log.prompt_tokens == 12
+    assert log.completion_tokens == 8
+    assert log.total_tokens == 20
+    assert log.estimated_cost == 0.0004
+    assert log.latency_ms == 321
+
+
 def test_essay_version_tracks_revision_task_metadata_and_llm_log_link():
     version = EssayVersion(
         essay_id="essay-1",

@@ -95,3 +95,25 @@ def test_assessment_artifact_references_have_migration():
     assert "ix_assessment_essay_id" in migration_text
     assert "fk_assessment_sentence_training_id_sentencetraining" in migration_text
     assert "fk_assessment_essay_id_essay" in migration_text
+
+
+def test_v05b_ai_sentence_training_has_migration():
+    migration_path = Path(
+        "app/db/migrations/versions/20260608_v05b_ai_sentence_training.py"
+    )
+    migration_text = migration_path.read_text(encoding="utf-8")
+
+    assert "20260608_v05b_ai_sentence" in migration_text
+    assert 'down_revision = "20260601_v05a_user_foundation"' in migration_text
+    assert "sentencetraining" in migration_text
+    assert "status" in migration_text
+    assert "challenge_prompt" in migration_text
+    assert "target_skill" in migration_text
+    assert "completed_at" in migration_text
+    assert "llmcalllog" in migration_text
+    assert "prompt_key" in migration_text
+    assert "prompt_tokens" in migration_text
+    assert "completion_tokens" in migration_text
+    assert "total_tokens" in migration_text
+    assert "estimated_cost" in migration_text
+    assert "latency_ms" in migration_text

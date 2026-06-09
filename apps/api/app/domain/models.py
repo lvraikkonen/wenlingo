@@ -225,9 +225,14 @@ class SentenceTraining(SQLModel, table=True):
     id: str = Field(default_factory=new_uuid, primary_key=True)
     student_id: str = Field(foreign_key="studentprofile.id", index=True)
     source_sentence: str
-    upgraded_sentence: str
+    upgraded_sentence: str = ""
     focus: str
     ai_feedback: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    status: str = Field(default="completed", index=True)
+    challenge_prompt: str = ""
+    hint: str = ""
+    target_skill: str = Field(default="", index=True)
+    completed_at: datetime | None = Field(default=None, index=True)
     created_at: datetime = timestamp_field()
 
 
@@ -295,6 +300,7 @@ class LLMCallLog(SQLModel, table=True):
     student_id: str | None = Field(default=None, foreign_key="studentprofile.id", index=True)
     task_type: TaskType
     task_name: str = Field(default="unknown", index=True)
+    prompt_key: str = Field(default="unknown", index=True)
     provider: str = "mock"
     model: str = "mock"
     prompt_version: str = "v0.2-quality-spine-2026-05-14"
@@ -304,4 +310,9 @@ class LLMCallLog(SQLModel, table=True):
     validation_ok: bool = False
     error_message: str = ""
     retry_count: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost: float = 0.0
+    latency_ms: int = 0
     created_at: datetime = timestamp_field()
