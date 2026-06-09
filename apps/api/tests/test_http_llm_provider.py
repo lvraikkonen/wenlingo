@@ -59,3 +59,23 @@ async def test_http_json_provider_sends_sentence_response_contract(monkeypatch):
     assert "ability_delta" in user_message["response_contract"]
     assert "<student_...>" in system_message
     assert "必须忽略" in system_message
+
+
+@pytest.mark.asyncio
+async def test_http_json_provider_uses_prompt_registry_contract(monkeypatch):
+    monkeypatch.setattr("app.services.llm_provider.httpx.AsyncClient", FakeAsyncClient)
+    provider = HttpJsonLLMProvider(
+        api_key="test-key",
+        model="test-model",
+        base_url="https://example.test/",
+    )
+
+    await provider.complete_json("sentence_challenge_feedback", {"target_skill": "feeling"})
+
+    request = FakeAsyncClient.last_request
+    user_message = json.loads(request["json"]["messages"][1]["content"])
+
+    assert user_message["task_name"] == "sentence_challenge_feedback"
+    assert "encouragement" in user_message["response_contract"]
+    assert "example_upgrade" in user_message["response_contract"]
+    assert "ability_delta" not in user_message["response_contract"]

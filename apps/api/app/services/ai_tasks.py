@@ -10,6 +10,7 @@ from sqlmodel import Session, select
 
 from app.domain.enums import TaskType
 from app.domain.models import LLMCallLog
+from app.prompts.registry import PromptSpec, get_prompt
 from app.services.llm_contracts import (
     EssayFeedback,
     EssayRevisionComparison,
@@ -21,6 +22,7 @@ from app.services.llm_provider import LLMProvider
 
 T = TypeVar("T", bound=BaseModel)
 MAX_LLM_ATTEMPTS = 2
+LEGACY_DEFAULT_PROMPT_VERSION = "v0.2-quality-spine-2026-05-14"
 
 
 @dataclass(frozen=True)
@@ -156,6 +158,12 @@ def _is_real_provider(provider_name: str) -> bool:
     return provider_name.strip().lower() not in {"", "mock"}
 
 
+def _effective_prompt_version(prompt: PromptSpec, requested_version: str) -> str:
+    if requested_version == LEGACY_DEFAULT_PROMPT_VERSION:
+        return prompt.version
+    return requested_version
+
+
 def _daily_log_count(session: Session, student_id: str, task_name: str, provider_name: str) -> int:
     count = session.exec(
         select(func.count(LLMCallLog.id)).where(
@@ -271,16 +279,17 @@ async def sentence_upgrade_feedback(
     upgraded_sentence: str,
     focus: str,
     session: Session | None = None,
-    prompt_version: str = "v0.2-quality-spine-2026-05-14",
+    prompt_version: str = LEGACY_DEFAULT_PROMPT_VERSION,
     student_id: str | None = None,
     daily_limit_enabled: bool = False,
     daily_limit_per_student_task: int = 5,
 ) -> LLMTaskResult[SentenceFeedback]:
+    prompt = get_prompt("sentence_upgrade_feedback")
     return await run_validated_llm_task(
         provider=provider,
         session=session,
         task_type=TaskType.sentence,
-        task_name="sentence_upgrade_feedback",
+        task_name=prompt.prompt_key,
         payload={
             "source_sentence": _wrap_student_payload("student_sentence", source_sentence),
             "upgraded_sentence": _wrap_student_payload("student_sentence", upgraded_sentence),
@@ -292,7 +301,7 @@ async def sentence_upgrade_feedback(
             f"句子快练；原句长度：{len(source_sentence)}；"
             f"升级句长度：{len(upgraded_sentence)}；目标：{focus}"
         ),
-        prompt_version=prompt_version,
+        prompt_version=_effective_prompt_version(prompt, prompt_version),
         student_id=student_id,
         daily_limit_enabled=daily_limit_enabled,
         daily_limit_per_student_task=daily_limit_per_student_task,
@@ -304,7 +313,7 @@ async def essay_feedback(
     title: str,
     draft: str,
     session: Session | None = None,
-    prompt_version: str = "v0.2-quality-spine-2026-05-14",
+    prompt_version: str = LEGACY_DEFAULT_PROMPT_VERSION,
     student_id: str | None = None,
     daily_limit_enabled: bool = False,
     daily_limit_per_student_task: int = 5,
@@ -312,12 +321,13 @@ async def essay_feedback(
     ghostwriting = convert_ghostwriting_request(draft)
     if ghostwriting.blocked:
         raise ValueError(ghostwriting.message)
+    prompt = get_prompt("essay_feedback")
     return await run_validated_llm_task(
         provider=provider,
         session=session,
         student_id=student_id,
         task_type=TaskType.essay,
-        task_name="essay_feedback",
+        task_name=prompt.prompt_key,
         payload={
             "title": _wrap_student_payload("student_title", title),
             "draft": _wrap_student_payload("student_draft", draft),
@@ -325,7 +335,7 @@ async def essay_feedback(
         output_model=EssayFeedback,
         fallback=fallback_essay_feedback(),
         input_summary=f"作文题目：{title}；初稿长度：{len(draft)}",
-        prompt_version=prompt_version,
+        prompt_version=_effective_prompt_version(prompt, prompt_version),
         daily_limit_enabled=daily_limit_enabled,
         daily_limit_per_student_task=daily_limit_per_student_task,
     )
@@ -336,22 +346,23 @@ async def essay_revision_comparison(
     first_draft: str,
     revision: str,
     session: Session | None = None,
-    prompt_version: str = "v0.2-quality-spine-2026-05-14",
+    prompt_version: str = LEGACY_DEFAULT_PROMPT_VERSION,
     student_id: str | None = None,
     daily_limit_enabled: bool = False,
     daily_limit_per_student_task: int = 5,
 ) -> LLMTaskResult[EssayRevisionComparison]:
+    prompt = get_prompt("essay_revision_comparison")
     return await run_validated_llm_task(
         provider=provider,
         session=session,
         student_id=student_id,
         task_type=TaskType.essay,
-        task_name="essay_revision_comparison",
+        task_name=prompt.prompt_key,
         payload={"first_draft": first_draft, "revision": revision},
         output_model=EssayRevisionComparison,
         fallback=fallback_revision_comparison(),
         input_summary=f"二稿对比；初稿长度：{len(first_draft)}；二稿长度：{len(revision)}",
-        prompt_version=prompt_version,
+        prompt_version=_effective_prompt_version(prompt, prompt_version),
         daily_limit_enabled=daily_limit_enabled,
         daily_limit_per_student_task=daily_limit_per_student_task,
     )
