@@ -1,3 +1,4 @@
+from collections import Counter
 from datetime import datetime, timezone
 from hashlib import sha256
 import logging
@@ -394,7 +395,7 @@ def _create_child_payload(parent: ParentUser, request: AlphaChildCreate, session
 
 def _summary_payload(parent: ParentUser, student: StudentProfile, session: Session):
     assessment_count = _count_rows(session, Assessment, student.id)
-    sentence_count = _count_rows(session, SentenceTraining, student.id)
+    sentence_count, sentence_summary = _sentence_training_summary(session, student.id)
     essay_count = _count_rows(session, Essay, student.id)
     history_rows = session.exec(
         select(AbilityHistory).where(AbilityHistory.student_id == student.id)
@@ -434,11 +435,32 @@ def _summary_payload(parent: ParentUser, student: StudentProfile, session: Sessi
         "recent_highlight": "孩子完成了第一次能力草图。"
         if assessment_completed
         else None,
+        "sentence_training_summary": sentence_summary,
         "empty_state": None if has_progress else EMPTY_SUMMARY,
         "next_suggestion": POPULATED_NEXT_SUGGESTION
         if has_progress
         else EMPTY_NEXT_SUGGESTION,
     }
+
+
+def _sentence_training_summary(session: Session, student_id: str) -> tuple[int, str | None]:
+    rows = session.exec(
+        select(SentenceTraining).where(
+            SentenceTraining.student_id == student_id,
+            SentenceTraining.status == "completed",
+        )
+    ).all()
+    if not rows:
+        return 0, None
+    focus_counts = Counter(row.focus for row in rows if row.focus)
+    top_focuses = [focus for focus, _count in focus_counts.most_common(2)]
+    if not top_focuses:
+        return len(rows), f"本周完成 {len(rows)} 次句子挑战。"
+    if len(top_focuses) == 1:
+        focus_text = f"“{top_focuses[0]}”"
+    else:
+        focus_text = f"“{top_focuses[0]}”和“{top_focuses[1]}”"
+    return len(rows), f"本周完成 {len(rows)} 次句子挑战，主要练习了{focus_text}。"
 
 
 def _summary_feedback_payload(

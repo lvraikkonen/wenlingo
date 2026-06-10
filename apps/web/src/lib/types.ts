@@ -129,6 +129,7 @@ export type AlphaChildSummary = {
   };
   ability_changes: AlphaAbilityChange[];
   recent_highlight: string | null;
+  sentence_training_summary: string | null;
   next_suggestion: string;
   empty_state: string | null;
 };

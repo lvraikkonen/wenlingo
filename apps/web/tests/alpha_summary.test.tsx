@@ -73,6 +73,7 @@ test("summary page renders empty state for a child without training records", as
     },
     ability_changes: [],
     recent_highlight: null,
+    sentence_training_summary: null,
     next_suggestion: "先完成入门小试炼，生成第一张能力草图。",
     empty_state: "还没有训练记录。完成入门小试炼后，这里会出现第一份成长摘要。",
   });
@@ -107,6 +108,7 @@ test("summary page renders populated practice counts, ability changes, and actio
       { ability: "observation", label: "观察力", delta: 4 },
     ],
     recent_highlight: "孩子完成了第一次能力草图。",
+    sentence_training_summary: null,
     next_suggestion: "继续练习把句子写具体。",
     empty_state: null,
   });
@@ -125,6 +127,38 @@ test("summary page renders populated practice counts, ability changes, and actio
     "href",
     "/children/student-1",
   );
+});
+
+test("summary page renders lightweight sentence training summary", async () => {
+  vi.mocked(getMyAlphaChildSummary).mockResolvedValueOnce({
+    parent_id: "parent-1",
+    child: {
+      id: "s1",
+      nickname: "小星",
+      name: "小星",
+      grade_label: "四年级",
+      persona: "real_child",
+      is_real_child: true,
+      dashboard_url: "/children/s1",
+      summary_url: "/parent/children/s1/summary",
+      assessment_completed: true,
+    },
+    usefulness: null,
+    assessment_completed: true,
+    practice_counts: { assessments: 1, sentence_trainings: 3, essays: 0 },
+    ability_changes: [{ ability: "expression", label: "表达力", delta: 3 }],
+    recent_highlight: "孩子完成了第一次能力草图。",
+    next_suggestion: "保持每周一次短练习。",
+    empty_state: null,
+    sentence_training_summary: "本周完成 3 次句子挑战，主要练习了“动作描写”和“扩句”。",
+  });
+
+  await renderSummaryPage("s1");
+
+  expect(await screen.findByText("句子训练 3 次")).toBeInTheDocument();
+  expect(
+    screen.getByText("本周完成 3 次句子挑战，主要练习了“动作描写”和“扩句”。"),
+  ).toBeInTheDocument();
 });
 
 test("summary page renders an error state when summary loading fails", async () => {

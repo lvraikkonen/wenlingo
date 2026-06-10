@@ -61,6 +61,12 @@ def create_alpha_child(client, parent_id: str, nickname: str = " 小文 ", grade
     return response.json()["child"]
 
 
+def parent_students(session, parent_id: str):
+    return session.exec(
+        select(StudentProfile).where(StudentProfile.parent_id == parent_id)
+    ).all()
+
+
 def test_create_alpha_parent_persists_real_parent_and_returns_children_url(session, client):
     create_invite(session)
 
@@ -242,6 +248,46 @@ def test_alpha_summary_with_sentence_training_but_no_assessment_is_not_empty(
     assert payload["practice_counts"]["sentence_trainings"] == 1
     assert payload["empty_state"] is None
     assert payload["next_suggestion"] == "继续练习把句子写具体。"
+
+
+def test_alpha_summary_counts_only_completed_sentence_training_and_reports_focus(
+    session, client
+):
+    parent = seed_demo_data(session)
+    student = parent_students(session, parent.id)[0]
+    session.add(
+        SentenceTraining(
+            student_id=student.id,
+            source_sentence="小猫跑了。",
+            upgraded_sentence="小猫飞快地跑过草地。",
+            focus="动作描写",
+            status="completed",
+            target_skill="action_expression",
+            ai_feedback={},
+        )
+    )
+    session.add(
+        SentenceTraining(
+            student_id=student.id,
+            source_sentence="花开了。",
+            upgraded_sentence="",
+            focus="扩句",
+            status="generated",
+            target_skill="expand_sentence",
+            ai_feedback={},
+        )
+    )
+    session.commit()
+
+    response = client.get(
+        f"/api/alpha/parents/{parent.id}/children/{student.id}/summary"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["practice_counts"]["sentence_trainings"] == 1
+    assert payload["sentence_training_summary"] == "本周完成 1 次句子挑战，主要练习了“动作描写”。"
+    assert "小猫飞快地跑过草地" not in str(payload)
 
 
 def test_alpha_summary_after_assessment_returns_counts_and_ability_changes(

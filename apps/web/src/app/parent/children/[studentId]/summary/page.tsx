@@ -142,6 +142,11 @@ export default function ParentChildSummaryPage({ params }: SummaryPageProps) {
                     <p className="mt-2 text-xl font-bold">
                       句子训练 {data.practice_counts.sentence_trainings} 次
                     </p>
+                    {data.sentence_training_summary ? (
+                      <p className="mt-2 text-sm text-[var(--wen-muted)]">
+                        {data.sentence_training_summary}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="rounded-lg border border-[var(--wen-border)] bg-white p-5 shadow-sm">
                     <p className="text-sm font-semibold text-[var(--wen-muted)]">
