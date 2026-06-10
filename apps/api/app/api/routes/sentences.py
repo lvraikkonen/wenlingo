@@ -22,7 +22,10 @@ from app.services.ai_tasks import (
 from app.services.gamification import settle_task
 from app.services.llm_provider import LLMProvider
 from app.services.recommendations import choose_today_tasks
-from app.services.sentence_challenges import deterministic_challenge_ability_delta
+from app.services.sentence_challenges import (
+    CHALLENGE_TYPE_SPECS,
+    deterministic_challenge_ability_delta,
+)
 
 router = APIRouter(prefix="/api/students", tags=["sentences"])
 
@@ -36,6 +39,10 @@ class SentenceTrainingCreate(BaseModel):
     source_sentence: str = Field(min_length=1, max_length=500)
     upgraded_sentence: str = Field(min_length=1, max_length=500)
     focus: SentenceFocus
+
+
+class SentenceChallengeGenerate(BaseModel):
+    pass
 
 
 class SentenceChallengeComplete(BaseModel):
@@ -113,6 +120,7 @@ def _challenge_event_payload(
 )
 async def create_sentence_challenge(
     student_id: str,
+    _request: SentenceChallengeGenerate,
     session: Session = Depends(get_db_session),
     provider: LLMProvider = Depends(get_llm_provider),
     settings: Settings = Depends(get_settings),
@@ -204,6 +212,12 @@ async def complete_sentence_challenge(
         raise HTTPException(status_code=404, detail="sentence training not found")
     if training.status == "completed":
         raise HTTPException(status_code=409, detail="sentence challenge already completed")
+    if (
+        training.status != "generated"
+        or not training.challenge_prompt
+        or training.target_skill not in CHALLENGE_TYPE_SPECS
+    ):
+        raise HTTPException(status_code=404, detail="sentence training not found")
 
     feedback_result = await sentence_challenge_feedback(
         provider=provider,

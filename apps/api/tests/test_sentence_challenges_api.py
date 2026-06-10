@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,7 +10,10 @@ from app.domain.enums import StudentPersona, TaskType
 from app.domain.models import (
     AbilityHistory,
     AbilityProfile,
+    GameEvent,
     LLMCallLog,
+    ParentAccount,
+    ParentSession,
     ParentUser,
     ProductEvent,
     SentenceTraining,
@@ -18,8 +21,9 @@ from app.domain.models import (
 )
 from app.domain.seed import seed_demo_data
 from app.main import create_app
-from app.services.sentence_challenges import fallback_challenge_feedback
+from app.services.auth_security import hash_secret
 from app.services.llm_provider import LLMProviderResponse
+from app.services.sentence_challenges import fallback_challenge_feedback
 
 
 CHALLENGE_RESPONSES = {
@@ -97,6 +101,42 @@ def challenge_client(session, provider, settings=None):
     return app, TestClient(app)
 
 
+def link_parent_session(session, parent, token="session-token"):
+    account = ParentAccount(
+        email_normalized=f"{parent.id}@example.com",
+        email_verified_at=datetime.now(UTC),
+        last_login_at=datetime.now(UTC),
+    )
+    session.add(account)
+    session.flush()
+    parent.account_id = account.id
+    parent.account_linked_at = datetime.now(UTC)
+    session.add(parent)
+    session.add(
+        ParentSession(
+            account_id=account.id,
+            token_hash=hash_secret(
+                token,
+                purpose="session-token",
+                pepper="test-pepper",
+            ),
+            expires_at=datetime.now(UTC) + timedelta(days=30),
+        )
+    )
+    session.commit()
+    return token
+
+
+def test_challenge_generation_declares_empty_request_body_contract():
+    app = create_app()
+
+    request_body = app.openapi()["paths"]["/api/students/{student_id}/sentence-challenges"][
+        "post"
+    ].get("requestBody")
+
+    assert request_body is not None
+
+
 def test_challenge_generation_persists_generated_training(session):
     parent = seed_demo_data(session)
     student = parent_students(session, parent.id)[0]
@@ -104,7 +144,10 @@ def test_challenge_generation_persists_generated_training(session):
     app, client = challenge_client(session, provider)
 
     with client:
-        response = client.post(f"/api/students/{student.id}/sentence-challenges")
+        response = client.post(
+            f"/api/students/{student.id}/sentence-challenges",
+            json={},
+        )
     app.dependency_overrides.clear()
 
     assert response.status_code == 201
@@ -157,7 +200,10 @@ def test_challenge_generation_cycles_target_skill_by_completed_count(
     app, client = challenge_client(session, provider)
 
     with client:
-        response = client.post(f"/api/students/{student.id}/sentence-challenges")
+        response = client.post(
+            f"/api/students/{student.id}/sentence-challenges",
+            json={},
+        )
     app.dependency_overrides.clear()
 
     assert response.status_code == 201
@@ -175,7 +221,10 @@ def test_challenge_generation_uses_student_grade_label(session):
     app, client = challenge_client(session, provider)
 
     with client:
-        response = client.post(f"/api/students/{student.id}/sentence-challenges")
+        response = client.post(
+            f"/api/students/{student.id}/sentence-challenges",
+            json={},
+        )
     app.dependency_overrides.clear()
 
     assert response.status_code == 201
@@ -206,7 +255,10 @@ def test_challenge_completion_updates_same_row_and_settles_once(session):
     app, client = challenge_client(session, provider)
 
     with client:
-        generation = client.post(f"/api/students/{student.id}/sentence-challenges")
+        generation = client.post(
+            f"/api/students/{student.id}/sentence-challenges",
+            json={},
+        )
         training_id = generation.json()["challenge"]["id"]
         response = client.post(
             f"/api/students/{student.id}/sentences/{training_id}/complete",
@@ -229,6 +281,52 @@ def test_challenge_completion_updates_same_row_and_settles_once(session):
         ("expression", 3, TaskType.sentence),
         ("observation", 2, TaskType.sentence),
     }
+
+
+def test_auth_required_challenge_generation_rejects_unauthenticated_request(session):
+    parent = seed_demo_data(session)
+    student = parent_students(session, parent.id)[0]
+    provider = ChallengeProvider()
+    app, client = challenge_client(
+        session,
+        provider,
+        Settings(auth_required_for_alpha=True, auth_secret_pepper="test-pepper"),
+    )
+
+    with client:
+        response = client.post(
+            f"/api/students/{student.id}/sentence-challenges",
+            json={},
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "parent session required"
+    assert provider.calls == []
+
+
+def test_auth_required_challenge_generation_accepts_empty_json_body(session):
+    parent = seed_demo_data(session)
+    student = parent_students(session, parent.id)[0]
+    token = link_parent_session(session, parent)
+    provider = ChallengeProvider()
+    app, client = challenge_client(
+        session,
+        provider,
+        Settings(auth_required_for_alpha=True, auth_secret_pepper="test-pepper"),
+    )
+
+    with client:
+        response = client.post(
+            f"/api/students/{student.id}/sentence-challenges",
+            json={},
+            cookies={"wenlingo_parent_session": token},
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert response.json()["challenge"]["target_skill"] == "expand_sentence"
+    assert provider.calls == ["sentence_challenge_generation"]
 
 
 def test_repeated_challenge_completion_returns_409(session):
@@ -306,6 +404,48 @@ def test_challenge_completion_rejects_cross_family_training_with_404(session):
     assert response.json()["detail"] == "sentence training not found"
 
 
+def test_challenge_completion_rejects_malformed_generated_row_without_award(session):
+    parent = seed_demo_data(session)
+    student = parent_students(session, parent.id)[0]
+    ability = session.exec(
+        select(AbilityProfile).where(AbilityProfile.student_id == student.id)
+    ).one()
+    expression_before = ability.expression
+    observation_before = ability.observation
+    training = SentenceTraining(
+        student_id=student.id,
+        source_sentence="小猫跑了。",
+        focus="动作描写",
+        status="generated",
+        challenge_prompt="请把句子写具体，加上动作和样子。",
+        hint="可以写小猫怎么跑。",
+        target_skill="",
+    )
+    session.add(training)
+    session.commit()
+    provider = ChallengeProvider()
+    app, client = challenge_client(session, provider)
+
+    with client:
+        response = client.post(
+            f"/api/students/{student.id}/sentences/{training.id}/complete",
+            json={"upgraded_sentence": "小猫瞪大眼睛，飞快地跑过草地。"},
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "sentence training not found"
+    assert provider.calls == []
+    session.refresh(training)
+    session.refresh(ability)
+    assert training.status == "generated"
+    assert training.upgraded_sentence == ""
+    assert ability.expression == expression_before
+    assert ability.observation == observation_before
+    assert session.exec(select(AbilityHistory)).all() == []
+    assert session.exec(select(GameEvent)).all() == []
+
+
 def test_challenge_completion_rejects_short_answer(session):
     parent = seed_demo_data(session)
     student = parent_students(session, parent.id)[0]
@@ -364,7 +504,10 @@ def test_daily_generation_limit_returns_rest_message_without_provider_call(sessi
     )
 
     with client:
-        response = client.post(f"/api/students/{student.id}/sentence-challenges")
+        response = client.post(
+            f"/api/students/{student.id}/sentence-challenges",
+            json={},
+        )
     app.dependency_overrides.clear()
 
     assert response.status_code == 429
@@ -401,7 +544,10 @@ def test_feedback_provider_failure_still_completes_with_fallback_feedback(sessio
     app, client = challenge_client(session, provider)
 
     with client:
-        generation = client.post(f"/api/students/{student.id}/sentence-challenges")
+        generation = client.post(
+            f"/api/students/{student.id}/sentence-challenges",
+            json={},
+        )
         training_id = generation.json()["challenge"]["id"]
         response = client.post(
             f"/api/students/{student.id}/sentences/{training_id}/complete",
