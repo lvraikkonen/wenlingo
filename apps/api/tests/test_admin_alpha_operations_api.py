@@ -298,3 +298,49 @@ def test_admin_disable_refuses_demo_parent_account_shape(session, monkeypatch):
     assert response.status_code == 409
     assert session.get(ParentAccount, account.id).status == "active"
     assert demo_login.status_code == 200
+
+
+def test_admin_overview_hides_revoked_invites_by_default(session, monkeypatch):
+    issued = AlphaInviteCode(code_hash="issued-overview-hash", label="Issued", status="issued")
+    revoked = AlphaInviteCode(
+        code_hash="revoked-overview-hash",
+        label="Revoked",
+        status="revoked",
+    )
+    session.add(issued)
+    session.add(revoked)
+    session.commit()
+    app = create_admin_client(session, monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/admin/alpha/overview",
+            headers={"X-Alpha-Admin-Token": "secret"},
+        )
+
+    assert response.status_code == 200
+    invite_ids = [row["invite_id"] for row in response.json()["families"]]
+    assert invite_ids == [issued.id]
+
+
+def test_admin_overview_can_include_revoked_invites(session, monkeypatch):
+    issued = AlphaInviteCode(code_hash="issued-include-hash", label="Issued", status="issued")
+    revoked = AlphaInviteCode(
+        code_hash="revoked-include-hash",
+        label="Revoked",
+        status="revoked",
+    )
+    session.add(issued)
+    session.add(revoked)
+    session.commit()
+    app = create_admin_client(session, monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/admin/alpha/overview?include_revoked=true",
+            headers={"X-Alpha-Admin-Token": "secret"},
+        )
+
+    assert response.status_code == 200
+    statuses = [row["invite_status"] for row in response.json()["families"]]
+    assert statuses == ["issued", "revoked"]

@@ -3,7 +3,7 @@ from datetime import datetime
 import secrets
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
@@ -15,6 +15,7 @@ from app.domain.models import (
     AlphaInviteCode,
     Assessment,
     FeedbackReaction,
+    LLMCallLog,
     ParentAccount,
     ParentFeedback,
     ParentSession,
@@ -347,9 +348,62 @@ def delete_admin_alpha_test_accounts(
     }
 
 
+@router.get("/ai-usage", dependencies=[Depends(require_alpha_admin_token)])
+def alpha_admin_ai_usage(session: Session = Depends(get_db_session)):
+    aggregates: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for log in session.exec(select(LLMCallLog)).all():
+        usage_date = log.created_at.date().isoformat()
+        key = (usage_date, log.task_name, log.model)
+        row = aggregates.setdefault(
+            key,
+            {
+                "date": usage_date,
+                "task_type": log.task_name,
+                "model": log.model,
+                "call_count": 0,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "estimated_cost": 0.0,
+                "failure_count": 0,
+                "daily_limit_hit_count": 0,
+            },
+        )
+        row["call_count"] += 1
+        row["prompt_tokens"] += log.prompt_tokens
+        row["completion_tokens"] += log.completion_tokens
+        row["total_tokens"] += log.total_tokens
+        row["estimated_cost"] += log.estimated_cost
+        if not log.validation_ok or log.error_message:
+            row["failure_count"] += 1
+
+    limit_hits: Counter[tuple[str, str]] = Counter()
+    events = session.exec(
+        select(ProductEvent).where(ProductEvent.event_type == "ai_daily_limit_reached")
+    ).all()
+    for event in events:
+        task_type = event.payload.get("task_type")
+        if isinstance(task_type, str) and task_type:
+            limit_hits[(event.created_at.date().isoformat(), task_type)] += 1
+
+    rows = []
+    for key in sorted(aggregates):
+        row = aggregates[key]
+        row["daily_limit_hit_count"] = limit_hits[(row["date"], row["task_type"])]
+        row["estimated_cost"] = round(row["estimated_cost"], 6)
+        rows.append(row)
+    return {"usage": rows}
+
+
 @router.get("/overview", dependencies=[Depends(require_alpha_admin_token)])
-def alpha_admin_overview(session: Session = Depends(get_db_session)):
-    invites = session.exec(select(AlphaInviteCode)).all()
+def alpha_admin_overview(
+    include_revoked: bool = Query(default=False),
+    session: Session = Depends(get_db_session),
+):
+    statement = select(AlphaInviteCode)
+    if not include_revoked:
+        statement = statement.where(AlphaInviteCode.status != "revoked")
+    invites = session.exec(statement).all()
     rows: list[dict[str, Any]] = []
 
     for invite in sorted(invites, key=lambda row: (row.created_at, row.id)):
