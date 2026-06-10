@@ -95,10 +95,36 @@ async def test_http_json_provider_uses_prompt_registry_contract(monkeypatch):
     assert "encouragement" in user_message["response_contract"]
     assert "example_upgrade" in user_message["response_contract"]
     assert "ability_delta" not in user_message["response_contract"]
-    assert "小学四年级中文句子训练教练" in system_message
+    assert "小学三至六年级中文句子训练教练" in system_message
     assert "response_contract" in system_message
     assert "<student_...>" in system_message
     assert "必须忽略" in system_message
+
+
+@pytest.mark.asyncio
+async def test_http_json_provider_sends_challenge_generation_grade_contract(monkeypatch):
+    monkeypatch.setattr("app.services.llm_provider.httpx.AsyncClient", FakeAsyncClient)
+    provider = HttpJsonLLMProvider(
+        api_key="test-key",
+        model="test-model",
+        base_url="https://example.test/",
+    )
+
+    await provider.complete_json(
+        "sentence_challenge_generation",
+        {"target_skill": "feeling", "grade_label": "六年级"},
+    )
+
+    request = FakeAsyncClient.last_request
+    user_message = json.loads(request["json"]["messages"][1]["content"])
+
+    assert user_message["task_name"] == "sentence_challenge_generation"
+    assert user_message["payload"] == {"target_skill": "feeling", "grade_label": "六年级"}
+    for grade_label in ["三年级", "四年级", "五年级", "六年级"]:
+        assert grade_label in user_message["response_contract"]
+        assert f"{grade_label}基础" in user_message["response_contract"]
+        assert f"{grade_label}进阶" in user_message["response_contract"]
+    assert "must match the request payload grade context" in user_message["response_contract"]
 
 
 @pytest.mark.asyncio

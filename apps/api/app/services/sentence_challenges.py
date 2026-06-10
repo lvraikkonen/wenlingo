@@ -14,6 +14,9 @@ class ChallengeTypeSpec:
     ability_delta: Mapping[str, int]
 
 
+SUPPORTED_SENTENCE_CHALLENGE_GRADE_LABELS = ("三年级", "四年级", "五年级", "六年级")
+
+
 CHALLENGE_TYPE_SPECS = {
     "expand_sentence": ChallengeTypeSpec(
         target_skill="expand_sentence",
@@ -46,7 +49,12 @@ FALLBACK_SOURCE_SENTENCES = {
 }
 
 
-def _challenge_type_spec(target_skill: str) -> ChallengeTypeSpec:
+def validate_sentence_challenge_grade_label(grade_label: str) -> None:
+    if grade_label not in SUPPORTED_SENTENCE_CHALLENGE_GRADE_LABELS:
+        raise ValueError(f"Unsupported sentence challenge grade_label: {grade_label}")
+
+
+def challenge_type_spec(target_skill: str) -> ChallengeTypeSpec:
     try:
         return CHALLENGE_TYPE_SPECS[target_skill]
     except KeyError as exc:
@@ -56,24 +64,25 @@ def _challenge_type_spec(target_skill: str) -> ChallengeTypeSpec:
 
 
 def deterministic_challenge_ability_delta(target_skill: str) -> dict[str, int]:
-    return dict(_challenge_type_spec(target_skill).ability_delta)
+    return dict(challenge_type_spec(target_skill).ability_delta)
 
 
-def fallback_challenge(target_skill: str) -> SentenceChallenge:
-    spec = _challenge_type_spec(target_skill)
+def fallback_challenge(target_skill: str, grade_label: str) -> SentenceChallenge:
+    validate_sentence_challenge_grade_label(grade_label)
+    spec = challenge_type_spec(target_skill)
     return SentenceChallenge(
         source_sentence=FALLBACK_SOURCE_SENTENCES[target_skill],
         challenge_prompt=spec.prompt,
         hint=spec.hint,
         target_skill=spec.target_skill,
         focus=spec.focus,
-        difficulty_label="四年级基础",
-        grade_label="四年级",
+        difficulty_label=f"{grade_label}基础",
+        grade_label=grade_label,
     )
 
 
 def fallback_challenge_feedback(target_skill: str) -> SentenceChallengeFeedback:
-    _challenge_type_spec(target_skill)
+    challenge_type_spec(target_skill)
     if target_skill == "feeling":
         return SentenceChallengeFeedback(
             encouragement="你把心情写出来了！",

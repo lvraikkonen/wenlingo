@@ -7,7 +7,17 @@ NonBlankStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length
 
 ChallengeSkill = Literal["expand_sentence", "action_expression", "feeling"]
 ChallengeFocus = Literal["扩句", "动作描写", "心理感受"]
-DifficultyLabel = Literal["四年级基础", "四年级进阶"]
+ChallengeGrade = Literal["三年级", "四年级", "五年级", "六年级"]
+DifficultyLabel = Literal[
+    "三年级基础",
+    "三年级进阶",
+    "四年级基础",
+    "四年级进阶",
+    "五年级基础",
+    "五年级进阶",
+    "六年级基础",
+    "六年级进阶",
+]
 
 
 class RevisionTask(BaseModel):
@@ -47,7 +57,7 @@ class SentenceChallenge(BaseModel):
     target_skill: ChallengeSkill
     focus: ChallengeFocus
     difficulty_label: DifficultyLabel
-    grade_label: Literal["四年级"]
+    grade_label: ChallengeGrade
 
 
 class SentenceChallengeFeedback(BaseModel):

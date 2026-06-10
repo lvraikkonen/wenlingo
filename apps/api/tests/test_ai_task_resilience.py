@@ -169,14 +169,15 @@ class RecordingChallengeGenerationProvider:
 
     async def complete_json(self, task_name, payload):
         self.calls.append((task_name, payload))
+        grade_label = payload["grade_label"]
         parsed = {
             "source_sentence": "小猫跑了。",
             "challenge_prompt": "请把句子写具体，加上动作和样子。",
             "hint": "可以写小猫怎么跑、跑到哪里、看起来怎么样。",
             "target_skill": "action_expression",
             "focus": "动作描写",
-            "difficulty_label": "四年级基础",
-            "grade_label": "四年级",
+            "difficulty_label": f"{grade_label}基础",
+            "grade_label": grade_label,
         }
         return LLMProviderResponse(
             parsed_json=parsed,
@@ -229,6 +230,58 @@ class WrongSkillChallengeGenerationProvider:
             "target_skill": "feeling",
             "focus": "心理感受",
             "difficulty_label": "四年级基础",
+            "grade_label": "四年级",
+        }
+        return LLMProviderResponse(
+            parsed_json=parsed,
+            raw_response=json.dumps(parsed, ensure_ascii=False),
+            provider=self.provider_name,
+            model=self.model_name,
+        )
+
+
+class WrongGradeChallengeGenerationProvider:
+    provider_name = "fake"
+    model_name = "wrong-grade-challenge-generation"
+
+    def __init__(self):
+        self.calls = 0
+
+    async def complete_json(self, task_name, payload):
+        self.calls += 1
+        parsed = {
+            "source_sentence": "小猫跑了。",
+            "challenge_prompt": "请把句子写具体，加上动作和样子。",
+            "hint": "可以写小猫怎么跑、跑到哪里、看起来怎么样。",
+            "target_skill": "action_expression",
+            "focus": "动作描写",
+            "difficulty_label": "五年级基础",
+            "grade_label": "五年级",
+        }
+        return LLMProviderResponse(
+            parsed_json=parsed,
+            raw_response=json.dumps(parsed, ensure_ascii=False),
+            provider=self.provider_name,
+            model=self.model_name,
+        )
+
+
+class WrongDifficultyPrefixChallengeGenerationProvider:
+    provider_name = "fake"
+    model_name = "wrong-difficulty-prefix-challenge-generation"
+
+    def __init__(self):
+        self.calls = 0
+
+    async def complete_json(self, task_name, payload):
+        self.calls += 1
+        parsed = {
+            "source_sentence": "小猫跑了。",
+            "challenge_prompt": "请把句子写具体，加上动作和样子。",
+            "hint": "可以写小猫怎么跑、跑到哪里、看起来怎么样。",
+            "target_skill": "action_expression",
+            "focus": "动作描写",
+            "difficulty_label": "五年级基础",
             "grade_label": "四年级",
         }
         return LLMProviderResponse(
@@ -528,16 +581,34 @@ async def test_sentence_challenge_generation_sends_task_name_and_payload():
     result = await sentence_challenge_generation(
         provider=provider,
         target_skill="action_expression",
-        grade_label="四年级",
+        grade_label="五年级",
     )
 
     assert provider.calls == [
         (
             "sentence_challenge_generation",
-            {"target_skill": "action_expression", "grade_label": "四年级"},
+            {"target_skill": "action_expression", "grade_label": "五年级"},
         )
     ]
     assert result.output.focus == "动作描写"
+    assert result.output.grade_label == "五年级"
+    assert result.output.difficulty_label == "五年级基础"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("grade_label", ["三年级", "四年级", "五年级", "六年级"])
+async def test_sentence_challenge_generation_accepts_all_supported_grades(grade_label):
+    provider = RecordingChallengeGenerationProvider()
+
+    result = await sentence_challenge_generation(
+        provider=provider,
+        target_skill="action_expression",
+        grade_label=grade_label,
+    )
+
+    assert provider.calls[0][1]["grade_label"] == grade_label
+    assert result.output.grade_label == grade_label
+    assert result.output.difficulty_label == f"{grade_label}基础"
 
 
 @pytest.mark.asyncio
@@ -590,12 +661,43 @@ async def test_sentence_challenge_generation_wrong_supported_skill_returns_reque
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider", "expected_message"),
+    [
+        (WrongGradeChallengeGenerationProvider(), "grade_label"),
+        (WrongDifficultyPrefixChallengeGenerationProvider(), "difficulty_label"),
+    ],
+)
+async def test_sentence_challenge_generation_mismatched_grade_context_falls_back(
+    provider,
+    expected_message,
+    session,
+):
+    result = await sentence_challenge_generation(
+        provider=provider,
+        target_skill="action_expression",
+        grade_label="四年级",
+        session=session,
+        student_id="s1",
+    )
+
+    saved = session.exec(select(LLMCallLog)).one()
+    assert provider.calls == 2
+    assert result.status == "fallback"
+    assert result.output.target_skill == "action_expression"
+    assert result.output.grade_label == "四年级"
+    assert result.output.difficulty_label == "四年级基础"
+    assert saved.validation_ok is False
+    assert expected_message in saved.error_message
+
+
+@pytest.mark.asyncio
 async def test_sentence_challenge_generation_rejects_unsupported_grade_before_provider():
     with pytest.raises(ValueError, match="Unsupported sentence challenge grade_label"):
         await sentence_challenge_generation(
             provider=MustNotCallProvider(),
             target_skill="action_expression",
-            grade_label="三年级",
+            grade_label="二年级",
         )
 
 

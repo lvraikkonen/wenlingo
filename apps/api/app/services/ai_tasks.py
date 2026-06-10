@@ -20,7 +20,11 @@ from app.services.llm_contracts import (
 )
 from app.services.llm_provider import LLMProvider
 from app.services.llm_usage import llm_daily_limit_reached
-from app.services.sentence_challenges import fallback_challenge, fallback_challenge_feedback
+from app.services.sentence_challenges import (
+    fallback_challenge,
+    fallback_challenge_feedback,
+    validate_sentence_challenge_grade_label,
+)
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -182,18 +186,28 @@ def _token_count(usage: dict[str, int] | None, key: str) -> int:
 
 
 def _validate_sentence_challenge_grade_label(grade_label: str) -> None:
-    if grade_label != "四年级":
-        raise ValueError(f"Unsupported sentence challenge grade_label: {grade_label}")
+    validate_sentence_challenge_grade_label(grade_label)
 
 
-def _validate_sentence_challenge_target(
+def _validate_sentence_challenge_response_context(
     challenge: SentenceChallenge,
     requested_target_skill: str,
+    requested_grade_label: str,
 ) -> None:
     if challenge.target_skill != requested_target_skill:
         raise LLMTaskValidationError(
             "sentence challenge target_skill mismatch: "
             f"requested {requested_target_skill}, got {challenge.target_skill}"
+        )
+    if challenge.grade_label != requested_grade_label:
+        raise LLMTaskValidationError(
+            "sentence challenge grade_label mismatch: "
+            f"requested {requested_grade_label}, got {challenge.grade_label}"
+        )
+    if not challenge.difficulty_label.startswith(requested_grade_label):
+        raise LLMTaskValidationError(
+            "sentence challenge difficulty_label grade mismatch: "
+            f"requested {requested_grade_label}, got {challenge.difficulty_label}"
         )
 
 
@@ -403,12 +417,13 @@ async def sentence_challenge_generation(
         prompt_key=prompt.prompt_key,
         payload={"target_skill": target_skill, "grade_label": grade_label},
         output_model=SentenceChallenge,
-        fallback=fallback_challenge(target_skill),
+        fallback=fallback_challenge(target_skill, grade_label),
         input_summary=f"句子挑战生成；年级：{grade_label}；目标：{target_skill}",
         prompt_version=prompt.version,
-        validation_hook=lambda challenge: _validate_sentence_challenge_target(
+        validation_hook=lambda challenge: _validate_sentence_challenge_response_context(
             challenge,
             target_skill,
+            grade_label,
         ),
         daily_limit_enabled=daily_limit_enabled,
         daily_limit_per_student_task=daily_limit_per_student_task,

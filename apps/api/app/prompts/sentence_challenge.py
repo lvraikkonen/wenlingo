@@ -15,8 +15,10 @@ SENTENCE_CHALLENGE_GENERATION_PROMPT = register_prompt(
             "hint: 10 to 80 Chinese characters, observation angle only, no full answer; "
             "target_skill: one of expand_sentence, action_expression, feeling; "
             "focus: one of 扩句, 动作描写, 心理感受; "
-            "difficulty_label: one of 四年级基础, 四年级进阶; "
-            "grade_label: 四年级."
+            "difficulty_label: one of 三年级基础, 三年级进阶, 四年级基础, 四年级进阶, "
+            "五年级基础, 五年级进阶, 六年级基础, 六年级进阶; "
+            "grade_label: one of 三年级, 四年级, 五年级, 六年级; "
+            "grade_label and difficulty_label must match the request payload grade context."
         ),
     )
 )

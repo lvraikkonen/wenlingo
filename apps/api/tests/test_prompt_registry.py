@@ -33,6 +33,17 @@ def test_unknown_prompt_key_raises_key_error():
         get_prompt("writing_castle_outline")
 
 
+def test_sentence_challenge_generation_contract_supports_alpha_grades():
+    contract = get_prompt("sentence_challenge_generation").response_contract
+
+    for grade_label in ["三年级", "四年级", "五年级", "六年级"]:
+        assert grade_label in contract
+        assert f"{grade_label}基础" in contract
+        assert f"{grade_label}进阶" in contract
+    assert "grade_label: 四年级." not in contract
+    assert "must match the request payload grade context" in contract
+
+
 def test_ensure_prompt_registry_loaded_imports_prompt_modules_once(monkeypatch):
     imported_modules = []
     prompt_modules = ("app.prompts.alpha", "app.prompts.beta")

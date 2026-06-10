@@ -61,18 +61,36 @@ def test_pre_writing_contracts_validate_material_card_and_outline_result():
     assert outline.sections[0] == "开头交代时间地点"
 
 
-def test_sentence_challenge_contract_accepts_spec_shape():
+@pytest.mark.parametrize(
+    "grade_label",
+    ["三年级", "四年级", "五年级", "六年级"],
+)
+def test_sentence_challenge_contract_accepts_supported_grade_labels(grade_label):
     challenge = SentenceChallenge(
         source_sentence="小猫跑了。",
         challenge_prompt="请把句子写具体，加上动作和样子。",
         hint="可以写小猫怎么跑、跑到哪里、看起来怎么样。",
         target_skill="action_expression",
         focus="动作描写",
-        difficulty_label="四年级基础",
-        grade_label="四年级",
+        difficulty_label=f"{grade_label}基础",
+        grade_label=grade_label,
     )
 
     assert challenge.target_skill == "action_expression"
+    assert challenge.grade_label == grade_label
+
+
+def test_sentence_challenge_contract_rejects_unsupported_grade_label():
+    with pytest.raises(ValidationError):
+        SentenceChallenge(
+            source_sentence="小猫跑了。",
+            challenge_prompt="请把句子写具体，加上动作和样子。",
+            hint="可以写小猫怎么跑、跑到哪里、看起来怎么样。",
+            target_skill="action_expression",
+            focus="动作描写",
+            difficulty_label="四年级基础",
+            grade_label="二年级",
+        )
 
 
 def test_sentence_challenge_contract_rejects_unknown_target_skill():
