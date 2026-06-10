@@ -16,6 +16,8 @@ from app.services.llm_contracts import (
     OutlineResult,
     ReportContent,
     RevisionTask,
+    SentenceChallenge,
+    SentenceChallengeFeedback,
     SentenceFeedback,
 )
 from app.services.llm_provider import LLMProviderResponse, MockLLMProvider, response_contract_for_task
@@ -57,6 +59,44 @@ def test_pre_writing_contracts_validate_material_card_and_outline_result():
 
     assert len(material.questions) == 3
     assert outline.sections[0] == "开头交代时间地点"
+
+
+def test_sentence_challenge_contract_accepts_spec_shape():
+    challenge = SentenceChallenge(
+        source_sentence="小猫跑了。",
+        challenge_prompt="请把句子写具体，加上动作和样子。",
+        hint="可以写小猫怎么跑、跑到哪里、看起来怎么样。",
+        target_skill="action_expression",
+        focus="动作描写",
+        difficulty_label="四年级基础",
+        grade_label="四年级",
+    )
+
+    assert challenge.target_skill == "action_expression"
+
+
+def test_sentence_challenge_contract_rejects_unknown_target_skill():
+    with pytest.raises(ValidationError):
+        SentenceChallenge(
+            source_sentence="小猫跑了。",
+            challenge_prompt="请把句子写具体，加上动作和样子。",
+            hint="可以写小猫怎么跑、跑到哪里、看起来怎么样。",
+            target_skill="metaphor",
+            focus="动作描写",
+            difficulty_label="四年级基础",
+            grade_label="四年级",
+        )
+
+
+def test_sentence_challenge_feedback_contract_is_short():
+    feedback = SentenceChallengeFeedback(
+        encouragement="你写得很有画面感！",
+        highlight="你加上了飞快地冲过去，动作更清楚了。",
+        suggestion="还可以加一点表情或心情。",
+        example_upgrade="小狗瞪大眼睛，飞快地冲过草地。",
+    )
+
+    assert feedback.example_upgrade.endswith("。")
 
 
 @pytest.mark.parametrize(

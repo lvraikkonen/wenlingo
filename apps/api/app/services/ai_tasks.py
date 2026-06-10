@@ -14,10 +14,13 @@ from app.services.llm_contracts import (
     EssayFeedback,
     EssayRevisionComparison,
     GhostwritingCheck,
+    SentenceChallenge,
+    SentenceChallengeFeedback,
     SentenceFeedback,
 )
 from app.services.llm_provider import LLMProvider
 from app.services.llm_usage import llm_daily_limit_reached
+from app.services.sentence_challenges import fallback_challenge, fallback_challenge_feedback
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -344,6 +347,80 @@ async def sentence_upgrade_feedback(
         prompt_version=_effective_prompt_version(prompt, prompt_version),
         prompt_key=prompt.prompt_key,
         student_id=student_id,
+        daily_limit_enabled=daily_limit_enabled,
+        daily_limit_per_student_task=daily_limit_per_student_task,
+        daily_limit_timezone=daily_limit_timezone,
+        input_cost_per_1k_tokens=input_cost_per_1k_tokens,
+        output_cost_per_1k_tokens=output_cost_per_1k_tokens,
+    )
+
+
+async def sentence_challenge_generation(
+    provider: LLMProvider,
+    target_skill: str,
+    grade_label: str,
+    session: Session | None = None,
+    student_id: str | None = None,
+    daily_limit_enabled: bool = False,
+    daily_limit_per_student_task: int = 10,
+    daily_limit_timezone: str = "Asia/Shanghai",
+    input_cost_per_1k_tokens: float = 0.0,
+    output_cost_per_1k_tokens: float = 0.0,
+) -> LLMTaskResult[SentenceChallenge]:
+    prompt = get_prompt("sentence_challenge_generation")
+    return await run_validated_llm_task(
+        provider=provider,
+        session=session,
+        student_id=student_id,
+        task_type=TaskType.sentence,
+        task_name=prompt.prompt_key,
+        prompt_key=prompt.prompt_key,
+        payload={"target_skill": target_skill, "grade_label": grade_label},
+        output_model=SentenceChallenge,
+        fallback=fallback_challenge(target_skill),
+        input_summary=f"句子挑战生成；年级：{grade_label}；目标：{target_skill}",
+        prompt_version=prompt.version,
+        daily_limit_enabled=daily_limit_enabled,
+        daily_limit_per_student_task=daily_limit_per_student_task,
+        daily_limit_timezone=daily_limit_timezone,
+        input_cost_per_1k_tokens=input_cost_per_1k_tokens,
+        output_cost_per_1k_tokens=output_cost_per_1k_tokens,
+    )
+
+
+async def sentence_challenge_feedback(
+    provider: LLMProvider,
+    target_skill: str,
+    source_sentence: str,
+    upgraded_sentence: str,
+    session: Session | None = None,
+    student_id: str | None = None,
+    daily_limit_enabled: bool = False,
+    daily_limit_per_student_task: int = 10,
+    daily_limit_timezone: str = "Asia/Shanghai",
+    input_cost_per_1k_tokens: float = 0.0,
+    output_cost_per_1k_tokens: float = 0.0,
+) -> LLMTaskResult[SentenceChallengeFeedback]:
+    prompt = get_prompt("sentence_challenge_feedback")
+    return await run_validated_llm_task(
+        provider=provider,
+        session=session,
+        student_id=student_id,
+        task_type=TaskType.sentence,
+        task_name=prompt.prompt_key,
+        prompt_key=prompt.prompt_key,
+        payload={
+            "target_skill": target_skill,
+            "source_sentence": _wrap_student_payload("student_sentence", source_sentence),
+            "upgraded_sentence": _wrap_student_payload("student_sentence", upgraded_sentence),
+        },
+        output_model=SentenceChallengeFeedback,
+        fallback=fallback_challenge_feedback(target_skill),
+        input_summary=(
+            f"句子挑战反馈；目标：{target_skill}；"
+            f"原句长度：{len(source_sentence)}；升级句长度：{len(upgraded_sentence)}"
+        ),
+        prompt_version=prompt.version,
         daily_limit_enabled=daily_limit_enabled,
         daily_limit_per_student_task=daily_limit_per_student_task,
         daily_limit_timezone=daily_limit_timezone,

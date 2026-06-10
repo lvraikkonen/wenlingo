@@ -1,9 +1,13 @@
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 
 NonBlankStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+ChallengeSkill = Literal["expand_sentence", "action_expression", "feeling"]
+ChallengeFocus = Literal["扩句", "动作描写", "心理感受"]
+DifficultyLabel = Literal["四年级基础", "四年级进阶"]
 
 
 class RevisionTask(BaseModel):
@@ -32,6 +36,27 @@ class SentenceFeedback(BaseModel):
     next_step: NonBlankStr
     ability_delta: dict[str, int]
     problem_monsters: list[NonBlankStr] = Field(min_length=1, max_length=3)
+
+
+class SentenceChallenge(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_sentence: NonBlankStr = Field(min_length=5, max_length=25)
+    challenge_prompt: NonBlankStr = Field(min_length=10, max_length=60)
+    hint: NonBlankStr = Field(min_length=10, max_length=80)
+    target_skill: ChallengeSkill
+    focus: ChallengeFocus
+    difficulty_label: DifficultyLabel
+    grade_label: Literal["四年级"]
+
+
+class SentenceChallengeFeedback(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    encouragement: NonBlankStr = Field(min_length=8, max_length=30)
+    highlight: NonBlankStr = Field(min_length=10, max_length=60)
+    suggestion: NonBlankStr = Field(min_length=10, max_length=60)
+    example_upgrade: NonBlankStr = Field(min_length=10, max_length=80)
 
 
 class GhostwritingCheck(BaseModel):
