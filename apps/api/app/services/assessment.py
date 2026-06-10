@@ -23,10 +23,13 @@ from app.services.llm_provider import LLMProvider
 ASSESSMENT_SUMMARY = "完成入门小试炼，生成第一张能力草图。"
 ASSESSMENT_ESSAY_TITLE = "入门小写作"
 SENTENCE_ABILITY_DELTA_FALLBACK = {"expression": 2, "observation": 2}
+DAILY_LIMIT_ERROR_MESSAGES = {"daily limit exceeded", "daily limit reached"}
 
 
 def _raise_for_provider_failure(log: LLMCallLog | None) -> None:
     if not log or log.validation_ok or not log.error_message:
+        return
+    if log.error_message in DAILY_LIMIT_ERROR_MESSAGES:
         return
     errors = [error.strip() for error in log.error_message.split(";") if error.strip()]
     if all(error.startswith("validation error:") for error in errors):
@@ -74,7 +77,8 @@ async def complete_entry_assessment(
         prompt_version=settings.llm_prompt_version,
         student_id=student.id,
         daily_limit_enabled=settings.llm_daily_limit_enabled,
-        daily_limit_per_student_task=settings.llm_daily_limit_per_student_task,
+        daily_limit_per_student_task=settings.sentence_feedback_daily_limit_per_student,
+        daily_limit_timezone=settings.llm_daily_limit_timezone,
         input_cost_per_1k_tokens=settings.llm_input_cost_per_1k_tokens,
         output_cost_per_1k_tokens=settings.llm_output_cost_per_1k_tokens,
     )
@@ -107,6 +111,7 @@ async def complete_entry_assessment(
         student_id=student.id,
         daily_limit_enabled=settings.llm_daily_limit_enabled,
         daily_limit_per_student_task=settings.llm_daily_limit_per_student_task,
+        daily_limit_timezone=settings.llm_daily_limit_timezone,
         input_cost_per_1k_tokens=settings.llm_input_cost_per_1k_tokens,
         output_cost_per_1k_tokens=settings.llm_output_cost_per_1k_tokens,
     )

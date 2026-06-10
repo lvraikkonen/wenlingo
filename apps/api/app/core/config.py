@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     llm_base_url: str = ""
     llm_daily_limit_enabled: bool = False
     llm_daily_limit_per_student_task: int = 5
+    sentence_challenge_daily_limit_per_student: int = 10
+    sentence_feedback_daily_limit_per_student: int = 10
+    llm_daily_limit_timezone: str = "Asia/Shanghai"
     llm_input_cost_per_1k_tokens: float = 0.0
     llm_output_cost_per_1k_tokens: float = 0.0
     auth_required_for_alpha: bool = False

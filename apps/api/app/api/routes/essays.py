@@ -28,7 +28,7 @@ from app.services.gamification import settle_task
 from app.services.llm_provider import LLMProvider
 
 router = APIRouter(tags=["essays"])
-DAILY_LIMIT_ERROR_MESSAGE = "daily limit exceeded"
+DAILY_LIMIT_ERROR_MESSAGES = {"daily limit exceeded", "daily limit reached"}
 
 
 class EssayCreate(BaseModel):
@@ -49,7 +49,7 @@ def _is_ai_feedback_failure(log) -> bool:
         log
         and log.validation_ok is False
         and log.error_message
-        and log.error_message != DAILY_LIMIT_ERROR_MESSAGE
+        and log.error_message not in DAILY_LIMIT_ERROR_MESSAGES
     )
 
 
@@ -79,6 +79,7 @@ async def create_essay(
             student_id=student_id,
             daily_limit_enabled=settings.llm_daily_limit_enabled,
             daily_limit_per_student_task=settings.llm_daily_limit_per_student_task,
+            daily_limit_timezone=settings.llm_daily_limit_timezone,
             input_cost_per_1k_tokens=settings.llm_input_cost_per_1k_tokens,
             output_cost_per_1k_tokens=settings.llm_output_cost_per_1k_tokens,
         )
@@ -199,6 +200,7 @@ async def submit_revision(
             student_id=essay.student_id,
             daily_limit_enabled=settings.llm_daily_limit_enabled,
             daily_limit_per_student_task=settings.llm_daily_limit_per_student_task,
+            daily_limit_timezone=settings.llm_daily_limit_timezone,
             input_cost_per_1k_tokens=settings.llm_input_cost_per_1k_tokens,
             output_cost_per_1k_tokens=settings.llm_output_cost_per_1k_tokens,
         )

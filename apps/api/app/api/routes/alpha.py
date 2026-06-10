@@ -79,6 +79,10 @@ P0_EVENT_TYPES = {
     "child_feedback_reaction_submitted",
     "parent_summary_feedback_submitted",
     "ai_feedback_failed",
+    "sentence_challenge_generated",
+    "sentence_challenge_completed",
+    "sentence_challenge_feedback_failed",
+    "ai_daily_limit_reached",
 }
 
 P1_EVENT_TYPES = {
@@ -104,6 +108,8 @@ SAFE_PAYLOAD_KEYS = {
     "reaction",
     "usefulness",
     "child_count",
+    "target_skill",
+    "limit_type",
 }
 JSON_SAFE_SCALARS = (str, int, float, bool, type(None))
 INVITE_CODE_VALUE_PATTERN = re.compile(

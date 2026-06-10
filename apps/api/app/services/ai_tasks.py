@@ -1,13 +1,11 @@
 import html
 import re
 from dataclasses import dataclass
-from datetime import datetime, time, timezone
 from time import perf_counter
 from typing import Generic, TypeVar
 
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import func
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.domain.enums import TaskType
 from app.domain.models import LLMCallLog
@@ -19,6 +17,7 @@ from app.services.llm_contracts import (
     SentenceFeedback,
 )
 from app.services.llm_provider import LLMProvider
+from app.services.llm_usage import llm_daily_limit_reached
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -30,6 +29,7 @@ LEGACY_DEFAULT_PROMPT_VERSION = "v0.2-quality-spine-2026-05-14"
 class LLMTaskResult(Generic[T]):
     output: T
     log: LLMCallLog | None
+    status: str = "ok"
 
 
 GHOSTWRITING_TRIGGERS = [
@@ -162,15 +162,6 @@ def fallback_sentence_feedback() -> SentenceFeedback:
     )
 
 
-def _start_of_utc_day() -> datetime:
-    today = datetime.now(timezone.utc).date()
-    return datetime.combine(today, time.min, tzinfo=timezone.utc)
-
-
-def _is_real_provider(provider_name: str) -> bool:
-    return provider_name.strip().lower() not in {"", "mock"}
-
-
 def _effective_prompt_version(prompt: PromptSpec, requested_version: str) -> str:
     if requested_version == LEGACY_DEFAULT_PROMPT_VERSION:
         return prompt.version
@@ -194,19 +185,6 @@ def estimate_llm_cost(
     )
 
 
-def _daily_log_count(session: Session, student_id: str, task_name: str, provider_name: str) -> int:
-    count = session.exec(
-        select(func.count(LLMCallLog.id)).where(
-            LLMCallLog.student_id == student_id,
-            LLMCallLog.task_name == task_name,
-            LLMCallLog.provider == provider_name,
-            LLMCallLog.created_at >= _start_of_utc_day(),
-            LLMCallLog.error_message != "daily limit exceeded",
-        )
-    ).one()
-    return int(count)
-
-
 async def run_validated_llm_task(
     *,
     provider: LLMProvider,
@@ -224,6 +202,7 @@ async def run_validated_llm_task(
     output_cost_per_1k_tokens: float = 0.0,
     daily_limit_enabled: bool = False,
     daily_limit_per_student_task: int = 5,
+    daily_limit_timezone: str = "Asia/Shanghai",
 ) -> LLMTaskResult[T]:
     errors: list[str] = []
     raw_response = ""
@@ -236,8 +215,14 @@ async def run_validated_llm_task(
         session is not None
         and student_id is not None
         and daily_limit_enabled
-        and _is_real_provider(provider_name)
-        and _daily_log_count(session, student_id, task_name, provider_name) >= daily_limit_per_student_task
+        and llm_daily_limit_reached(
+            session=session,
+            student_id=student_id,
+            task_name=task_name,
+            provider_name=provider_name,
+            limit=daily_limit_per_student_task,
+            timezone_name=daily_limit_timezone,
+        )
     ):
         log = log_llm_result(
             session=session,
@@ -245,17 +230,17 @@ async def run_validated_llm_task(
             task_type=task_type,
             task_name=task_name,
             prompt_key=prompt_key or task_name,
-            provider=provider_name,
-            model=model_name,
+            provider="local_fallback",
+            model="local_fallback",
             prompt_version=prompt_version,
             input_summary=input_summary,
             raw_response="",
             output_json=fallback.model_dump(),
             validation_ok=False,
-            error_message="daily limit exceeded",
+            error_message="daily limit reached",
             retry_count=0,
         )
-        return LLMTaskResult(output=fallback, log=log)
+        return LLMTaskResult(output=fallback, log=log, status="daily_limit_reached")
 
     for attempt_index in range(MAX_LLM_ATTEMPTS):
         try:
@@ -322,7 +307,7 @@ async def run_validated_llm_task(
             error_message="; ".join(errors),
             retry_count=MAX_LLM_ATTEMPTS - 1,
         )
-    return LLMTaskResult(output=fallback, log=log)
+    return LLMTaskResult(output=fallback, log=log, status="fallback")
 
 
 async def sentence_upgrade_feedback(
@@ -335,6 +320,7 @@ async def sentence_upgrade_feedback(
     student_id: str | None = None,
     daily_limit_enabled: bool = False,
     daily_limit_per_student_task: int = 5,
+    daily_limit_timezone: str = "Asia/Shanghai",
     input_cost_per_1k_tokens: float = 0.0,
     output_cost_per_1k_tokens: float = 0.0,
 ) -> LLMTaskResult[SentenceFeedback]:
@@ -360,6 +346,7 @@ async def sentence_upgrade_feedback(
         student_id=student_id,
         daily_limit_enabled=daily_limit_enabled,
         daily_limit_per_student_task=daily_limit_per_student_task,
+        daily_limit_timezone=daily_limit_timezone,
         input_cost_per_1k_tokens=input_cost_per_1k_tokens,
         output_cost_per_1k_tokens=output_cost_per_1k_tokens,
     )
@@ -374,6 +361,7 @@ async def essay_feedback(
     student_id: str | None = None,
     daily_limit_enabled: bool = False,
     daily_limit_per_student_task: int = 5,
+    daily_limit_timezone: str = "Asia/Shanghai",
     input_cost_per_1k_tokens: float = 0.0,
     output_cost_per_1k_tokens: float = 0.0,
 ) -> LLMTaskResult[EssayFeedback]:
@@ -398,6 +386,7 @@ async def essay_feedback(
         prompt_key=prompt.prompt_key,
         daily_limit_enabled=daily_limit_enabled,
         daily_limit_per_student_task=daily_limit_per_student_task,
+        daily_limit_timezone=daily_limit_timezone,
         input_cost_per_1k_tokens=input_cost_per_1k_tokens,
         output_cost_per_1k_tokens=output_cost_per_1k_tokens,
     )
@@ -412,6 +401,7 @@ async def essay_revision_comparison(
     student_id: str | None = None,
     daily_limit_enabled: bool = False,
     daily_limit_per_student_task: int = 5,
+    daily_limit_timezone: str = "Asia/Shanghai",
     input_cost_per_1k_tokens: float = 0.0,
     output_cost_per_1k_tokens: float = 0.0,
 ) -> LLMTaskResult[EssayRevisionComparison]:
@@ -433,6 +423,7 @@ async def essay_revision_comparison(
         prompt_key=prompt.prompt_key,
         daily_limit_enabled=daily_limit_enabled,
         daily_limit_per_student_task=daily_limit_per_student_task,
+        daily_limit_timezone=daily_limit_timezone,
         input_cost_per_1k_tokens=input_cost_per_1k_tokens,
         output_cost_per_1k_tokens=output_cost_per_1k_tokens,
     )

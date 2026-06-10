@@ -498,11 +498,15 @@ async def test_daily_limit_returns_fallback_without_calling_real_provider_again(
 
     logs = session.exec(select(LLMCallLog).where(LLMCallLog.student_id == "s1")).all()
     assert provider.calls == 1
+    assert first.status == "ok"
+    assert second.status == "daily_limit_reached"
     assert first.output.revision_tasks[0].instruction == "给第二段加一个动作描写"
     assert second.output.revision_tasks[0].instruction == "先给最重要的一段加一个动作或看到的细节"
     assert len(logs) == 2
+    assert logs[-1].provider == "local_fallback"
+    assert logs[-1].model == "local_fallback"
     assert logs[-1].validation_ok is False
-    assert logs[-1].error_message == "daily limit exceeded"
+    assert logs[-1].error_message == "daily limit reached"
 
 
 @pytest.mark.asyncio

@@ -15,6 +15,7 @@ from app.domain.models import (
     GameEvent,
     LLMCallLog,
     ParentUser,
+    ProductEvent,
     SentenceTraining,
     StudentProfile,
 )
@@ -86,7 +87,7 @@ class RaiseOnEssayFeedbackProvider:
 
 
 class QuotaLimitedAssessmentProvider:
-    provider_name = "real-assessment-provider"
+    provider_name = "http"
     model_name = "assessment-quota"
 
     async def complete_json(self, task_name, payload):
@@ -192,7 +193,7 @@ def test_schema_valid_fallback_can_complete_assessment(session):
     assert response.json()["ability_sketch"]["specific_writing_power"] > 40
 
 
-def test_daily_limit_assessment_rolls_back_without_artifacts_history_or_settlement(session):
+def test_daily_limit_assessment_uses_fallback_without_failure_event(session):
     student = create_default_child(session)
     session.add(
         LLMCallLog(
@@ -212,29 +213,35 @@ def test_daily_limit_assessment_rolls_back_without_artifacts_history_or_settleme
     app.dependency_overrides[get_settings] = lambda: Settings(
         llm_daily_limit_enabled=True,
         llm_daily_limit_per_student_task=1,
+        sentence_feedback_daily_limit_per_student=1,
     )
 
-    with TestClient(app, raise_server_exceptions=False) as test_client:
+    with TestClient(app) as test_client:
         response = test_client.post(
             f"/api/students/{student.id}/assessment",
             json=valid_assessment_payload(),
         )
     app.dependency_overrides.clear()
 
-    assert response.status_code == 500
-    assert session.exec(select(Assessment)).all() == []
-    assert session.exec(select(SentenceTraining)).all() == []
-    assert session.exec(select(Essay)).all() == []
-    assert session.exec(select(EssayVersion)).all() == []
-    assert session.exec(select(AbilityHistory)).all() == []
-    assert session.exec(select(GameEvent)).all() == []
-    assert len(session.exec(select(LLMCallLog)).all()) == 1
+    assert response.status_code == 201
+    assert session.exec(select(Assessment)).one().sentence_training_id
+    assert session.exec(select(SentenceTraining)).one().ai_feedback["encouragement"]
+    assert session.exec(select(Essay)).one().title == "入门小写作"
+    assert session.exec(select(EssayVersion)).one().llm_call_log_id is not None
+    assert session.exec(select(GameEvent)).one().task_type == TaskType.assessment
+    assert session.exec(
+        select(ProductEvent).where(ProductEvent.event_type == "ai_feedback_failed")
+    ).all() == []
+    logs = session.exec(select(LLMCallLog)).all()
+    assert [log.provider for log in logs] == ["http", "local_fallback", "http"]
+    assert logs[1].error_message == "daily limit reached"
+    assert logs[1].validation_ok is False
     ability = session.exec(
         select(AbilityProfile).where(AbilityProfile.student_id == student.id)
     ).one()
-    assert ability.expression == 40
-    assert ability.observation == 40
-    assert ability.structure == 40
+    assert ability.expression > 40
+    assert ability.observation > 40
+    assert ability.structure > 40
 
 
 def test_ghostwriting_rolls_back_all_partial_assessment_rows(session, client):

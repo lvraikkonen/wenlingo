@@ -1,7 +1,9 @@
 from fastapi.testclient import TestClient
 from sqlmodel import select
 
+from app.api.routes import sentences as sentence_routes
 from app.api.deps import get_db_session, get_llm_provider
+from app.core.config import Settings, get_settings
 from app.domain.enums import TaskType
 from app.domain.models import (
     AbilityHistory,
@@ -12,6 +14,8 @@ from app.domain.models import (
 )
 from app.domain.seed import seed_demo_data
 from app.main import create_app
+from app.services.ai_tasks import LLMTaskResult
+from app.services.llm_contracts import SentenceFeedback
 from app.services.llm_provider import LLMProviderResponse
 
 
@@ -141,3 +145,52 @@ def test_sentence_training_rejects_overlong_sentences(session, client):
     )
 
     assert response.status_code == 422
+
+
+def test_sentence_training_uses_sentence_feedback_limit_and_timezone(
+    session, monkeypatch
+):
+    parent = seed_demo_data(session)
+    student = parent_students(session, parent.id)[0]
+    captured_kwargs = {}
+
+    async def capture_sentence_feedback(**kwargs):
+        captured_kwargs.update(kwargs)
+        return LLMTaskResult(
+            output=SentenceFeedback(
+                encouragement="继续加油。",
+                specific_improvement="加入了可看见的细节",
+                next_step="再加一个动作。",
+                ability_delta={"expression": 4, "observation": 4},
+                problem_monsters=["空泛表达"],
+            ),
+            log=None,
+        )
+
+    monkeypatch.setattr(
+        sentence_routes, "sentence_upgrade_feedback", capture_sentence_feedback
+    )
+    app = create_app()
+    app.dependency_overrides[get_db_session] = lambda: session
+    app.dependency_overrides[get_llm_provider] = lambda: object()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        llm_daily_limit_enabled=True,
+        llm_daily_limit_per_student_task=99,
+        sentence_feedback_daily_limit_per_student=3,
+        llm_daily_limit_timezone="Asia/Tokyo",
+    )
+
+    with TestClient(app) as test_client:
+        response = test_client.post(
+            f"/api/students/{student.id}/sentences",
+            json={
+                "source_sentence": "公园很美。",
+                "upgraded_sentence": "公园里的花在风里轻轻摇。",
+                "focus": "加细节",
+            },
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert captured_kwargs["daily_limit_per_student_task"] == 3
+    assert captured_kwargs["daily_limit_timezone"] == "Asia/Tokyo"
