@@ -1,7 +1,8 @@
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 import secrets
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -70,6 +71,12 @@ def _serialize_dt(value: datetime | None) -> str | None:
     if value is None:
         return None
     return value.isoformat()
+
+
+def _product_day(value: datetime, timezone_name: str) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(ZoneInfo(timezone_name)).date().isoformat()
 
 
 def _generate_invite_code() -> str:
@@ -349,10 +356,13 @@ def delete_admin_alpha_test_accounts(
 
 
 @router.get("/ai-usage", dependencies=[Depends(require_alpha_admin_token)])
-def alpha_admin_ai_usage(session: Session = Depends(get_db_session)):
+def alpha_admin_ai_usage(
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
     aggregates: dict[tuple[str, str, str], dict[str, Any]] = {}
     for log in session.exec(select(LLMCallLog)).all():
-        usage_date = log.created_at.date().isoformat()
+        usage_date = _product_day(log.created_at, settings.llm_daily_limit_timezone)
         key = (usage_date, log.task_name, log.model)
         row = aggregates.setdefault(
             key,
@@ -384,7 +394,11 @@ def alpha_admin_ai_usage(session: Session = Depends(get_db_session)):
     for event in events:
         task_type = event.payload.get("task_type")
         if isinstance(task_type, str) and task_type:
-            limit_hits[(event.created_at.date().isoformat(), task_type)] += 1
+            usage_date = _product_day(
+                event.created_at,
+                settings.llm_daily_limit_timezone,
+            )
+            limit_hits[(usage_date, task_type)] += 1
 
     rows = []
     for key in sorted(aggregates):
