@@ -2,7 +2,7 @@ import html
 import re
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Generic, TypeVar
+from typing import Callable, Generic, TypeVar
 
 from pydantic import BaseModel, ValidationError
 from sqlmodel import Session
@@ -33,6 +33,10 @@ class LLMTaskResult(Generic[T]):
     output: T
     log: LLMCallLog | None
     status: str = "ok"
+
+
+class LLMTaskValidationError(ValueError):
+    pass
 
 
 GHOSTWRITING_TRIGGERS = [
@@ -177,6 +181,22 @@ def _token_count(usage: dict[str, int] | None, key: str) -> int:
     return int(usage.get(key) or 0)
 
 
+def _validate_sentence_challenge_grade_label(grade_label: str) -> None:
+    if grade_label != "四年级":
+        raise ValueError(f"Unsupported sentence challenge grade_label: {grade_label}")
+
+
+def _validate_sentence_challenge_target(
+    challenge: SentenceChallenge,
+    requested_target_skill: str,
+) -> None:
+    if challenge.target_skill != requested_target_skill:
+        raise LLMTaskValidationError(
+            "sentence challenge target_skill mismatch: "
+            f"requested {requested_target_skill}, got {challenge.target_skill}"
+        )
+
+
 def estimate_llm_cost(
     prompt_tokens: int,
     completion_tokens: int,
@@ -201,6 +221,7 @@ async def run_validated_llm_task(
     input_summary: str,
     prompt_version: str,
     prompt_key: str | None = None,
+    validation_hook: Callable[[T], None] | None = None,
     input_cost_per_1k_tokens: float = 0.0,
     output_cost_per_1k_tokens: float = 0.0,
     daily_limit_enabled: bool = False,
@@ -263,6 +284,8 @@ async def run_validated_llm_task(
             latest_response_provider = response.provider
             latest_response_model = response.model
             output = output_model.model_validate(response.parsed_json)
+            if validation_hook is not None:
+                validation_hook(output)
             log = None
             if session is not None:
                 log = log_llm_result(
@@ -288,6 +311,8 @@ async def run_validated_llm_task(
                 )
             return LLMTaskResult(output=output, log=log)
         except ValidationError as exc:
+            errors.append(f"validation error: {exc}")
+        except LLMTaskValidationError as exc:
             errors.append(f"validation error: {exc}")
         except Exception as exc:
             errors.append(str(exc))
@@ -367,6 +392,7 @@ async def sentence_challenge_generation(
     input_cost_per_1k_tokens: float = 0.0,
     output_cost_per_1k_tokens: float = 0.0,
 ) -> LLMTaskResult[SentenceChallenge]:
+    _validate_sentence_challenge_grade_label(grade_label)
     prompt = get_prompt("sentence_challenge_generation")
     return await run_validated_llm_task(
         provider=provider,
@@ -380,6 +406,10 @@ async def sentence_challenge_generation(
         fallback=fallback_challenge(target_skill),
         input_summary=f"句子挑战生成；年级：{grade_label}；目标：{target_skill}",
         prompt_version=prompt.version,
+        validation_hook=lambda challenge: _validate_sentence_challenge_target(
+            challenge,
+            target_skill,
+        ),
         daily_limit_enabled=daily_limit_enabled,
         daily_limit_per_student_task=daily_limit_per_student_task,
         daily_limit_timezone=daily_limit_timezone,

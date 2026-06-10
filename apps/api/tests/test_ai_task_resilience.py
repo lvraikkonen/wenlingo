@@ -213,6 +213,32 @@ class UsageChallengeGenerationProvider:
         )
 
 
+class WrongSkillChallengeGenerationProvider:
+    provider_name = "fake"
+    model_name = "wrong-skill-challenge-generation"
+
+    def __init__(self):
+        self.calls = 0
+
+    async def complete_json(self, task_name, payload):
+        self.calls += 1
+        parsed = {
+            "source_sentence": "我走进教室。",
+            "challenge_prompt": "请把句子写具体，加上一点心里想法。",
+            "hint": "可以写人物当时在想什么，心情有什么变化。",
+            "target_skill": "feeling",
+            "focus": "心理感受",
+            "difficulty_label": "四年级基础",
+            "grade_label": "四年级",
+        }
+        return LLMProviderResponse(
+            parsed_json=parsed,
+            raw_response=json.dumps(parsed, ensure_ascii=False),
+            provider=self.provider_name,
+            model=self.model_name,
+        )
+
+
 class RecordingChallengeFeedbackProvider:
     provider_name = "fake"
     model_name = "recording-challenge-feedback"
@@ -535,6 +561,42 @@ async def test_sentence_challenge_generation_logs_usage_and_cost(session):
     assert saved.completion_tokens == 40
     assert saved.total_tokens == 160
     assert saved.estimated_cost == 0.0004
+
+
+@pytest.mark.asyncio
+async def test_sentence_challenge_generation_wrong_supported_skill_returns_requested_fallback(
+    session,
+):
+    provider = WrongSkillChallengeGenerationProvider()
+
+    result = await sentence_challenge_generation(
+        provider=provider,
+        target_skill="action_expression",
+        grade_label="四年级",
+        session=session,
+        student_id="s1",
+    )
+
+    saved = session.exec(select(LLMCallLog)).one()
+    assert provider.calls == 2
+    assert result.status == "fallback"
+    assert result.output.target_skill == "action_expression"
+    assert result.output.focus == "动作描写"
+    assert saved.validation_ok is False
+    assert saved.task_name == "sentence_challenge_generation"
+    assert "target_skill" in saved.error_message
+    assert "action_expression" in saved.error_message
+    assert "feeling" in saved.error_message
+
+
+@pytest.mark.asyncio
+async def test_sentence_challenge_generation_rejects_unsupported_grade_before_provider():
+    with pytest.raises(ValueError, match="Unsupported sentence challenge grade_label"):
+        await sentence_challenge_generation(
+            provider=MustNotCallProvider(),
+            target_skill="action_expression",
+            grade_label="三年级",
+        )
 
 
 @pytest.mark.asyncio
