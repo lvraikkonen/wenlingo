@@ -99,7 +99,9 @@ def test_resend_sender_posts_magic_code_payload(monkeypatch):
     "from_email,resend_api_key",
     [
         ("", "fake-resend-key"),
+        ("   ", "fake-resend-key"),
         ("login@wenlingo.example", ""),
+        ("login@wenlingo.example", "   "),
     ],
 )
 def test_resend_sender_missing_config_fails_closed(from_email, resend_api_key):
@@ -169,5 +171,26 @@ def test_validate_startup_settings_allows_dev_echo_in_development():
     from app.services.startup_checks import validate_startup_settings
 
     settings = Settings(environment="development", magic_code_dev_echo=True)
+
+    validate_startup_settings(settings)
+
+
+@pytest.mark.parametrize(
+    "environment,magic_code_dev_echo",
+    [
+        (" Production ", False),
+        (" DEVELOPMENT ", True),
+    ],
+)
+def test_validate_startup_settings_strips_and_lowercases_environment(
+    environment,
+    magic_code_dev_echo,
+):
+    from app.services.startup_checks import validate_startup_settings
+
+    settings = Settings(
+        environment=environment,
+        magic_code_dev_echo=magic_code_dev_echo,
+    )
 
     validate_startup_settings(settings)

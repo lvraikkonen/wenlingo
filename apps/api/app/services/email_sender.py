@@ -119,7 +119,10 @@ def _smtp_configured(settings) -> bool:
 
 
 def _resend_configured(settings) -> bool:
-    return bool(settings.magic_code_from_email and settings.resend_api_key)
+    return bool(
+        settings.magic_code_from_email.strip()
+        and settings.resend_api_key.strip()
+    )
 
 
 def get_email_sender(settings) -> EmailSender:
