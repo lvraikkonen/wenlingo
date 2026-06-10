@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import select
 
@@ -17,7 +18,30 @@ from app.domain.models import (
 )
 from app.domain.seed import seed_demo_data
 from app.main import create_app
+from app.services.sentence_challenges import fallback_challenge_feedback
 from app.services.llm_provider import LLMProviderResponse
+
+
+CHALLENGE_RESPONSES = {
+    "expand_sentence": {
+        "source_sentence": "小花开了。",
+        "challenge_prompt": "请把句子写具体，补充时间、地点或样子。",
+        "hint": "可以想一想谁在什么地方，看到或听到了什么。",
+        "focus": "扩句",
+    },
+    "action_expression": {
+        "source_sentence": "小猫跑了。",
+        "challenge_prompt": "请把句子写具体，加上动作和样子。",
+        "hint": "可以写小猫怎么跑、跑到哪里、看起来怎么样。",
+        "focus": "动作描写",
+    },
+    "feeling": {
+        "source_sentence": "我走进教室。",
+        "challenge_prompt": "请把句子写具体，加上一点心里想法。",
+        "hint": "可以写人物当时在想什么，心情有什么变化。",
+        "focus": "心理感受",
+    },
+}
 
 
 class ChallengeProvider:
@@ -26,17 +50,17 @@ class ChallengeProvider:
 
     def __init__(self):
         self.calls = []
+        self.payloads = []
 
     async def complete_json(self, task_name, payload):
         self.calls.append(task_name)
+        self.payloads.append(payload)
         if task_name == "sentence_challenge_generation":
             grade_label = payload["grade_label"]
+            target_skill = payload["target_skill"]
             body = {
-                "source_sentence": "小猫跑了。",
-                "challenge_prompt": "请把句子写具体，加上动作和样子。",
-                "hint": "可以写小猫怎么跑、跑到哪里、看起来怎么样。",
-                "target_skill": "action_expression",
-                "focus": "动作描写",
+                **CHALLENGE_RESPONSES[target_skill],
+                "target_skill": target_skill,
                 "difficulty_label": f"{grade_label}基础",
                 "grade_label": grade_label,
             }
@@ -89,11 +113,56 @@ def test_challenge_generation_persists_generated_training(session):
     challenge = payload["challenge"]
     assert training.status == "generated"
     assert training.upgraded_sentence == ""
-    assert training.target_skill == "action_expression"
+    assert training.target_skill == "expand_sentence"
     assert challenge["id"] == training.id
-    assert challenge["source_sentence"] == "小猫跑了。"
+    assert challenge["source_sentence"] == "小花开了。"
     assert challenge["grade_label"] == student.grade_label
     assert provider.calls == ["sentence_challenge_generation"]
+    assert provider.payloads[0]["target_skill"] == "expand_sentence"
+
+
+@pytest.mark.parametrize(
+    ("completed_count", "expected_target_skill"),
+    [
+        (0, "expand_sentence"),
+        (1, "action_expression"),
+        (2, "feeling"),
+    ],
+)
+def test_challenge_generation_cycles_target_skill_by_completed_count(
+    session,
+    completed_count,
+    expected_target_skill,
+):
+    parent = seed_demo_data(session)
+    student = parent_students(session, parent.id)[0]
+    for index in range(completed_count):
+        target_skill = tuple(CHALLENGE_RESPONSES)[index]
+        session.add(
+            SentenceTraining(
+                student_id=student.id,
+                source_sentence=CHALLENGE_RESPONSES[target_skill]["source_sentence"],
+                upgraded_sentence="这个句子已经写具体了。",
+                focus=CHALLENGE_RESPONSES[target_skill]["focus"],
+                ai_feedback={},
+                status="completed",
+                challenge_prompt=CHALLENGE_RESPONSES[target_skill]["challenge_prompt"],
+                hint=CHALLENGE_RESPONSES[target_skill]["hint"],
+                target_skill=target_skill,
+                completed_at=datetime.now(UTC),
+            )
+        )
+    session.commit()
+    provider = ChallengeProvider()
+    app, client = challenge_client(session, provider)
+
+    with client:
+        response = client.post(f"/api/students/{student.id}/sentence-challenges")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert provider.payloads[0]["target_skill"] == expected_target_skill
+    assert response.json()["challenge"]["target_skill"] == expected_target_skill
 
 
 def test_challenge_generation_uses_student_grade_label(session):
@@ -118,6 +187,21 @@ def test_challenge_generation_uses_student_grade_label(session):
 def test_challenge_completion_updates_same_row_and_settles_once(session):
     parent = seed_demo_data(session)
     student = parent_students(session, parent.id)[0]
+    session.add(
+        SentenceTraining(
+            student_id=student.id,
+            source_sentence="小花开了。",
+            upgraded_sentence="春天的小花在墙角静静地开了。",
+            focus="扩句",
+            ai_feedback={},
+            status="completed",
+            challenge_prompt="请把句子写具体，补充时间、地点或样子。",
+            hint="可以想一想谁在什么地方，看到或听到了什么。",
+            target_skill="expand_sentence",
+            completed_at=datetime.now(UTC),
+        )
+    )
+    session.commit()
     provider = ChallengeProvider()
     app, client = challenge_client(session, provider)
 
@@ -298,6 +382,21 @@ def test_feedback_provider_failure_still_completes_with_fallback_feedback(sessio
 
     parent = seed_demo_data(session)
     student = parent_students(session, parent.id)[0]
+    session.add(
+        SentenceTraining(
+            student_id=student.id,
+            source_sentence="小花开了。",
+            upgraded_sentence="春天的小花在墙角静静地开了。",
+            focus="扩句",
+            ai_feedback={},
+            status="completed",
+            challenge_prompt="请把句子写具体，补充时间、地点或样子。",
+            hint="可以想一想谁在什么地方，看到或听到了什么。",
+            target_skill="expand_sentence",
+            completed_at=datetime.now(UTC),
+        )
+    )
+    session.commit()
     provider = FailingFeedbackProvider()
     app, client = challenge_client(session, provider)
 
@@ -311,6 +410,13 @@ def test_feedback_provider_failure_still_completes_with_fallback_feedback(sessio
     app.dependency_overrides.clear()
 
     assert response.status_code == 200
+    payload = response.json()
+    training = session.get(SentenceTraining, training_id)
+    fallback = fallback_challenge_feedback("action_expression")
+    assert training.status == "completed"
+    assert training.ai_feedback == fallback.model_dump()
+    assert payload["feedback"]["encouragement"] == fallback.encouragement
+    assert payload["feedback"]["example_upgrade"] == fallback.example_upgrade
     event = session.exec(
         select(ProductEvent).where(
             ProductEvent.event_type == "sentence_challenge_feedback_failed"

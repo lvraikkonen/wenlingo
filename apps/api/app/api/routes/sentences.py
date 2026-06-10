@@ -79,8 +79,9 @@ def choose_challenge_target_skill(session: Session, student_id: str) -> str:
             )
         ).all()
     )
-    target_index = (completed_count + 1) % len(CHALLENGE_TARGET_SKILL_CYCLE)
-    return CHALLENGE_TARGET_SKILL_CYCLE[target_index]
+    return CHALLENGE_TARGET_SKILL_CYCLE[
+        completed_count % len(CHALLENGE_TARGET_SKILL_CYCLE)
+    ]
 
 
 def _challenge_event_payload(
