@@ -88,7 +88,10 @@ class ResendEmailSender(EmailSender):
             "text": body,
             "html": f"<p>你的 WenLingo 登录验证码是 <strong>{code}</strong>，{ttl_minutes} 分钟内有效。</p>",
         }
-        headers = {"Authorization": f"Bearer {self.settings.resend_api_key}"}
+        headers = {
+            "Authorization": f"Bearer {self.settings.resend_api_key}",
+            "Content-Type": "application/json",
+        }
 
         try:
             with httpx.Client(timeout=self.settings.resend_timeout_seconds) as client:

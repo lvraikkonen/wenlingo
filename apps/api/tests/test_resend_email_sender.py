@@ -40,6 +40,11 @@ class FakeResendClient:
         return response
 
 
+class FailingResendClient(FakeResendClient):
+    def post(self, url, *, headers, json):
+        raise RuntimeError("provider unavailable")
+
+
 def test_get_email_sender_returns_resend_sender_when_configured():
     settings = Settings(
         magic_code_dev_echo=False,
@@ -76,7 +81,10 @@ def test_resend_sender_posts_magic_code_payload(monkeypatch):
     call = client.post_calls[0]
     assert client.timeout == 7
     assert call["url"] == "https://api.resend.com/emails"
-    assert call["headers"] == {"Authorization": "Bearer fake-resend-key"}
+    assert call["headers"] == {
+        "Authorization": "Bearer fake-resend-key",
+        "Content-Type": "application/json",
+    }
     assert call["json"]["from"] == "login@wenlingo.example"
     assert call["json"]["to"] == ["parent@example.com"]
     assert call["json"]["subject"] == "WenLingo 登录验证码"
@@ -107,6 +115,42 @@ def test_resend_sender_missing_config_fails_closed(from_email, resend_api_key):
 
     assert exc.value.status_code == 503
     assert exc.value.detail == "email provider unavailable"
+
+
+def test_resend_sender_provider_error_logs_warning_and_fails_closed(monkeypatch, caplog):
+    import app.services.email_sender as email_sender
+    from app.services.email_sender import ResendEmailSender
+
+    monkeypatch.setattr(email_sender.httpx, "Client", FailingResendClient)
+    settings = Settings(
+        magic_code_from_email="login@wenlingo.example",
+        resend_api_key="fake-resend-key",
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        ResendEmailSender(settings).send_magic_code(
+            to_email="parent@example.com",
+            code="654321",
+            ttl_minutes=10,
+        )
+
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "email provider unavailable"
+    assert "Resend email send failed: RuntimeError" in caplog.text
+    assert "fake-resend-key" not in caplog.text
+    assert "654321" not in caplog.text
+    assert "parent@example.com" not in caplog.text
+
+
+def test_validate_startup_settings_rejects_invalid_environment():
+    from app.services.startup_checks import validate_startup_settings
+
+    settings = Settings(environment="qa", magic_code_dev_echo=False)
+
+    with pytest.raises(RuntimeError) as exc:
+        validate_startup_settings(settings)
+
+    assert str(exc.value) == "ENVIRONMENT must be development, staging, or production"
 
 
 @pytest.mark.parametrize("environment", ["staging", "production"])
