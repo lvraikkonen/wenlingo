@@ -103,6 +103,39 @@ def test_sentence_challenge_feedback_contract_is_short():
     ("contract", "payload"),
     [
         (
+            SentenceChallenge,
+            {
+                "source_sentence": "小猫跑了。",
+                "challenge_prompt": "请把句子写具体，加上动作和样子。",
+                "hint": "可以写小猫怎么跑、跑到哪里、看起来怎么样。",
+                "target_skill": "action_expression",
+                "focus": "动作描写",
+                "difficulty_label": "四年级基础",
+                "grade_label": "四年级",
+                "ability_delta": {"expression": 3},
+            },
+        ),
+        (
+            SentenceChallengeFeedback,
+            {
+                "encouragement": "你写得很有画面感！",
+                "highlight": "你加上了飞快地冲过去，动作更清楚了。",
+                "suggestion": "还可以加一点表情或心情。",
+                "example_upgrade": "小狗瞪大眼睛，飞快地冲过草地。",
+                "ability_delta": {"expression": 3},
+            },
+        ),
+    ],
+)
+def test_sentence_challenge_contracts_reject_extra_fields(contract, payload):
+    with pytest.raises(ValidationError):
+        contract(**payload)
+
+
+@pytest.mark.parametrize(
+    ("contract", "payload"),
+    [
+        (
             MaterialQuestion,
             {"question": "这件事发生在哪里？", "hint": "想一想地点和时间", "extra": "ignored"},
         ),
