@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    environment: str = "development"
     database_url: str = "postgresql+psycopg://wenlingo:wenlingo@localhost:5432/wenlingo"
     test_database_url: str = "postgresql+psycopg://wenlingo:wenlingo@localhost:5433/wenlingo_test"
     api_base_url: str = "http://localhost:8000"
@@ -38,6 +39,8 @@ class Settings(BaseSettings):
     smtp_use_ssl: bool = True
     smtp_use_starttls: bool = False
     smtp_timeout_seconds: int = 10
+    resend_api_key: str = ""
+    resend_timeout_seconds: int = 10
     legacy_bind_window_days: int = 14
     auth_allowed_origins: str = ""
 

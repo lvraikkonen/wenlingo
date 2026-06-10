@@ -14,11 +14,13 @@ from app.api.routes import (
     sentences,
 )
 from app.core.config import get_settings
+from app.services.startup_checks import validate_startup_settings
 
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Wenlingo API")
     settings = get_settings()
+    validate_startup_settings(settings)
     cors_allow_origins = [
         origin.strip()
         for origin in settings.cors_allow_origins.split(",")

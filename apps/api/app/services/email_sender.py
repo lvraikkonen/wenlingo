@@ -3,6 +3,7 @@ import smtplib
 from dataclasses import dataclass, field
 from email.message import EmailMessage
 
+import httpx
 from fastapi import HTTPException
 
 
@@ -73,6 +74,37 @@ class SmtpEmailSender(EmailSender):
         return SentEmail(to_email=to_email, subject=subject, body=body)
 
 
+@dataclass
+class ResendEmailSender(EmailSender):
+    settings: object
+
+    def send_magic_code(self, *, to_email: str, code: str, ttl_minutes: int) -> SentEmail:
+        subject = "WenLingo 登录验证码"
+        body = f"你的 WenLingo 登录验证码是 {code}，{ttl_minutes} 分钟内有效。"
+        payload = {
+            "from": self.settings.magic_code_from_email,
+            "to": [to_email],
+            "subject": subject,
+            "text": body,
+            "html": f"<p>你的 WenLingo 登录验证码是 <strong>{code}</strong>，{ttl_minutes} 分钟内有效。</p>",
+        }
+        headers = {"Authorization": f"Bearer {self.settings.resend_api_key}"}
+
+        try:
+            with httpx.Client(timeout=self.settings.resend_timeout_seconds) as client:
+                response = client.post(
+                    "https://api.resend.com/emails",
+                    headers=headers,
+                    json=payload,
+                )
+                response.raise_for_status()
+        except Exception as exc:
+            logger.warning("Resend email send failed: %s", exc.__class__.__name__)
+            raise HTTPException(status_code=503, detail="email provider unavailable") from None
+
+        return SentEmail(to_email=to_email, subject=subject, body=body)
+
+
 def _smtp_configured(settings) -> bool:
     return bool(
         settings.magic_code_from_email
@@ -83,6 +115,10 @@ def _smtp_configured(settings) -> bool:
     )
 
 
+def _resend_configured(settings) -> bool:
+    return bool(settings.magic_code_from_email and settings.resend_api_key)
+
+
 def get_email_sender(settings) -> EmailSender:
     if settings.magic_code_dev_echo:
         return CapturedEmailSender()
@@ -90,4 +126,8 @@ def get_email_sender(settings) -> EmailSender:
         if not _smtp_configured(settings):
             raise HTTPException(status_code=503, detail="email provider unavailable")
         return SmtpEmailSender(settings)
+    if settings.magic_code_email_provider == "resend":
+        if not _resend_configured(settings):
+            raise HTTPException(status_code=503, detail="email provider unavailable")
+        return ResendEmailSender(settings)
     return DisabledProductionEmailSender()
