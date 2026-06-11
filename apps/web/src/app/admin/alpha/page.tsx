@@ -69,6 +69,7 @@ export default function AdminAlphaPage() {
   const [isDeletingTestAccounts, setIsDeletingTestAccounts] = useState(false);
   const [notice, setNotice] = useState("");
   const hasSkippedRevokedReloadRef = useRef(false);
+  const revokedRefreshRequestIdRef = useRef(0);
 
   useEffect(() => {
     const storedToken = window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY);
@@ -81,16 +82,43 @@ export default function AdminAlphaPage() {
   useEffect(() => {
     if (!token) {
       hasSkippedRevokedReloadRef.current = false;
+      revokedRefreshRequestIdRef.current += 1;
       return;
     }
     if (!hasSkippedRevokedReloadRef.current) {
       hasSkippedRevokedReloadRef.current = true;
       return;
     }
+    const requestId = revokedRefreshRequestIdRef.current + 1;
+    revokedRefreshRequestIdRef.current = requestId;
+    setError("");
     getAdminAlphaOverview(token, showRevokedInvites)
-      .then((response) => setFamilies(response.families))
-      .catch(() => setError("Admin overview unavailable."));
+      .then((response) => {
+        if (revokedRefreshRequestIdRef.current !== requestId) {
+          return;
+        }
+        setFamilies(response.families);
+        setError("");
+      })
+      .catch(() => {
+        if (revokedRefreshRequestIdRef.current !== requestId) {
+          return;
+        }
+        clearAdminSession("Admin overview unavailable.");
+      });
   }, [showRevokedInvites, token]);
+
+  function clearAdminSession(message: string) {
+    revokedRefreshRequestIdRef.current += 1;
+    setError(message);
+    setToken("");
+    window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+    setFamilies([]);
+    setAccounts([]);
+    setUsageRows([]);
+    setGeneratedInvites([]);
+    setFamilyDetail(null);
+  }
 
   async function loadOverview(nextToken: string): Promise<boolean> {
     setIsLoading(true);
@@ -108,14 +136,7 @@ export default function AdminAlphaPage() {
       window.sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, nextToken);
       return true;
     } catch {
-      setError("Token invalid or admin overview unavailable.");
-      setToken("");
-      window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
-      setFamilies([]);
-      setAccounts([]);
-      setUsageRows([]);
-      setGeneratedInvites([]);
-      setFamilyDetail(null);
+      clearAdminSession("Token invalid or admin overview unavailable.");
       return false;
     } finally {
       setIsLoading(false);

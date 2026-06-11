@@ -72,6 +72,33 @@ const familyDetail = {
   parent_feedback: [{ student_id: "child-1", usefulness: "helpful" }],
 };
 
+function createDeferred<T>() {
+  let resolve: (value: T) => void = () => undefined;
+  let reject: (reason?: unknown) => void = () => undefined;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, reject, resolve };
+}
+
+const usageResponse = {
+  usage: [
+    {
+      date: "2026-06-08",
+      task_type: "sentence_challenge_generation",
+      model: "test-model",
+      call_count: 2,
+      prompt_tokens: 18,
+      completion_tokens: 5,
+      total_tokens: 23,
+      estimated_cost: 0.0015,
+      failure_count: 1,
+      daily_limit_hit_count: 1,
+    },
+  ],
+};
+
 beforeEach(() => {
   window.sessionStorage.clear();
   apiMocks.getAdminAlphaOverview.mockResolvedValue(overview);
@@ -163,22 +190,7 @@ test("submitting token stores it in sessionStorage", async () => {
 });
 
 test("admin renders grouped sections and ai usage aggregates", async () => {
-  apiMocks.getAdminAlphaAIUsage.mockResolvedValueOnce({
-    usage: [
-      {
-        date: "2026-06-08",
-        task_type: "sentence_challenge_generation",
-        model: "test-model",
-        call_count: 2,
-        prompt_tokens: 18,
-        completion_tokens: 5,
-        total_tokens: 23,
-        estimated_cost: 0.0015,
-        failure_count: 1,
-        daily_limit_hit_count: 1,
-      },
-    ],
-  });
+  apiMocks.getAdminAlphaAIUsage.mockResolvedValueOnce(usageResponse);
   window.sessionStorage.setItem("wenlingo_alpha_admin_token", "secret");
 
   render(<AdminAlphaPage />);
@@ -205,6 +217,115 @@ test("admin hides revoked invites by default and loads them when toggled", async
   await waitFor(() =>
     expect(apiMocks.getAdminAlphaOverview).toHaveBeenLastCalledWith("secret", true),
   );
+});
+
+test("admin clears stale data and token when revoked invite refresh fails", async () => {
+  apiMocks.getAdminAlphaOverview
+    .mockResolvedValueOnce(overview)
+    .mockRejectedValueOnce(new Error("Request failed: 403"));
+  apiMocks.getAdminAlphaAIUsage.mockResolvedValueOnce(usageResponse);
+  window.sessionStorage.setItem("wenlingo_alpha_admin_token", "secret");
+
+  render(<AdminAlphaPage />);
+
+  expect(await screen.findByRole("button", { name: /家庭 01/ })).toBeInTheDocument();
+  expect(await screen.findByText("sentence_challenge_generation")).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("checkbox", { name: "显示已撤销邀请码" }));
+
+  expect(
+    await screen.findByRole("alert", { name: "Admin alpha error" }),
+  ).toHaveTextContent("Admin overview unavailable.");
+  expect(screen.getByLabelText("Admin token")).toBeInTheDocument();
+  expect(window.sessionStorage.getItem("wenlingo_alpha_admin_token")).toBeNull();
+  expect(screen.queryByRole("button", { name: /家庭 01/ })).not.toBeInTheDocument();
+  expect(screen.queryAllByText("pa***@example.com")).toHaveLength(0);
+  expect(screen.queryByText("sentence_challenge_generation")).not.toBeInTheDocument();
+});
+
+test("admin clears stale overview error when later revoked toggle refresh succeeds", async () => {
+  const failedRefresh = createDeferred<{ families: typeof overview.families }>();
+  const successfulRefresh = createDeferred<{ families: typeof overview.families }>();
+  apiMocks.getAdminAlphaOverview
+    .mockResolvedValueOnce(overview)
+    .mockReturnValueOnce(failedRefresh.promise)
+    .mockReturnValueOnce(successfulRefresh.promise);
+  window.sessionStorage.setItem("wenlingo_alpha_admin_token", "secret");
+
+  render(<AdminAlphaPage />);
+
+  await screen.findByRole("button", { name: /家庭 01/ });
+  await userEvent.click(screen.getByRole("checkbox", { name: "显示已撤销邀请码" }));
+  await waitFor(() =>
+    expect(apiMocks.getAdminAlphaOverview).toHaveBeenLastCalledWith("secret", true),
+  );
+
+  await userEvent.click(screen.getByRole("checkbox", { name: "显示已撤销邀请码" }));
+  await waitFor(() =>
+    expect(apiMocks.getAdminAlphaOverview).toHaveBeenLastCalledWith("secret", false),
+  );
+
+  failedRefresh.reject(new Error("Request failed: 500"));
+  await new Promise((resolve) => {
+    window.setTimeout(resolve, 0);
+  });
+  successfulRefresh.resolve(overview);
+
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("alert", { name: "Admin alpha error" }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(screen.getByRole("button", { name: /家庭 01/ })).toBeInTheDocument();
+});
+
+test("admin ignores out-of-order revoked toggle responses", async () => {
+  const revokedRefresh = createDeferred<{ families: typeof overview.families }>();
+  const normalRefresh = createDeferred<{ families: typeof overview.families }>();
+  const revokedOverview = {
+    families: [
+      {
+        ...overview.families[0],
+        invite_id: "invite-revoked",
+        invite_label: "Revoked 01",
+        invite_status: "revoked",
+        parent_id: null,
+        parent_display_name: null,
+        account_linked: false,
+        account_email_masked: null,
+        phone_bound: false,
+        last_login_at: null,
+      },
+    ],
+  };
+  apiMocks.getAdminAlphaOverview
+    .mockResolvedValueOnce(overview)
+    .mockReturnValueOnce(revokedRefresh.promise)
+    .mockReturnValueOnce(normalRefresh.promise);
+  window.sessionStorage.setItem("wenlingo_alpha_admin_token", "secret");
+
+  render(<AdminAlphaPage />);
+
+  await screen.findByRole("button", { name: /家庭 01/ });
+  await userEvent.click(screen.getByRole("checkbox", { name: "显示已撤销邀请码" }));
+  await waitFor(() =>
+    expect(apiMocks.getAdminAlphaOverview).toHaveBeenLastCalledWith("secret", true),
+  );
+
+  await userEvent.click(screen.getByRole("checkbox", { name: "显示已撤销邀请码" }));
+  await waitFor(() =>
+    expect(apiMocks.getAdminAlphaOverview).toHaveBeenLastCalledWith("secret", false),
+  );
+
+  normalRefresh.resolve(overview);
+  await screen.findByRole("button", { name: /家庭 01/ });
+
+  revokedRefresh.resolve(revokedOverview);
+
+  await waitFor(() =>
+    expect(screen.queryByText("Revoked 01")).not.toBeInTheDocument(),
+  );
+  expect(screen.getByRole("button", { name: /家庭 01/ })).toBeInTheDocument();
 });
 
 test("overview table renders invite family funnel and last activity", async () => {
