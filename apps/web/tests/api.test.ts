@@ -187,6 +187,8 @@ describe("api client", () => {
       "http://localhost:8000/api/students/student-1/sentence-challenges",
       expect.objectContaining({
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
         credentials: "include",
       }),
     );
@@ -205,7 +207,9 @@ describe("api client", () => {
       "http://localhost:8000/api/students/student-1/sentences/training-1/complete",
       expect.objectContaining({
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ upgraded_sentence: "小猫飞快地跑过草地。" }),
+        credentials: "include",
       }),
     );
   });
@@ -230,6 +234,19 @@ describe("api client", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:8000/api/admin/alpha/overview?include_revoked=true",
+      expect.objectContaining({
+        headers: { "X-Alpha-Admin-Token": "secret" },
+      }),
+    );
+  });
+
+  test("getAdminAlphaOverview omits revoked families by default", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ families: [] }));
+
+    await getAdminAlphaOverview("secret");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/api/admin/alpha/overview",
       expect.objectContaining({
         headers: { "X-Alpha-Admin-Token": "secret" },
       }),
