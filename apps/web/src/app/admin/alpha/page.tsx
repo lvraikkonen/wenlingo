@@ -117,7 +117,13 @@ export default function AdminAlphaPage() {
     setAccounts([]);
     setUsageRows([]);
     setGeneratedInvites([]);
+    setSelectedParentId(null);
     setFamilyDetail(null);
+    setPendingAccountActionIds([]);
+    setSelectedAccountIds([]);
+    setDeleteConfirmation("");
+    setNotice("");
+    setIsDeletingTestAccounts(false);
   }
 
   async function loadOverview(nextToken: string): Promise<boolean> {

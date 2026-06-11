@@ -243,6 +243,43 @@ test("admin clears stale data and token when revoked invite refresh fails", asyn
   expect(screen.queryByText("sentence_challenge_generation")).not.toBeInTheDocument();
 });
 
+test("admin clears destructive action state after revoked refresh failure", async () => {
+  apiMocks.getAdminAlphaOverview
+    .mockResolvedValueOnce(overview)
+    .mockRejectedValueOnce(new Error("Request failed: 403"))
+    .mockResolvedValueOnce(overview);
+  window.sessionStorage.setItem("wenlingo_alpha_admin_token", "secret");
+
+  render(<AdminAlphaPage />);
+
+  await screen.findAllByText("pa***@example.com");
+  await userEvent.click(
+    screen.getByRole("checkbox", { name: /select pa\*\*\*@example\.com/i }),
+  );
+  await userEvent.type(
+    screen.getByLabelText("Delete confirmation"),
+    "DELETE TEST ACCOUNTS",
+  );
+  expect(
+    screen.getByRole("button", { name: "Delete selected test accounts" }),
+  ).toBeEnabled();
+
+  await userEvent.click(screen.getByRole("checkbox", { name: "显示已撤销邀请码" }));
+  await screen.findByLabelText("Admin token");
+
+  await userEvent.type(screen.getByLabelText("Admin token"), "secret");
+  await userEvent.click(screen.getByRole("button", { name: "进入" }));
+
+  await screen.findAllByText("pa***@example.com");
+  expect(
+    screen.getByRole("checkbox", { name: /select pa\*\*\*@example\.com/i }),
+  ).not.toBeChecked();
+  expect(screen.getByLabelText("Delete confirmation")).toHaveValue("");
+  expect(
+    screen.getByRole("button", { name: "Delete selected test accounts" }),
+  ).toBeDisabled();
+});
+
 test("admin clears stale overview error when later revoked toggle refresh succeeds", async () => {
   const failedRefresh = createDeferred<{ families: typeof overview.families }>();
   const successfulRefresh = createDeferred<{ families: typeof overview.families }>();
