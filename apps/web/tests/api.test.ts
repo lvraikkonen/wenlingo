@@ -1,11 +1,24 @@
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
+  completeSentenceChallenge,
   createAssessment,
+  createSentenceChallenge,
   createSentenceTraining,
   demoLogin,
+  getAdminAlphaOverview,
+  getAdminAlphaAIUsage,
   getDashboard,
 } from "../src/lib/api";
 import type { DashboardResponse, DemoLoginResponse } from "../src/lib/types";
+
+const fetchMock = vi.fn();
+
+function jsonResponse(body: unknown) {
+  return {
+    ok: true,
+    json: async () => body,
+  };
+}
 
 const student = {
   id: "s1",
@@ -52,6 +65,11 @@ const dashboardResponse = {
 } satisfies DashboardResponse;
 
 describe("api client", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    global.fetch = fetchMock as unknown as typeof fetch;
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -154,6 +172,66 @@ describe("api client", () => {
         body: JSON.stringify(payload),
         cache: "no-store",
         credentials: "include",
+      }),
+    );
+  });
+
+  test("createSentenceChallenge posts to challenge endpoint", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ challenge: { id: "training-1" } }),
+    );
+
+    await createSentenceChallenge("student-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/api/students/student-1/sentence-challenges",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+      }),
+    );
+  });
+
+  test("completeSentenceChallenge posts upgraded sentence", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ training: { id: "training-1" } }),
+    );
+
+    await completeSentenceChallenge("student-1", "training-1", {
+      upgraded_sentence: "小猫飞快地跑过草地。",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/api/students/student-1/sentences/training-1/complete",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ upgraded_sentence: "小猫飞快地跑过草地。" }),
+      }),
+    );
+  });
+
+  test("getAdminAlphaAIUsage uses admin token header", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ usage: [] }));
+
+    await getAdminAlphaAIUsage("secret");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/api/admin/alpha/ai-usage",
+      expect.objectContaining({
+        headers: { "X-Alpha-Admin-Token": "secret" },
+      }),
+    );
+  });
+
+  test("getAdminAlphaOverview can include revoked families", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ families: [] }));
+
+    await getAdminAlphaOverview("secret", true);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/api/admin/alpha/overview?include_revoked=true",
+      expect.objectContaining({
+        headers: { "X-Alpha-Admin-Token": "secret" },
       }),
     );
   });

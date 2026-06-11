@@ -5,6 +5,7 @@ import type {
   AlphaEventCreate,
   AlphaInviteValidationResponse,
   AlphaParentResponse,
+  AdminAlphaAIUsageRow,
   AdminAlphaAccountActionResponse,
   AdminAlphaAccountRow,
   AdminAlphaFamilyDetail,
@@ -18,6 +19,8 @@ import type {
   FeedbackReactionValue,
   ParentSummaryUsefulness,
   SavedFeedbackReaction,
+  SentenceChallengeCompletionResponse,
+  SentenceChallengeResponse,
 } from "./types";
 
 const API_BASE_URL =
@@ -202,6 +205,33 @@ export function createSentenceTraining(
 ): Promise<SentenceTrainingResponse> {
   return requestJson<SentenceTrainingResponse>(
     `/api/students/${studentId}/sentences`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function createSentenceChallenge(
+  studentId: string,
+): Promise<SentenceChallengeResponse> {
+  return requestJson<SentenceChallengeResponse>(
+    `/api/students/${studentId}/sentence-challenges`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    },
+  );
+}
+
+export function completeSentenceChallenge(
+  studentId: string,
+  trainingId: string,
+  payload: { upgraded_sentence: string },
+): Promise<SentenceChallengeCompletionResponse> {
+  return requestJson<SentenceChallengeCompletionResponse>(
+    `/api/students/${studentId}/sentences/${trainingId}/complete`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -411,9 +441,22 @@ export function saveMyParentSummaryFeedback(
 
 export function getAdminAlphaOverview(
   token: string,
+  includeRevoked = false,
 ): Promise<{ families: AdminAlphaOverviewRow[] }> {
+  const suffix = includeRevoked ? "?include_revoked=true" : "";
   return requestJson<{ families: AdminAlphaOverviewRow[] }>(
-    "/api/admin/alpha/overview",
+    `/api/admin/alpha/overview${suffix}`,
+    {
+      headers: { "X-Alpha-Admin-Token": token },
+    },
+  );
+}
+
+export function getAdminAlphaAIUsage(
+  token: string,
+): Promise<{ usage: AdminAlphaAIUsageRow[] }> {
+  return requestJson<{ usage: AdminAlphaAIUsageRow[] }>(
+    "/api/admin/alpha/ai-usage",
     {
       headers: { "X-Alpha-Admin-Token": token },
     },

@@ -39,6 +39,55 @@ export type DashboardResponse = {
   coach_message: string;
 };
 
+export type Settlement = {
+  xp_delta: number;
+  level_after: number;
+  badge_code?: string | null;
+  evidence?: {
+    completed_task_count?: number;
+    completed_tasks?: string[];
+    [key: string]: unknown;
+  };
+};
+
+export type SentenceChallenge = {
+  id: string;
+  source_sentence: string;
+  challenge_prompt: string;
+  hint: string;
+  focus: "扩句" | "动作描写" | "心理感受";
+  target_skill: "expand_sentence" | "action_expression" | "feeling";
+  difficulty_label:
+    | "三年级基础"
+    | "三年级进阶"
+    | "四年级基础"
+    | "四年级进阶"
+    | "五年级基础"
+    | "五年级进阶"
+    | "六年级基础"
+    | "六年级进阶";
+  grade_label: "三年级" | "四年级" | "五年级" | "六年级";
+};
+
+export type SentenceChallengeResponse = {
+  challenge: SentenceChallenge;
+};
+
+export type SentenceChallengeCompletionResponse = {
+  training: {
+    id: string;
+    reaction?: FeedbackReactionValue | null;
+  };
+  feedback: {
+    encouragement: string;
+    highlight: string;
+    suggestion: string;
+    example_upgrade: string;
+  };
+  settlement: Settlement;
+  next_task: RecommendedTask;
+};
+
 export type AlphaParent = {
   id: string;
   email: string;
@@ -169,6 +218,19 @@ export type AdminAlphaOverviewRow = {
   account_email_masked: string | null;
   phone_bound: boolean;
   last_login_at: string | null;
+};
+
+export type AdminAlphaAIUsageRow = {
+  date: string;
+  task_type: string;
+  model: string;
+  call_count: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  estimated_cost: number;
+  failure_count: number;
+  daily_limit_hit_count: number;
 };
 
 export type AdminAlphaAccountRow = {
