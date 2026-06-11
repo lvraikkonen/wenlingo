@@ -8,6 +8,7 @@ const apiMocks = vi.hoisted(() => ({
   getAdminAlphaOverview: vi.fn(),
   getAdminAlphaFamily: vi.fn(),
   getAdminAlphaAccounts: vi.fn(),
+  getAdminAlphaAIUsage: vi.fn(),
   createAdminAlphaInvites: vi.fn(),
   revokeAdminAlphaInvite: vi.fn(),
   disableAdminAlphaAccount: vi.fn(),
@@ -19,6 +20,7 @@ vi.mock("../src/lib/api", () => ({
   getAdminAlphaOverview: apiMocks.getAdminAlphaOverview,
   getAdminAlphaFamily: apiMocks.getAdminAlphaFamily,
   getAdminAlphaAccounts: apiMocks.getAdminAlphaAccounts,
+  getAdminAlphaAIUsage: apiMocks.getAdminAlphaAIUsage,
   createAdminAlphaInvites: apiMocks.createAdminAlphaInvites,
   revokeAdminAlphaInvite: apiMocks.revokeAdminAlphaInvite,
   disableAdminAlphaAccount: apiMocks.disableAdminAlphaAccount,
@@ -89,6 +91,7 @@ beforeEach(() => {
       },
     ],
   });
+  apiMocks.getAdminAlphaAIUsage.mockResolvedValue({ usage: [] });
   apiMocks.createAdminAlphaInvites.mockResolvedValue({
     invites: [
       {
@@ -154,9 +157,54 @@ test("submitting token stores it in sessionStorage", async () => {
   await userEvent.click(screen.getByRole("button", { name: "进入" }));
 
   await waitFor(() =>
-    expect(apiMocks.getAdminAlphaOverview).toHaveBeenCalledWith("secret"),
+    expect(apiMocks.getAdminAlphaOverview).toHaveBeenCalledWith("secret", false),
   );
   expect(window.sessionStorage.getItem("wenlingo_alpha_admin_token")).toBe("secret");
+});
+
+test("admin renders grouped sections and ai usage aggregates", async () => {
+  apiMocks.getAdminAlphaAIUsage.mockResolvedValueOnce({
+    usage: [
+      {
+        date: "2026-06-08",
+        task_type: "sentence_challenge_generation",
+        model: "test-model",
+        call_count: 2,
+        prompt_tokens: 18,
+        completion_tokens: 5,
+        total_tokens: 23,
+        estimated_cost: 0.0015,
+        failure_count: 1,
+        daily_limit_hit_count: 1,
+      },
+    ],
+  });
+  window.sessionStorage.setItem("wenlingo_alpha_admin_token", "secret");
+
+  render(<AdminAlphaPage />);
+
+  expect(await screen.findByRole("heading", { name: "Alpha 总览" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "邀请管理" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "账号管理" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "AI 使用量" })).toBeInTheDocument();
+  expect(await screen.findByText("sentence_challenge_generation")).toBeInTheDocument();
+  expect(screen.getByText("23")).toBeInTheDocument();
+  expect(screen.getByText("0.0015")).toBeInTheDocument();
+});
+
+test("admin hides revoked invites by default and loads them when toggled", async () => {
+  window.sessionStorage.setItem("wenlingo_alpha_admin_token", "secret");
+
+  render(<AdminAlphaPage />);
+
+  await screen.findByRole("button", { name: /家庭 01/ });
+  expect(apiMocks.getAdminAlphaOverview).toHaveBeenLastCalledWith("secret", false);
+
+  await userEvent.click(screen.getByRole("checkbox", { name: "显示已撤销邀请码" }));
+
+  await waitFor(() =>
+    expect(apiMocks.getAdminAlphaOverview).toHaveBeenLastCalledWith("secret", true),
+  );
 });
 
 test("overview table renders invite family funnel and last activity", async () => {

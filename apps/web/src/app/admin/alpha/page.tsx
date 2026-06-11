@@ -1,17 +1,19 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   createAdminAlphaInvites,
   deleteAdminAlphaTestAccounts,
   disableAdminAlphaAccount,
   enableAdminAlphaAccount,
   getAdminAlphaAccounts,
+  getAdminAlphaAIUsage,
   getAdminAlphaFamily,
   getAdminAlphaOverview,
   revokeAdminAlphaInvite,
 } from "../../../lib/api";
 import type {
+  AdminAlphaAIUsageRow,
   AdminAlphaAccountRow,
   AdminAlphaFamilyDetail,
   AdminAlphaInviteCreateResponse,
@@ -45,6 +47,8 @@ export default function AdminAlphaPage() {
   const [tokenInput, setTokenInput] = useState("");
   const [families, setFamilies] = useState<AdminAlphaOverviewRow[]>([]);
   const [accounts, setAccounts] = useState<AdminAlphaAccountRow[]>([]);
+  const [usageRows, setUsageRows] = useState<AdminAlphaAIUsageRow[]>([]);
+  const [showRevokedInvites, setShowRevokedInvites] = useState(false);
   const [generatedInvites, setGeneratedInvites] = useState<
     AdminAlphaInviteCreateResponse["invites"]
   >([]);
@@ -64,6 +68,7 @@ export default function AdminAlphaPage() {
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [isDeletingTestAccounts, setIsDeletingTestAccounts] = useState(false);
   const [notice, setNotice] = useState("");
+  const hasSkippedRevokedReloadRef = useRef(false);
 
   useEffect(() => {
     const storedToken = window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY);
@@ -73,16 +78,32 @@ export default function AdminAlphaPage() {
     void loadOverview(storedToken);
   }, []);
 
+  useEffect(() => {
+    if (!token) {
+      hasSkippedRevokedReloadRef.current = false;
+      return;
+    }
+    if (!hasSkippedRevokedReloadRef.current) {
+      hasSkippedRevokedReloadRef.current = true;
+      return;
+    }
+    getAdminAlphaOverview(token, showRevokedInvites)
+      .then((response) => setFamilies(response.families))
+      .catch(() => setError("Admin overview unavailable."));
+  }, [showRevokedInvites, token]);
+
   async function loadOverview(nextToken: string): Promise<boolean> {
     setIsLoading(true);
     setError("");
     try {
-      const [overviewResponse, accountResponse] = await Promise.all([
-        getAdminAlphaOverview(nextToken),
+      const [overviewResponse, accountResponse, usageResponse] = await Promise.all([
+        getAdminAlphaOverview(nextToken, showRevokedInvites),
         getAdminAlphaAccounts(nextToken),
+        getAdminAlphaAIUsage(nextToken),
       ]);
       setFamilies(overviewResponse.families);
       setAccounts(accountResponse.accounts);
+      setUsageRows(usageResponse.usage);
       setToken(nextToken);
       window.sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, nextToken);
       return true;
@@ -92,6 +113,7 @@ export default function AdminAlphaPage() {
       window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
       setFamilies([]);
       setAccounts([]);
+      setUsageRows([]);
       setGeneratedInvites([]);
       setFamilyDetail(null);
       return false;
@@ -332,7 +354,25 @@ export default function AdminAlphaPage() {
               </p>
             ) : null}
 
-            <section className="mb-6 rounded-lg border border-[var(--wen-border)] bg-white p-5">
+            <section
+              aria-labelledby="invite-management-heading"
+              className="mb-6 rounded-lg border border-[var(--wen-border)] bg-white p-5"
+            >
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <h2 id="invite-management-heading" className="text-xl font-bold">
+                  邀请管理
+                </h2>
+                <label className="inline-flex items-center gap-2 text-sm font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={showRevokedInvites}
+                    onChange={(event) =>
+                      setShowRevokedInvites(event.target.checked)
+                    }
+                  />
+                  显示已撤销邀请码
+                </label>
+              </div>
               <div className="flex flex-wrap items-start justify-between gap-6">
                 <form
                   onSubmit={handleGenerateInvites}
@@ -398,6 +438,15 @@ export default function AdminAlphaPage() {
                 </div>
               ) : null}
 
+            </section>
+
+            <section
+              aria-labelledby="account-management-heading"
+              className="mb-6 rounded-lg border border-[var(--wen-border)] bg-white p-5"
+            >
+              <h2 id="account-management-heading" className="text-xl font-bold">
+                账号管理
+              </h2>
               <div className="mt-5 grid gap-3">
                 {accounts.map((account) => {
                   const isPending =
@@ -478,49 +527,111 @@ export default function AdminAlphaPage() {
               </div>
             </section>
 
-            <div className="overflow-hidden rounded-lg border border-[var(--wen-border)] bg-white">
-              <div className="grid grid-cols-[1.2fr_1fr_1.3fr_1fr_0.7fr_1.2fr_1fr_1.5fr_auto] gap-3 border-b border-[var(--wen-border)] bg-[var(--wen-bg)] px-4 py-3 text-xs font-bold uppercase text-[var(--wen-muted)]">
-                <span>Invite</span>
-                <span>Family</span>
-                <span>Account</span>
-                <span>Funnel</span>
-                <span>Children</span>
-                <span>Reactions</span>
-                <span>Feedback</span>
-                <span>Last activity</span>
-                <span>Actions</span>
+            <section
+              aria-labelledby="alpha-overview-heading"
+              className="mb-6"
+            >
+              <h2 id="alpha-overview-heading" className="mb-3 text-xl font-bold">
+                Alpha 总览
+              </h2>
+              <div className="overflow-hidden rounded-lg border border-[var(--wen-border)] bg-white">
+                <div className="grid grid-cols-[1.2fr_1fr_1.3fr_1fr_0.7fr_1.2fr_1fr_1.5fr_auto] gap-3 border-b border-[var(--wen-border)] bg-[var(--wen-bg)] px-4 py-3 text-xs font-bold uppercase text-[var(--wen-muted)]">
+                  <span>Invite</span>
+                  <span>Family</span>
+                  <span>Account</span>
+                  <span>Funnel</span>
+                  <span>Children</span>
+                  <span>Reactions</span>
+                  <span>Feedback</span>
+                  <span>Last activity</span>
+                  <span>Actions</span>
+                </div>
+                {families.map((row) =>
+                  canRevokeInvite(row) ? (
+                    <div
+                      key={row.invite_id}
+                      className="grid w-full grid-cols-[1.2fr_1fr_1.3fr_1fr_0.7fr_1.2fr_1fr_1.5fr_auto] gap-3 border-b border-[var(--wen-border)] px-4 py-3 text-left text-sm last:border-b-0"
+                    >
+                      {renderOverviewCells(row)}
+                      <span>
+                        <button
+                          type="button"
+                          onClick={() => void handleRevokeInvite(row)}
+                          className="rounded-lg border border-[var(--wen-border)] px-3 py-2 font-semibold"
+                        >
+                          Revoke invite
+                        </button>
+                      </span>
+                    </div>
+                  ) : (
+                    <button
+                      key={row.invite_id}
+                      type="button"
+                      onClick={() => void selectFamily(row)}
+                      disabled={!row.parent_id}
+                      className="grid w-full grid-cols-[1.2fr_1fr_1.3fr_1fr_0.7fr_1.2fr_1fr_1.5fr_auto] gap-3 border-b border-[var(--wen-border)] px-4 py-3 text-left text-sm last:border-b-0 disabled:cursor-not-allowed disabled:text-[var(--wen-muted)]"
+                    >
+                      {renderOverviewCells(row)}
+                      <span />
+                    </button>
+                  ),
+                )}
               </div>
-              {families.map((row) =>
-                canRevokeInvite(row) ? (
-                  <div
-                    key={row.invite_id}
-                    className="grid w-full grid-cols-[1.2fr_1fr_1.3fr_1fr_0.7fr_1.2fr_1fr_1.5fr_auto] gap-3 border-b border-[var(--wen-border)] px-4 py-3 text-left text-sm last:border-b-0"
-                  >
-                    {renderOverviewCells(row)}
-                    <span>
-                      <button
-                        type="button"
-                        onClick={() => void handleRevokeInvite(row)}
-                        className="rounded-lg border border-[var(--wen-border)] px-3 py-2 font-semibold"
-                      >
-                        Revoke invite
-                      </button>
-                    </span>
-                  </div>
-                ) : (
-                  <button
-                    key={row.invite_id}
-                    type="button"
-                    onClick={() => void selectFamily(row)}
-                    disabled={!row.parent_id}
-                    className="grid w-full grid-cols-[1.2fr_1fr_1.3fr_1fr_0.7fr_1.2fr_1fr_1.5fr_auto] gap-3 border-b border-[var(--wen-border)] px-4 py-3 text-left text-sm last:border-b-0 disabled:cursor-not-allowed disabled:text-[var(--wen-muted)]"
-                  >
-                    {renderOverviewCells(row)}
-                    <span />
-                  </button>
-                ),
+            </section>
+
+            <section
+              aria-labelledby="ai-usage-heading"
+              className="rounded-lg border border-[var(--wen-border)] bg-white p-5"
+            >
+              <h2 id="ai-usage-heading" className="text-xl font-bold">
+                AI 使用量
+              </h2>
+              {usageRows.length > 0 ? (
+                <div className="mt-4 overflow-x-auto">
+                  <table aria-label="AI usage" className="min-w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-[var(--wen-border)] bg-[var(--wen-bg)] text-left text-xs font-bold uppercase text-[var(--wen-muted)]">
+                        <th className="px-3 py-2">Date</th>
+                        <th className="px-3 py-2">Task</th>
+                        <th className="px-3 py-2">Model</th>
+                        <th className="px-3 py-2">Calls</th>
+                        <th className="px-3 py-2">Prompt</th>
+                        <th className="px-3 py-2">Completion</th>
+                        <th className="px-3 py-2">Total</th>
+                        <th className="px-3 py-2">Cost</th>
+                        <th className="px-3 py-2">Failures</th>
+                        <th className="px-3 py-2">Limits</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {usageRows.map((row) => (
+                        <tr
+                          key={`${row.date}:${row.task_type}:${row.model}`}
+                          className="border-b border-[var(--wen-border)] last:border-b-0"
+                        >
+                          <td className="px-3 py-2">{row.date}</td>
+                          <td className="px-3 py-2">{row.task_type}</td>
+                          <td className="px-3 py-2">{row.model}</td>
+                          <td className="px-3 py-2">{row.call_count}</td>
+                          <td className="px-3 py-2">{row.prompt_tokens}</td>
+                          <td className="px-3 py-2">{row.completion_tokens}</td>
+                          <td className="px-3 py-2">{row.total_tokens}</td>
+                          <td className="px-3 py-2">{row.estimated_cost}</td>
+                          <td className="px-3 py-2">{row.failure_count}</td>
+                          <td className="px-3 py-2">
+                            {row.daily_limit_hit_count}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="mt-4 text-sm text-[var(--wen-muted)]">
+                  No AI usage yet.
+                </p>
               )}
-            </div>
+            </section>
           </div>
         ) : null}
 
