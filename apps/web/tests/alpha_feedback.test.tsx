@@ -17,6 +17,7 @@ import ParentChildSummaryPage from "../src/app/parent/children/[studentId]/summa
 import { FeedbackReaction } from "../src/components/FeedbackReaction";
 import { ParentSummaryFeedback } from "../src/components/ParentSummaryFeedback";
 import { ALPHA_SESSION_STORAGE_KEY } from "../src/lib/alphaSession";
+import { ApiRequestError } from "../src/lib/api";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -31,6 +32,8 @@ function deferred<T>() {
 
 const apiMocks = vi.hoisted(() => ({
   createAssessment: vi.fn(),
+  createSentenceChallenge: vi.fn(),
+  completeSentenceChallenge: vi.fn(),
   createSentenceTraining: vi.fn(),
   createEssay: vi.fn(),
   submitEssayRevision: vi.fn(),
@@ -49,7 +52,18 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("../src/lib/api", () => ({
+  ApiRequestError: class ApiRequestError extends Error {
+    status: number;
+
+    constructor(status: number) {
+      super(`Request failed: ${status}`);
+      this.name = "ApiRequestError";
+      this.status = status;
+    }
+  },
   createAssessment: apiMocks.createAssessment,
+  createSentenceChallenge: apiMocks.createSentenceChallenge,
+  completeSentenceChallenge: apiMocks.completeSentenceChallenge,
   createSentenceTraining: apiMocks.createSentenceTraining,
   createEssay: apiMocks.createEssay,
   submitEssayRevision: apiMocks.submitEssayRevision,
@@ -77,6 +91,34 @@ const summaryChild = {
   summary_url: "/parent/children/s1/summary",
 };
 
+const challengeResponse = {
+  challenge: {
+    id: "training-1",
+    source_sentence: "小猫跑了。",
+    challenge_prompt: "请把句子写具体，加上动作和样子。",
+    hint: "可以写小猫怎么跑、跑到哪里、看起来怎么样。",
+    focus: "动作描写",
+    target_skill: "action_expression",
+    difficulty_label: "四年级基础",
+    grade_label: "四年级",
+  },
+};
+
+const existingFreeInputResponse = {
+  training: { id: "training-1" },
+  feedback: {
+    encouragement: "你把画面写得更清楚了。",
+    specific_improvement: "加入了可看见的细节",
+    next_step: "再加一个动作，会更生动。",
+    problem_monsters: ["空泛表达"],
+  },
+  settlement: {
+    xp_delta: 25,
+    level_after: 2,
+    badge_code: "first_sentence_upgrade",
+  },
+};
+
 beforeEach(() => {
   window.localStorage.clear();
   window.localStorage.setItem(ALPHA_SESSION_STORAGE_KEY, "session-1");
@@ -99,20 +141,19 @@ beforeEach(() => {
       badge_code: null,
     },
   });
-  apiMocks.createSentenceTraining.mockResolvedValue({
+  apiMocks.createSentenceChallenge.mockResolvedValue(challengeResponse);
+  apiMocks.completeSentenceChallenge.mockResolvedValue({
     training: { id: "training-1" },
     feedback: {
-      encouragement: "你把画面写得更清楚了。",
-      specific_improvement: "加入了可看见的细节",
-      next_step: "再加一个动作，会更生动。",
-      problem_monsters: ["空泛表达"],
+      encouragement: "你写得很有画面感！",
+      highlight: "你加上了飞快地冲过去，动作更清楚了。",
+      suggestion: "还可以加一点表情或心情。",
+      example_upgrade: "小狗瞪大眼睛，飞快地冲过草地。",
     },
-    settlement: {
-      xp_delta: 25,
-      level_after: 2,
-      badge_code: "first_sentence_upgrade",
-    },
+    settlement: { xp_delta: 25, level_after: 2 },
+    next_task: { kind: "sentence", title: "再练一句", focus: "动作描写", minutes: "5" },
   });
+  apiMocks.createSentenceTraining.mockResolvedValue(existingFreeInputResponse);
   apiMocks.createEssay.mockResolvedValue({
     essay: { id: "essay-1" },
     first_draft: {
@@ -715,6 +756,110 @@ test("assessment page ignores stale assessment completion after student route ch
   expect(screen.queryByText("这次 AI 教练的提示对你有帮助吗？")).not.toBeInTheDocument();
 });
 
+test("sentence page loads an ai challenge by default", async () => {
+  apiMocks.createSentenceChallenge.mockResolvedValueOnce({
+    challenge: {
+      id: "training-1",
+      source_sentence: "小猫跑了。",
+      challenge_prompt: "请把句子写具体，加上动作和样子。",
+      hint: "可以写小猫怎么跑、跑到哪里、看起来怎么样。",
+      focus: "动作描写",
+      target_skill: "action_expression",
+      difficulty_label: "四年级基础",
+      grade_label: "四年级",
+    },
+  });
+
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <SentencePage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    );
+  });
+
+  expect(await screen.findByText("小猫跑了。")).toBeInTheDocument();
+  expect(screen.getByText("请把句子写具体，加上动作和样子。")).toBeInTheDocument();
+  expect(
+    screen.getByText("可以写小猫怎么跑、跑到哪里、看起来怎么样。"),
+  ).toBeInTheDocument();
+  expect(apiMocks.createSentenceTraining).not.toHaveBeenCalled();
+});
+
+test("sentence page completes generated challenge and shows short feedback", async () => {
+  apiMocks.createSentenceChallenge.mockResolvedValueOnce(challengeResponse);
+  apiMocks.completeSentenceChallenge.mockResolvedValueOnce({
+    training: { id: "training-1" },
+    feedback: {
+      encouragement: "你写得很有画面感！",
+      highlight: "你加上了飞快地冲过去，动作更清楚了。",
+      suggestion: "还可以加一点表情或心情。",
+      example_upgrade: "小狗瞪大眼睛，飞快地冲过草地。",
+    },
+    settlement: { xp_delta: 25, level_after: 2 },
+    next_task: { kind: "sentence", title: "再练一句", focus: "动作描写", minutes: "5" },
+  });
+
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <SentencePage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    );
+  });
+
+  await userEvent.type(
+    await screen.findByLabelText("升级后的句子"),
+    "小猫瞪大眼睛，飞快地跑过草地。",
+  );
+  await userEvent.click(screen.getByRole("button", { name: /提交给 AI 教练/ }));
+
+  expect(apiMocks.completeSentenceChallenge).toHaveBeenCalledWith("s1", "training-1", {
+    upgraded_sentence: "小猫瞪大眼睛，飞快地跑过草地。",
+  });
+  expect(await screen.findByText("你写得很有画面感！")).toBeInTheDocument();
+  expect(screen.getByText("小狗瞪大眼睛，飞快地冲过草地。")).toBeInTheDocument();
+});
+
+test("sentence page daily limit response shows rest message", async () => {
+  apiMocks.createSentenceChallenge.mockRejectedValueOnce(new ApiRequestError(429));
+
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <SentencePage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    );
+  });
+
+  expect(
+    await screen.findByText("今天的句子挑战已经完成很多啦，休息一下，明天继续闯关！"),
+  ).toBeInTheDocument();
+});
+
+test("sentence page keeps bring your own sentence mode", async () => {
+  apiMocks.createSentenceChallenge.mockResolvedValueOnce(challengeResponse);
+  apiMocks.createSentenceTraining.mockResolvedValueOnce(existingFreeInputResponse);
+
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <SentencePage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    );
+  });
+
+  await userEvent.click(await screen.findByRole("button", { name: "自己带句子来练" }));
+  await userEvent.type(screen.getByLabelText("原句"), "公园很美。");
+  await userEvent.type(
+    screen.getByLabelText("升级后的句子"),
+    "清晨的公园里，荷叶上的水珠一闪一闪。",
+  );
+  await userEvent.click(screen.getByRole("button", { name: /提交给 AI 教练/ }));
+
+  expect(apiMocks.createSentenceTraining).toHaveBeenCalled();
+});
+
 test("sentence page renders a feedback reaction after sentence result with training id", async () => {
   await act(async () => {
     render(
@@ -724,6 +869,7 @@ test("sentence page renders a feedback reaction after sentence result with train
     );
   });
 
+  await userEvent.click(await screen.findByRole("button", { name: "自己带句子来练" }));
   await userEvent.type(await screen.findByLabelText("原句"), "公园很美。");
   await userEvent.type(screen.getByLabelText("升级后的句子"), "公园里花香很浓。");
   await userEvent.click(screen.getByRole("button", { name: "提交给 AI 教练" }));
@@ -760,6 +906,7 @@ test("sentence page passes persisted reaction from sentence response", async () 
     );
   });
 
+  await userEvent.click(await screen.findByRole("button", { name: "自己带句子来练" }));
   await userEvent.type(await screen.findByLabelText("原句"), "公园很美。");
   await userEvent.type(screen.getByLabelText("升级后的句子"), "公园里花香很浓。");
   await userEvent.click(screen.getByRole("button", { name: "提交给 AI 教练" }));
@@ -782,6 +929,7 @@ test("sentence page ignores stale sentence completion after student route change
     ));
   });
 
+  await userEvent.click(await screen.findByRole("button", { name: "自己带句子来练" }));
   await userEvent.type(await screen.findByLabelText("原句"), "公园很美。");
   await userEvent.type(screen.getByLabelText("升级后的句子"), "公园里花香很浓。");
   await userEvent.click(screen.getByRole("button", { name: "提交给 AI 教练" }));
