@@ -18,16 +18,17 @@ type SummaryPageProps = {
 
 export default function ParentChildSummaryPage({ params }: SummaryPageProps) {
   const { studentId } = use(params);
+
+  return <ParentChildSummaryPageContent key={studentId} studentId={studentId} />;
+}
+
+function ParentChildSummaryPageContent({ studentId }: { studentId: string }) {
   const { replace } = useRouter();
   const [data, setData] = useState<AlphaChildSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    setData(null);
-    setError("");
-    setIsLoading(true);
-
     let isMounted = true;
     getMyAlphaChildSummary(studentId)
       .then((response) => {

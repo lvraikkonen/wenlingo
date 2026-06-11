@@ -27,6 +27,27 @@ export function FeedbackReaction({
   targetId,
   initialReaction = null,
 }: FeedbackReactionProps) {
+  const reactionKey = `${studentId}:${targetType}:${targetId}:${
+    initialReaction ?? "none"
+  }`;
+
+  return (
+    <FeedbackReactionContent
+      key={reactionKey}
+      studentId={studentId}
+      targetType={targetType}
+      targetId={targetId}
+      initialReaction={initialReaction}
+    />
+  );
+}
+
+function FeedbackReactionContent({
+  studentId,
+  targetType,
+  targetId,
+  initialReaction = null,
+}: FeedbackReactionProps) {
   const targetKey = `${studentId}:${targetType}:${targetId}`;
   const activeTargetKey = useRef(targetKey);
   const [selected, setSelected] = useState<FeedbackReactionValue | null>(
@@ -38,12 +59,10 @@ export function FeedbackReaction({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    activeTargetKey.current = targetKey;
-    setSelected(initialReaction);
-    setLastConfirmedReaction(initialReaction);
-    setIsSaving(false);
-    setError("");
-  }, [initialReaction, targetId, targetKey, targetType]);
+    return () => {
+      activeTargetKey.current = "";
+    };
+  }, []);
 
   async function handleClick(reaction: FeedbackReactionValue) {
     if (isSaving) {

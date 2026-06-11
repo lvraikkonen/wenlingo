@@ -164,7 +164,12 @@ export default function AssessmentPage({
   params: Promise<{ studentId: string }>;
 }) {
   const { studentId } = use(params);
-  const activeStudentId = useRef(studentId);
+
+  return <AssessmentPageContent key={studentId} studentId={studentId} />;
+}
+
+function AssessmentPageContent({ studentId }: { studentId: string }) {
+  const activeStudentId = useRef<string | null>(studentId);
   const [step, setStep] = useState<Step>("intro");
   const [sentenceAfter, setSentenceAfter] = useState("");
   const [shortWriting, setShortWriting] = useState("");
@@ -176,14 +181,10 @@ export default function AssessmentPage({
   const canSubmitWriting = shortWriting.trim().length >= 20;
 
   useEffect(() => {
-    activeStudentId.current = studentId;
-    setStep("intro");
-    setSentenceAfter("");
-    setShortWriting("");
-    setResult(null);
-    setIsSubmitting(false);
-    setError("");
-  }, [studentId]);
+    return () => {
+      activeStudentId.current = null;
+    };
+  }, []);
 
   const progress = useMemo(
     () =>

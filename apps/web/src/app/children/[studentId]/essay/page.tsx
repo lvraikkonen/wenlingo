@@ -20,7 +20,12 @@ export default function EssayPage({
   params: Promise<{ studentId: string }>;
 }) {
   const { studentId } = use(params);
-  const activeStudentId = useRef(studentId);
+
+  return <EssayPageContent key={studentId} studentId={studentId} />;
+}
+
+function EssayPageContent({ studentId }: { studentId: string }) {
+  const activeStudentId = useRef<string | null>(studentId);
   const [title, setTitle] = useState("");
   const [draft, setDraft] = useState("");
   const [revision, setRevision] = useState("");
@@ -49,24 +54,10 @@ export default function EssayPage({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    activeStudentId.current = studentId;
-    setTitle("");
-    setDraft("");
-    setRevision("");
-    setEssayId(null);
-    setFirstDraftId(null);
-    setFirstDraftReaction(null);
-    setRevisionResultId(null);
-    setRevisionResultReaction(null);
-    setFeedback(null);
-    setComparison(null);
-    setSettlement(null);
-    setSelectedTasks([]);
-    setRevisionStartedAt(null);
-    setIsFeedbackPending(false);
-    setIsRevisionPending(false);
-    setError("");
-  }, [studentId]);
+    return () => {
+      activeStudentId.current = null;
+    };
+  }, []);
 
   function toggleTask(instruction: string) {
     setSelectedTasks((current) =>

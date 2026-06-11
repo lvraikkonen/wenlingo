@@ -22,6 +22,23 @@ export function ParentSummaryFeedback({
   studentId,
   initialUsefulness = null,
 }: ParentSummaryFeedbackProps) {
+  const feedbackKey = `${parentId}:${studentId}:${initialUsefulness ?? "none"}`;
+
+  return (
+    <ParentSummaryFeedbackContent
+      key={feedbackKey}
+      parentId={parentId}
+      studentId={studentId}
+      initialUsefulness={initialUsefulness}
+    />
+  );
+}
+
+function ParentSummaryFeedbackContent({
+  parentId,
+  studentId,
+  initialUsefulness = null,
+}: ParentSummaryFeedbackProps) {
   const router = useRouter();
   const targetKey = `${parentId}:${studentId}`;
   const activeTargetKey = useRef(targetKey);
@@ -34,12 +51,10 @@ export function ParentSummaryFeedback({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    activeTargetKey.current = targetKey;
-    setSelected(initialUsefulness);
-    setLastConfirmedUsefulness(initialUsefulness);
-    setIsSaving(false);
-    setError("");
-  }, [initialUsefulness, parentId, studentId, targetKey]);
+    return () => {
+      activeTargetKey.current = "";
+    };
+  }, []);
 
   async function handleClick(usefulness: ParentSummaryUsefulness) {
     if (isSaving) {

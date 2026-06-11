@@ -36,7 +36,12 @@ export default function SentencePage({
   params: Promise<{ studentId: string }>;
 }) {
   const { studentId } = use(params);
-  const activeStudentId = useRef(studentId);
+
+  return <SentencePageContent key={studentId} studentId={studentId} />;
+}
+
+function SentencePageContent({ studentId }: { studentId: string }) {
+  const activeStudentId = useRef<string | null>(studentId);
   const [mode, setMode] = useState<Mode>("challenge");
   const [challenge, setChallenge] = useState<SentenceChallenge | null>(null);
   const [challengeResult, setChallengeResult] =
@@ -45,22 +50,12 @@ export default function SentencePage({
     useState<SentenceTrainingResponse | null>(null);
   const [sourceSentence, setSourceSentence] = useState("");
   const [upgradedSentence, setUpgradedSentence] = useState("");
-  const [isLoadingChallenge, setIsLoadingChallenge] = useState(false);
+  const [isLoadingChallenge, setIsLoadingChallenge] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let active = true;
-    activeStudentId.current = studentId;
-    setMode("challenge");
-    setChallenge(null);
-    setChallengeResult(null);
-    setFreeInputResult(null);
-    setSourceSentence("");
-    setUpgradedSentence("");
-    setIsSubmitting(false);
-    setError("");
-    setIsLoadingChallenge(true);
 
     createSentenceChallenge(studentId)
       .then((response) => {
@@ -85,6 +80,7 @@ export default function SentencePage({
 
     return () => {
       active = false;
+      activeStudentId.current = null;
     };
   }, [studentId]);
 

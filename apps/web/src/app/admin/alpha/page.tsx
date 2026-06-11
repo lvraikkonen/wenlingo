@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   createAdminAlphaInvites,
   deleteAdminAlphaTestAccounts,
@@ -71,13 +71,69 @@ export default function AdminAlphaPage() {
   const hasSkippedRevokedReloadRef = useRef(false);
   const revokedRefreshRequestIdRef = useRef(0);
 
+  const clearAdminSession = useCallback((message: string) => {
+    revokedRefreshRequestIdRef.current += 1;
+    setError(message);
+    setToken("");
+    window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+    setFamilies([]);
+    setAccounts([]);
+    setUsageRows([]);
+    setGeneratedInvites([]);
+    setSelectedParentId(null);
+    setFamilyDetail(null);
+    setPendingAccountActionIds([]);
+    setSelectedAccountIds([]);
+    setDeleteConfirmation("");
+    setNotice("");
+    setIsDeletingTestAccounts(false);
+  }, []);
+
+  const loadOverview = useCallback(
+    async (
+      nextToken: string,
+      includeRevokedInvites: boolean,
+    ): Promise<boolean> => {
+      setIsLoading(true);
+      setError("");
+      try {
+        const [overviewResponse, accountResponse, usageResponse] =
+          await Promise.all([
+            getAdminAlphaOverview(nextToken, includeRevokedInvites),
+            getAdminAlphaAccounts(nextToken),
+            getAdminAlphaAIUsage(nextToken),
+          ]);
+        setFamilies(overviewResponse.families);
+        setAccounts(accountResponse.accounts);
+        setUsageRows(usageResponse.usage);
+        setToken(nextToken);
+        window.sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, nextToken);
+        return true;
+      } catch {
+        clearAdminSession("Token invalid or admin overview unavailable.");
+        return false;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [clearAdminSession],
+  );
+
   useEffect(() => {
     const storedToken = window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY);
     if (!storedToken) {
       return;
     }
-    void loadOverview(storedToken);
-  }, []);
+    let active = true;
+    queueMicrotask(() => {
+      if (active) {
+        void loadOverview(storedToken, false);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [loadOverview]);
 
   useEffect(() => {
     if (!token) {
@@ -106,48 +162,7 @@ export default function AdminAlphaPage() {
         }
         clearAdminSession("Admin overview unavailable.");
       });
-  }, [showRevokedInvites, token]);
-
-  function clearAdminSession(message: string) {
-    revokedRefreshRequestIdRef.current += 1;
-    setError(message);
-    setToken("");
-    window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
-    setFamilies([]);
-    setAccounts([]);
-    setUsageRows([]);
-    setGeneratedInvites([]);
-    setSelectedParentId(null);
-    setFamilyDetail(null);
-    setPendingAccountActionIds([]);
-    setSelectedAccountIds([]);
-    setDeleteConfirmation("");
-    setNotice("");
-    setIsDeletingTestAccounts(false);
-  }
-
-  async function loadOverview(nextToken: string): Promise<boolean> {
-    setIsLoading(true);
-    setError("");
-    try {
-      const [overviewResponse, accountResponse, usageResponse] = await Promise.all([
-        getAdminAlphaOverview(nextToken, showRevokedInvites),
-        getAdminAlphaAccounts(nextToken),
-        getAdminAlphaAIUsage(nextToken),
-      ]);
-      setFamilies(overviewResponse.families);
-      setAccounts(accountResponse.accounts);
-      setUsageRows(usageResponse.usage);
-      setToken(nextToken);
-      window.sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, nextToken);
-      return true;
-    } catch {
-      clearAdminSession("Token invalid or admin overview unavailable.");
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
-  }
+  }, [clearAdminSession, showRevokedInvites, token]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -156,7 +171,7 @@ export default function AdminAlphaPage() {
       setError("Token invalid or admin overview unavailable.");
       return;
     }
-    await loadOverview(nextToken);
+    await loadOverview(nextToken, showRevokedInvites);
   }
 
   async function refreshAccounts() {
@@ -180,7 +195,7 @@ export default function AdminAlphaPage() {
         issued_to_note: inviteNote,
       });
       setGeneratedInvites(response.invites);
-      await loadOverview(token);
+      await loadOverview(token, showRevokedInvites);
     } catch {
       setError("Invite generation failed.");
     }
@@ -257,7 +272,7 @@ export default function AdminAlphaPage() {
           response.deleted_count === 1 ? "" : "s"
         }.`,
       );
-      await loadOverview(token);
+      await loadOverview(token, showRevokedInvites);
     } catch {
       setError("Test account delete failed.");
     } finally {
@@ -272,7 +287,7 @@ export default function AdminAlphaPage() {
     setError("");
     try {
       await revokeAdminAlphaInvite(token, row.invite_id);
-      await loadOverview(token);
+      await loadOverview(token, showRevokedInvites);
     } catch {
       setError("Invite revoke failed.");
     }

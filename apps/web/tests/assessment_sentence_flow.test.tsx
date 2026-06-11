@@ -8,15 +8,32 @@ import SentencePage from "../src/app/children/[studentId]/sentence/page";
 
 const apiMocks = vi.hoisted(() => ({
   createAssessment: vi.fn(),
+  createSentenceChallenge: vi.fn(),
+  completeSentenceChallenge: vi.fn(),
   createSentenceTraining: vi.fn(),
   demoLogin: vi.fn(),
 }));
 
 vi.mock("../src/lib/api", () => ({
   createAssessment: apiMocks.createAssessment,
+  createSentenceChallenge: apiMocks.createSentenceChallenge,
+  completeSentenceChallenge: apiMocks.completeSentenceChallenge,
   createSentenceTraining: apiMocks.createSentenceTraining,
   demoLogin: apiMocks.demoLogin,
 }));
+
+const challengeResponse = {
+  challenge: {
+    id: "training-1",
+    source_sentence: "小猫跑了。",
+    challenge_prompt: "请把句子写具体，加上动作和样子。",
+    hint: "可以写小猫怎么跑、跑到哪里、看起来怎么样。",
+    focus: "动作描写",
+    target_skill: "action_expression",
+    difficulty_label: "四年级基础",
+    grade_label: "四年级",
+  },
+};
 
 beforeEach(() => {
   apiMocks.demoLogin.mockResolvedValue({
@@ -72,6 +89,23 @@ beforeEach(() => {
       xp_delta: 20,
       level_after: 1,
       badge_code: null,
+    },
+  });
+  apiMocks.createSentenceChallenge.mockResolvedValue(challengeResponse);
+  apiMocks.completeSentenceChallenge.mockResolvedValue({
+    training: { id: "training-1" },
+    feedback: {
+      encouragement: "你写得很有画面感！",
+      highlight: "你加上了飞快地冲过去，动作更清楚了。",
+      suggestion: "还可以加一点表情或心情。",
+      example_upgrade: "小狗瞪大眼睛，飞快地冲过草地。",
+    },
+    settlement: { xp_delta: 25, level_after: 2 },
+    next_task: {
+      kind: "sentence",
+      title: "再练一句",
+      focus: "动作描写",
+      minutes: "5",
     },
   });
   apiMocks.createSentenceTraining.mockResolvedValue({
@@ -178,6 +212,9 @@ test("sentence page shows ai feedback and settlement", async () => {
     );
   });
 
+  await userEvent.click(
+    await screen.findByRole("button", { name: "自己带句子来练" }),
+  );
   await userEvent.type(await screen.findByLabelText("原句"), "公园很美。");
   await userEvent.type(
     screen.getByLabelText("升级后的句子"),
@@ -240,6 +277,9 @@ test("sentence page clears old feedback when retrying after success", async () =
     );
   });
 
+  await userEvent.click(
+    await screen.findByRole("button", { name: "自己带句子来练" }),
+  );
   await userEvent.type(await screen.findByLabelText("原句"), "公园很美。");
   await userEvent.type(
     screen.getByLabelText("升级后的句子"),
@@ -343,6 +383,9 @@ test("sentence page disables submit while pending and reports failures", async (
     );
   });
 
+  await userEvent.click(
+    await screen.findByRole("button", { name: "自己带句子来练" }),
+  );
   await userEvent.type(await screen.findByLabelText("原句"), "公园很美。");
   await userEvent.type(screen.getByLabelText("升级后的句子"), "公园里花香很浓。");
   const submit = screen.getByRole("button", { name: "提交给 AI 教练" });
