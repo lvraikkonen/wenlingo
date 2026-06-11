@@ -175,6 +175,49 @@ cleanup. It is guarded by a test-email allowlist and the confirmation text
 `DELETE TEST ACCOUNTS`. Do not use it for real Alpha families. The action must
 reject protected demo/system accounts and any batch containing a non-test email.
 
+## V0.5b AI Infrastructure And Sentence Train
+
+Magic Code email config:
+
+| Variable | V0.5b Railway Dev value |
+| --- | --- |
+| `ENVIRONMENT` | `development` for Railway Dev, `staging` for staging, `production` for production |
+| `MAGIC_CODE_EMAIL_PROVIDER` | `resend` |
+| `MAGIC_CODE_FROM_EMAIL` | `login@your-verified-domain.example` |
+| `RESEND_API_KEY` | Resend API key stored as a server-side secret |
+| `RESEND_TIMEOUT_SECONDS` | `10` |
+| `MAGIC_CODE_DEV_ECHO` | `true` only for internal QA in `ENVIRONMENT=development`; `false` in staging and production |
+
+`MAGIC_CODE_DEV_ECHO=true` is not real email delivery. It is only for internal QA in `ENVIRONMENT=development`, where the dev code is intentionally echoed for testers. Startup must fail fast when `ENVIRONMENT=staging` or `ENVIRONMENT=production` and `MAGIC_CODE_DEV_ECHO=true`; do not use database URL heuristics for this guard.
+
+External Alpha invitations are blocked until the Resend sending domain is verified and at least one real Magic Code email is delivered successfully from `MAGIC_CODE_FROM_EMAIL`. If the domain is pending, Railway Dev may continue using Dev Echo for internal QA only, but the build is not ready for external family invitations.
+
+AI usage settings:
+
+| Variable | Default |
+| --- | --- |
+| `SENTENCE_CHALLENGE_DAILY_LIMIT_PER_STUDENT` | `10` |
+| `SENTENCE_FEEDBACK_DAILY_LIMIT_PER_STUDENT` | `10` |
+| `LLM_DAILY_LIMIT_TIMEZONE` | `Asia/Shanghai` |
+| `LLM_INPUT_COST_PER_1K_TOKENS` | `0` |
+| `LLM_OUTPUT_COST_PER_1K_TOKENS` | `0` |
+
+### V0.5b AI Sentence Challenge Smoke
+
+1. Dev Echo login with code `123456` in `ENVIRONMENT=development`.
+2. Configure Resend in Railway Dev and verify one real Magic Code email after domain verification.
+3. Confirm staging/production startup fails if Dev Echo is enabled.
+4. Create or use an Alpha family.
+5. Open sentence workshop and receive an AI-generated or fallback challenge.
+6. Complete one challenge and verify short feedback, XP, and reaction.
+7. Challenge again and verify a new generated row.
+8. Exercise the daily limit path and verify `今天的句子挑战已经完成很多啦，休息一下，明天继续闯关！`.
+9. Switch to `自己带句子来练` and verify the old flow still works.
+10. Open parent summary and verify sentence training is lightly reflected.
+11. Open Admin `AI 使用量` and verify aggregate LLM usage and daily limit hits appear.
+12. Revoke an unused invite and verify it is hidden by default but visible when toggled.
+13. Verify cross-family sentence challenge access is rejected.
+
 ## Railway Project Layout
 
 Use one Railway project with three services:
