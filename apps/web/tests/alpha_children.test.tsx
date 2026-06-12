@@ -8,6 +8,7 @@ import {
   getMyAlphaChildren,
   recordAlphaEvent,
 } from "../src/lib/api";
+import { ALPHA_PARENT_STORAGE_KEY } from "../src/lib/alphaParent";
 import { ALPHA_SESSION_STORAGE_KEY } from "../src/lib/alphaSession";
 
 const push = vi.fn();
@@ -123,6 +124,37 @@ test("children list records child handoff click with student id", async () => {
     alpha_session_id: "session-1",
     payload: { path: "/parent/children", status: "clicked" },
   });
+});
+
+test("children page logs out only the current browser and clears local alpha family marker", async () => {
+  window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "parent-1");
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = input.toString();
+    if (url.endsWith("/api/auth/logout")) {
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<ParentChildrenPage />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "退出当前浏览器登录" }));
+
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/api/auth/logout",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+      }),
+    );
+  });
+  expect(window.localStorage.getItem(ALPHA_PARENT_STORAGE_KEY)).toBeNull();
+  expect(replace).toHaveBeenCalledWith("/alpha/start");
 });
 
 test("new child page validates required nickname before submit", async () => {

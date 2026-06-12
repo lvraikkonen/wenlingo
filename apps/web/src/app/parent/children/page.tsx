@@ -8,8 +8,9 @@ import {
   isUnauthorizedError,
   recordAlphaEvent,
 } from "../../../lib/api";
+import { clearStoredAlphaParentId } from "../../../lib/alphaParent";
 import { getStoredAlphaSessionId } from "../../../lib/alphaSession";
-import { bindPhone } from "../../../lib/authSession";
+import { bindPhone, logoutParentSession } from "../../../lib/authSession";
 import type { AlphaChildrenResponse } from "../../../lib/types";
 
 export default function ParentChildrenPage() {
@@ -22,6 +23,7 @@ export default function ParentChildrenPage() {
   const [phoneError, setPhoneError] = useState("");
   const [isSavingPhone, setIsSavingPhone] = useState(false);
   const [isEditingPhone, setIsEditingPhone] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const boundPhoneMasked = phoneMasked || data?.account?.phone_masked || "";
 
@@ -93,6 +95,24 @@ export default function ParentChildrenPage() {
     setPhone("");
     setPhoneError("");
     setIsEditingPhone(false);
+  }
+
+  async function handleLogout() {
+    if (isLoggingOut) {
+      return;
+    }
+
+    setIsLoggingOut(true);
+    setError("");
+    try {
+      await logoutParentSession();
+      clearStoredAlphaParentId();
+      router.replace("/alpha/start");
+    } catch {
+      setError("退出登录失败，请稍后再试。");
+    } finally {
+      setIsLoggingOut(false);
+    }
   }
 
   return (
@@ -177,12 +197,22 @@ export default function ParentChildrenPage() {
               )
             ) : null}
           </div>
-          <Link
-            href="/parent/children/new"
-            className="inline-flex w-fit rounded-lg bg-[var(--wen-orange)] px-5 py-3 font-semibold text-white"
-          >
-            创建孩子档案
-          </Link>
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/parent/children/new"
+              className="inline-flex w-fit rounded-lg bg-[var(--wen-orange)] px-5 py-3 font-semibold text-white"
+            >
+              创建孩子档案
+            </Link>
+            <button
+              type="button"
+              onClick={handleLogout}
+              disabled={isLoggingOut}
+              className="rounded-lg border border-[var(--wen-border)] bg-white px-5 py-3 font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isLoggingOut ? "正在退出..." : "退出当前浏览器登录"}
+            </button>
+          </div>
         </div>
 
         {isLoading ? (

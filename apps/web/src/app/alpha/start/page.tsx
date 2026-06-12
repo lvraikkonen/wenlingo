@@ -349,6 +349,15 @@ export default function AlphaStartPage() {
     setError("");
   }
 
+  function switchFromStaleFamilyToExistingLogin() {
+    clearStoredAlphaParentId();
+    window.dispatchEvent(new Event(ALPHA_PARENT_STORAGE_EVENT));
+    setEntryMode("existing_account");
+    setCodeRequested(false);
+    setCode("");
+    setError("");
+  }
+
   return (
     <main className="min-h-screen px-5 py-8 sm:px-8">
       <section className="mx-auto max-w-3xl rounded-lg border border-[var(--wen-border)] bg-white p-6 shadow-sm">
@@ -411,6 +420,13 @@ export default function AlphaStartPage() {
                 className="rounded-lg border border-[var(--wen-border)] bg-white px-5 py-3 font-semibold"
               >
                 重新创建 Alpha 家庭
+              </button>
+              <button
+                type="button"
+                onClick={switchFromStaleFamilyToExistingLogin}
+                className="rounded-lg border border-[var(--wen-border)] bg-white px-5 py-3 font-semibold"
+              >
+                这不是我的家庭，使用已有账号登录
               </button>
             </div>
             {error ? (

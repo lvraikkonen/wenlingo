@@ -575,6 +575,39 @@ test("routes to children when legacy bind fails but session parent children is r
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
 
+test("legacy migration page can clear stale local family and switch to existing account login", async () => {
+  window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "stale-parent-1");
+
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.endsWith("/api/auth/session")) {
+        return jsonResponse({ authenticated: false });
+      }
+      if (url.endsWith("/api/alpha/events")) {
+        return jsonResponse({ ok: true });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }),
+  );
+
+  render(<AlphaStartPage />);
+
+  expect(
+    await screen.findByText("绑定邮箱继续使用当前 Alpha 家庭"),
+  ).toBeInTheDocument();
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "这不是我的家庭，使用已有账号登录" }),
+  );
+
+  expect(window.localStorage.getItem(ALPHA_PARENT_STORAGE_KEY)).toBeNull();
+  expect(screen.getByRole("button", { name: "已有账号登录" })).toBeInTheDocument();
+  expect(screen.getByLabelText("邮箱")).toBeInTheDocument();
+  expect(screen.queryByLabelText("内测邀请码")).not.toBeInTheDocument();
+});
+
 test("clears requested code state when email or invite changes", async () => {
   vi.stubGlobal(
     "fetch",

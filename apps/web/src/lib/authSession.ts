@@ -69,6 +69,12 @@ export function verifyMagicCode(payload: {
   });
 }
 
+export function logoutParentSession(): Promise<{ ok: boolean }> {
+  return authRequestJson<{ ok: boolean }>("/api/auth/logout", {
+    method: "POST",
+  });
+}
+
 export function bindPhone(payload: { phone: string }): Promise<{
   phone_masked: string;
   phone_bound: boolean;
