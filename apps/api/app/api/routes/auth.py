@@ -93,7 +93,8 @@ def verify_parent_magic_code(
     session.commit()
     session.refresh(account)
 
-    return auth_session_payload(account=account)
+    parent = get_linked_parent_for_account(db=session, account_id=account.id)
+    return auth_session_payload(account=account, parent_id=parent.id if parent else None)
 
 
 @router.get("/session")

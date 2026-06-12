@@ -3,7 +3,7 @@ from datetime import timedelta
 import pytest
 from sqlmodel import select
 
-from app.domain.models import AuthMagicCode, ParentAccount, utcnow
+from app.domain.models import AuthMagicCode, ParentAccount, ParentUser, utcnow
 from app.services.auth_security import hash_secret
 
 GENERIC_REQUEST_MESSAGE = "如果邮箱可用，我们已经发送验证码。"
@@ -153,6 +153,35 @@ def test_verify_magic_code_creates_account_masks_email_and_sets_session_cookie(c
     ).one()
     assert account.email_verified_at is not None
     assert account.last_login_at is not None
+
+
+def test_verify_magic_code_for_linked_alpha_account_returns_parent_id(client, session):
+    account = ParentAccount(
+        email_normalized="parent@example.com",
+        email_verified_at=utcnow(),
+    )
+    session.add(account)
+    session.commit()
+    session.refresh(account)
+    parent = ParentUser(
+        email="parent@example.com",
+        display_name="Alpha Parent",
+        account_id=account.id,
+        account_linked_at=utcnow(),
+    )
+    session.add(parent)
+    session.commit()
+    session.refresh(parent)
+    _insert_code(session)
+
+    response = client.post(
+        "/api/auth/magic-codes/verify",
+        json={"email": "parent@example.com", "code": "123456"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["authenticated"] is True
+    assert response.json()["parent_id"] == parent.id
 
 
 @pytest.mark.parametrize(
