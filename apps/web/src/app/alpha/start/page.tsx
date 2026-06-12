@@ -27,6 +27,8 @@ const ALPHA_PARENT_STORAGE_EVENT = "wenlingo-alpha-parent-storage";
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 const DISABLED_ACCOUNT_MESSAGE = "账号暂不可用，请联系邀请人。";
+const UNLINKED_ACCOUNT_MESSAGE = "这个邮箱还没有 Alpha 家庭，请使用邀请码创建。";
+type EntryMode = "create_family" | "existing_account";
 
 function isDisabledAccountError(error: unknown): boolean {
   return (
@@ -74,6 +76,7 @@ async function bindLegacyParent(legacyParentId: string) {
 export default function AlphaStartPage() {
   const router = useRouter();
   const [displayName, setDisplayName] = useState("Alpha 家长");
+  const [entryMode, setEntryMode] = useState<EntryMode>("create_family");
   const [inviteCode, setInviteCode] = useState("");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -152,6 +155,12 @@ export default function AlphaStartPage() {
     }
   }
 
+  function switchEntryMode(nextMode: EntryMode) {
+    setEntryMode(nextMode);
+    resetRequestedCode();
+    setError("");
+  }
+
   async function finishLegacyBind() {
     if (!storedParentId) {
       return false;
@@ -200,7 +209,11 @@ export default function AlphaStartPage() {
       setError("请输入邮箱。");
       return;
     }
-    if (!isLegacyMigration && !trimmedInviteCode) {
+    if (
+      !isLegacyMigration &&
+      entryMode === "create_family" &&
+      !trimmedInviteCode
+    ) {
       setError("请输入内测邀请码。");
       return;
     }
@@ -209,7 +222,7 @@ export default function AlphaStartPage() {
     setError("");
     let inviteValidated = false;
     try {
-      if (!isLegacyMigration) {
+      if (!isLegacyMigration && entryMode === "create_family") {
         await validateAlphaInvite({
           code: trimmedInviteCode,
           alpha_session_id: alphaSessionId,
@@ -225,7 +238,7 @@ export default function AlphaStartPage() {
       setError(
         isLegacyMigration
           ? "验证码发送失败，请稍后再试。"
-          : inviteValidated
+          : entryMode === "existing_account" || inviteValidated
             ? "验证码发送失败，请稍后再试。"
             : "邀请码无效或已失效，请检查后再试。",
       );
@@ -281,6 +294,11 @@ export default function AlphaStartPage() {
       if (verifiedParentId) {
         setStoredAlphaParentId(verifiedParentId);
         router.push("/parent/children");
+        return;
+      }
+
+      if (entryMode === "existing_account") {
+        setError(UNLINKED_ACCOUNT_MESSAGE);
         return;
       }
 
@@ -416,24 +434,52 @@ export default function AlphaStartPage() {
               <p>继续使用表示家长同意参与本次内测。</p>
             </div>
             <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-              <label className="block font-semibold">
-                家长怎么称呼？
-                <input
-                  value={displayName}
-                  onChange={(event) => setDisplayName(event.target.value)}
-                  maxLength={40}
-                  className="mt-2 w-full rounded-lg border border-[var(--wen-border)] p-3"
-                />
-              </label>
-              <label className="block font-semibold">
-                内测邀请码
-                <input
-                  value={inviteCode}
-                  onChange={(event) => handleInviteCodeChange(event.target.value)}
-                  maxLength={40}
-                  className="mt-2 w-full rounded-lg border border-[var(--wen-border)] p-3"
-                />
-              </label>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => switchEntryMode("create_family")}
+                  className={
+                    entryMode === "create_family"
+                      ? "rounded-lg bg-[var(--wen-orange)] px-4 py-2 text-sm font-bold text-white"
+                      : "rounded-lg border border-[var(--wen-border)] bg-white px-4 py-2 text-sm font-bold"
+                  }
+                >
+                  创建 Alpha 家庭
+                </button>
+                <button
+                  type="button"
+                  onClick={() => switchEntryMode("existing_account")}
+                  className={
+                    entryMode === "existing_account"
+                      ? "rounded-lg bg-[var(--wen-orange)] px-4 py-2 text-sm font-bold text-white"
+                      : "rounded-lg border border-[var(--wen-border)] bg-white px-4 py-2 text-sm font-bold"
+                  }
+                >
+                  已有账号登录
+                </button>
+              </div>
+              {entryMode === "create_family" ? (
+                <>
+                  <label className="block font-semibold">
+                    家长怎么称呼？
+                    <input
+                      value={displayName}
+                      onChange={(event) => setDisplayName(event.target.value)}
+                      maxLength={40}
+                      className="mt-2 w-full rounded-lg border border-[var(--wen-border)] p-3"
+                    />
+                  </label>
+                  <label className="block font-semibold">
+                    内测邀请码
+                    <input
+                      value={inviteCode}
+                      onChange={(event) => handleInviteCodeChange(event.target.value)}
+                      maxLength={40}
+                      className="mt-2 w-full rounded-lg border border-[var(--wen-border)] p-3"
+                    />
+                  </label>
+                </>
+              ) : null}
               <label className="block font-semibold">
                 邮箱
                 <input
@@ -468,7 +514,7 @@ export default function AlphaStartPage() {
                 disabled={isSubmitting || !codeRequested}
                 className="rounded-lg bg-[var(--wen-orange)] px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
               >
-                继续使用 Alpha
+                {entryMode === "existing_account" ? "登录 Alpha" : "继续使用 Alpha"}
               </button>
             </form>
             {error ? (

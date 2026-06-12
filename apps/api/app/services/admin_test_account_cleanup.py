@@ -31,6 +31,7 @@ from app.services.auth_security import mask_email
 logger = logging.getLogger(__name__)
 
 DELETE_TEST_CONFIRMATION = "DELETE TEST ACCOUNTS"
+DELETE_ALPHA_ACCOUNT_CONFIRMATION = "DELETE ALPHA ACCOUNT"
 MAX_DELETE_TEST_ACCOUNTS = 20
 PROTECTED_EMAILS = {"demo@wenlingo.local"}
 ALLOWLIST_DOMAINS = {"example.com", "test.local", "wenlingo.local"}
@@ -82,9 +83,14 @@ def _is_protected_account(session: Session, account: ParentAccount) -> bool:
 
 
 def _require_valid_request(
-    session: Session, account_ids: list[str], confirm: str
+    session: Session,
+    account_ids: list[str],
+    confirm: str,
+    *,
+    confirmation_text: str,
+    allow_real_email: bool = False,
 ) -> list[ParentAccount]:
-    if confirm != DELETE_TEST_CONFIRMATION:
+    if confirm != confirmation_text:
         raise HTTPException(status_code=400, detail="confirmation text is required")
     if not account_ids:
         raise HTTPException(status_code=400, detail="account_ids must not be empty")
@@ -102,11 +108,65 @@ def _require_valid_request(
         account
         for account in accounts
         if _is_protected_account(session, account)
-        or not is_test_account_email(account.email_normalized)
+        or (not allow_real_email and not is_test_account_email(account.email_normalized))
     ]
     if rejected:
         raise HTTPException(status_code=409, detail="batch contains non-test account")
     return accounts
+
+
+def _account_deletion_preview(session: Session, account: ParentAccount) -> DeletedTestAccount:
+    parents = session.exec(
+        select(ParentUser).where(ParentUser.account_id == account.id)
+    ).all()
+    parent_ids = {parent.id for parent in parents}
+    children = (
+        session.exec(
+            select(StudentProfile).where(StudentProfile.parent_id.in_(parent_ids))
+        ).all()
+        if parent_ids
+        else []
+    )
+    invites = (
+        session.exec(
+            select(AlphaInviteCode).where(
+                AlphaInviteCode.consumed_by_parent_id.in_(parent_ids)
+            )
+        ).all()
+        if parent_ids
+        else []
+    )
+    sessions = session.exec(
+        select(ParentSession).where(ParentSession.account_id == account.id)
+    ).all()
+    return DeletedTestAccount(
+        account_id=account.id,
+        email_masked=mask_email(account.email_normalized),
+        parent_ids=sorted(parent_ids),
+        child_count=len(children),
+        deleted_session_count=len(sessions),
+        deleted_invite_count=len(invites),
+    )
+
+
+def preview_alpha_account_deletion(
+    session: Session,
+    *,
+    account_ids: list[str],
+    allow_real_email: bool = False,
+) -> DeleteTestAccountsResult:
+    accounts = _require_valid_request(
+        session,
+        account_ids,
+        DELETE_ALPHA_ACCOUNT_CONFIRMATION,
+        confirmation_text=DELETE_ALPHA_ACCOUNT_CONFIRMATION,
+        allow_real_email=allow_real_email,
+    )
+    return DeleteTestAccountsResult(
+        deleted_accounts=[
+            _account_deletion_preview(session, account) for account in accounts
+        ]
+    )
 
 
 def _delete_where_in(session: Session, model, field, values: set[str]) -> int:
@@ -123,10 +183,21 @@ def _flush_if_needed(session: Session, deleted_count: int) -> None:
         session.flush()
 
 
-def delete_test_accounts(
-    session: Session, *, account_ids: list[str], confirm: str
+def _delete_accounts(
+    session: Session,
+    *,
+    account_ids: list[str],
+    confirm: str,
+    confirmation_text: str,
+    allow_real_email: bool = False,
 ) -> DeleteTestAccountsResult:
-    accounts = _require_valid_request(session, account_ids, confirm)
+    accounts = _require_valid_request(
+        session,
+        account_ids,
+        confirm,
+        confirmation_text=confirmation_text,
+        allow_real_email=allow_real_email,
+    )
     deleted_accounts: list[DeletedTestAccount] = []
 
     for account in accounts:
@@ -249,3 +320,31 @@ def delete_test_accounts(
         },
     )
     return DeleteTestAccountsResult(deleted_accounts=deleted_accounts)
+
+
+def delete_test_accounts(
+    session: Session, *, account_ids: list[str], confirm: str
+) -> DeleteTestAccountsResult:
+    return _delete_accounts(
+        session,
+        account_ids=account_ids,
+        confirm=confirm,
+        confirmation_text=DELETE_TEST_CONFIRMATION,
+        allow_real_email=False,
+    )
+
+
+def delete_alpha_accounts(
+    session: Session,
+    *,
+    account_ids: list[str],
+    confirm: str,
+    allow_real_email: bool = False,
+) -> DeleteTestAccountsResult:
+    return _delete_accounts(
+        session,
+        account_ids=account_ids,
+        confirm=confirm,
+        confirmation_text=DELETE_ALPHA_ACCOUNT_CONFIRMATION,
+        allow_real_email=allow_real_email,
+    )

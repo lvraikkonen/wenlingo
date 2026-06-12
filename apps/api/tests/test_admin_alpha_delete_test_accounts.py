@@ -1,5 +1,7 @@
 from datetime import timedelta
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
@@ -29,7 +31,11 @@ from app.domain.models import (
     utcnow,
 )
 from app.main import create_app
-from app.services.admin_test_account_cleanup import is_test_account_email
+from app.services.admin_test_account_cleanup import (
+    DELETE_ALPHA_ACCOUNT_CONFIRMATION,
+    delete_alpha_accounts,
+    is_test_account_email,
+)
 from app.services.auth_security import hash_secret
 
 
@@ -126,6 +132,40 @@ def test_delete_test_accounts_rejects_mixed_batch_and_deletes_none(session, monk
     assert response.status_code == 409
     assert session.get(ParentAccount, test_account.id) is not None
     assert session.get(ParentAccount, real_account.id) is not None
+
+
+def test_delete_alpha_accounts_rejects_real_email_without_explicit_flag(session):
+    account = add_account(session, "family@qq.com")
+
+    with pytest.raises(HTTPException) as exc_info:
+        delete_alpha_accounts(
+            session,
+            account_ids=[account.id],
+            confirm=DELETE_ALPHA_ACCOUNT_CONFIRMATION,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert session.get(ParentAccount, account.id) is not None
+
+
+def test_delete_alpha_accounts_allows_real_email_with_explicit_flag(session, monkeypatch):
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+    account = add_account(session, "family@qq.com")
+    parent, child, invite = seed_test_family_graph(session, account)
+
+    result = delete_alpha_accounts(
+        session,
+        account_ids=[account.id],
+        confirm=DELETE_ALPHA_ACCOUNT_CONFIRMATION,
+        allow_real_email=True,
+    )
+
+    assert result.deleted_count == 1
+    assert result.deleted_accounts[0].email_masked == "fa***@qq.com"
+    assert session.get(ParentAccount, account.id) is None
+    assert session.get(ParentUser, parent.id) is None
+    assert session.get(StudentProfile, child.id) is None
+    assert session.get(AlphaInviteCode, invite.id) is None
 
 
 def seed_test_family_graph(session, account: ParentAccount):

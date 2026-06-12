@@ -112,6 +112,29 @@ Do not commit `.env`. After running the 小宇 essay revision path, create a QA
 record under `qa/` with provider/model, prompt version, whether retry/fallback
 triggered, and the manual AI quality verdict.
 
+## Environment Variables
+
+The full environment variable checklist lives in `docs/env-vars.md`. Use it
+before every Railway Dev, staging, or production config change.
+
+Common variables that are easy to miss during Alpha QA:
+
+- `NEXT_PUBLIC_API_BASE_URL` is set on `wenlingo-web` before build and requires
+  a web redeploy when changed.
+- `CORS_ALLOW_ORIGINS` and `AUTH_ALLOWED_ORIGINS` are set on `wenlingo-api`,
+  must use full web HTTPS origins with no trailing slash, and require an API
+  restart/redeploy when changed.
+- `AUTH_SECRET_PEPPER` must be stable once Magic Code sessions are in use.
+- `MAGIC_CODE_EMAIL_PROVIDER`, `MAGIC_CODE_FROM_EMAIL`, and provider secrets
+  such as `RESEND_API_KEY` are API-only values.
+- `MAGIC_CODE_DEV_ECHO=true` is only for internal QA in
+  `ENVIRONMENT=development`; real email QA should use `MAGIC_CODE_DEV_ECHO=false`.
+- `LLM_DAILY_LIMIT_ENABLED=true` is required before Daily limit QA can trigger
+  the V0.5b sentence challenge rest message.
+- `SENTENCE_CHALLENGE_DAILY_LIMIT_PER_STUDENT` and
+  `SENTENCE_FEEDBACK_DAILY_LIMIT_PER_STUDENT` control V0.5b sentence limits
+  once daily limits are enabled.
+
 ## Railway Alpha Deployment
 
 The V0.4.1a Alpha deployment target is Railway. Use one Railway project with

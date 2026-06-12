@@ -36,6 +36,19 @@ def test_revoke_parent_sessions_validates_account_id_target_exists():
     assert 'SystemExit("account not found")' in text
 
 
+def test_cleanup_alpha_accounts_script_has_manual_safety_gates():
+    path = Path("app/ops/cleanup_alpha_accounts.py")
+    assert path.exists()
+    text = path.read_text(encoding="utf-8")
+
+    assert "--allow-real-email" in text
+    assert "--dry-run" in text
+    assert "DELETE ALPHA ACCOUNT" in text
+    assert 'settings.environment == "production"' in text
+    assert "allow_real_email=args.allow_real_email" in text
+    assert "mask_email" in text
+
+
 def test_playwright_alpha_seed_requires_explicit_flag(monkeypatch):
     from app.db import seed_playwright_alpha
 
