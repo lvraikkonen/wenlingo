@@ -76,7 +76,7 @@ test("shows alpha notice before creating a parent", async () => {
   expect(screen.getByRole("button", { name: "继续使用 Alpha" })).toBeInTheDocument();
 });
 
-test("creates alpha parent after validating invite and email code stores id and routes to children page", async () => {
+test("creates alpha parent after validating invite and email code routes without writing legacy parent id", async () => {
   window.localStorage.setItem(ALPHA_SESSION_STORAGE_KEY, "session-1");
   render(<AlphaStartPage />);
 
@@ -127,7 +127,7 @@ test("creates alpha parent after validating invite and email code stores id and 
   expect(vi.mocked(verifyMagicCode).mock.invocationCallOrder[0]).toBeLessThan(
     vi.mocked(createAlphaParent).mock.invocationCallOrder[0],
   );
-  expect(window.localStorage.getItem(ALPHA_PARENT_STORAGE_KEY)).toBe("parent-1");
+  expect(window.localStorage.getItem(ALPHA_PARENT_STORAGE_KEY)).toBeNull();
   expect(push).toHaveBeenCalledWith("/parent/children");
 });
 

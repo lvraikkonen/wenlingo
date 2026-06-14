@@ -12,7 +12,6 @@ import {
 import {
   clearStoredAlphaParentId,
   getStoredAlphaParentId,
-  setStoredAlphaParentId,
 } from "../../../lib/alphaParent";
 import { getStoredAlphaSessionId } from "../../../lib/alphaSession";
 import {
@@ -166,8 +165,7 @@ export default function AlphaStartPage() {
       return false;
     }
 
-    const response = await bindLegacyParent(storedParentId);
-    setStoredAlphaParentId(response.parent.id);
+    await bindLegacyParent(storedParentId);
     router.push("/parent/children");
     return true;
   }
@@ -177,7 +175,6 @@ export default function AlphaStartPage() {
       const session = await getAuthSession();
       const parentId = linkedParentId(session);
       if (parentId) {
-        setStoredAlphaParentId(parentId);
         router.push("/parent/children");
         return true;
       }
@@ -189,8 +186,7 @@ export default function AlphaStartPage() {
     }
 
     try {
-      const children = await getMyAlphaChildren();
-      setStoredAlphaParentId(children.parent.id);
+      await getMyAlphaChildren();
       router.push("/parent/children");
       return true;
     } catch {
@@ -292,7 +288,6 @@ export default function AlphaStartPage() {
 
       const verifiedParentId = linkedParentId(verifiedSession);
       if (verifiedParentId) {
-        setStoredAlphaParentId(verifiedParentId);
         router.push("/parent/children");
         return;
       }
@@ -321,7 +316,6 @@ export default function AlphaStartPage() {
         invite_code: trimmedInviteCode,
         alpha_session_id: alphaSessionId,
       });
-      setStoredAlphaParentId(response.parent.id);
       router.push(response.children_url);
     } catch (error) {
       if (isDisabledAccountError(error)) {
