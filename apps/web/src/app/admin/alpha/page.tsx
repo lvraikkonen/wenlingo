@@ -38,6 +38,10 @@ function formatPhoneStatus(row: AdminAlphaOverviewRow): string {
   return row.phone_bound ? "Phone bound" : "Phone not bound";
 }
 
+function formatEstimatedCost(cost: number): string {
+  return `$${cost.toFixed(6)}`;
+}
+
 function canRevokeInvite(row: AdminAlphaOverviewRow): boolean {
   return row.invite_status === "issued" && !row.parent_id;
 }
@@ -48,6 +52,7 @@ export default function AdminAlphaPage() {
   const [families, setFamilies] = useState<AdminAlphaOverviewRow[]>([]);
   const [accounts, setAccounts] = useState<AdminAlphaAccountRow[]>([]);
   const [usageRows, setUsageRows] = useState<AdminAlphaAIUsageRow[]>([]);
+  const [pricingConfigured, setPricingConfigured] = useState(false);
   const [showRevokedInvites, setShowRevokedInvites] = useState(false);
   const [generatedInvites, setGeneratedInvites] = useState<
     AdminAlphaInviteCreateResponse["invites"]
@@ -79,6 +84,7 @@ export default function AdminAlphaPage() {
     setFamilies([]);
     setAccounts([]);
     setUsageRows([]);
+    setPricingConfigured(false);
     setGeneratedInvites([]);
     setSelectedParentId(null);
     setFamilyDetail(null);
@@ -106,6 +112,7 @@ export default function AdminAlphaPage() {
         setFamilies(overviewResponse.families);
         setAccounts(accountResponse.accounts);
         setUsageRows(usageResponse.usage);
+        setPricingConfigured(usageResponse.pricing_configured);
         setToken(nextToken);
         window.sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, nextToken);
         return true;
@@ -658,7 +665,11 @@ export default function AdminAlphaPage() {
                           <td className="px-3 py-2">{row.prompt_tokens}</td>
                           <td className="px-3 py-2">{row.completion_tokens}</td>
                           <td className="px-3 py-2">{row.total_tokens}</td>
-                          <td className="px-3 py-2">{row.estimated_cost}</td>
+                          <td className="px-3 py-2">
+                            {pricingConfigured
+                              ? formatEstimatedCost(row.estimated_cost)
+                              : "未配置价格"}
+                          </td>
                           <td className="px-3 py-2">{row.failure_count}</td>
                           <td className="px-3 py-2">
                             {row.daily_limit_hit_count}
