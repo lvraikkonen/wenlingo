@@ -18,6 +18,7 @@ import { FeedbackReaction } from "../src/components/FeedbackReaction";
 import { ParentSummaryFeedback } from "../src/components/ParentSummaryFeedback";
 import { ALPHA_SESSION_STORAGE_KEY } from "../src/lib/alphaSession";
 import { ApiRequestError } from "../src/lib/api";
+import { useAssessmentRecommendation } from "../src/lib/useAssessmentRecommendation";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -30,6 +31,26 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function AssessmentRecommendationProbe({ studentId }: { studentId: string }) {
+  const {
+    shouldShowAssessmentRecommendation,
+    dismissAssessmentRecommendation,
+  } = useAssessmentRecommendation(studentId);
+
+  return (
+    <div>
+      <p>
+        {shouldShowAssessmentRecommendation
+          ? `recommendation shown for ${studentId}`
+          : `recommendation hidden for ${studentId}`}
+      </p>
+      <button type="button" onClick={dismissAssessmentRecommendation}>
+        dismiss recommendation
+      </button>
+    </div>
+  );
+}
+
 const apiMocks = vi.hoisted(() => ({
   createAssessment: vi.fn(),
   createSentenceChallenge: vi.fn(),
@@ -39,6 +60,7 @@ const apiMocks = vi.hoisted(() => ({
   submitEssayRevision: vi.fn(),
   demoLogin: vi.fn(),
   getAlphaChildren: vi.fn(),
+  getDashboard: vi.fn(),
   getMyAlphaChildSummary: vi.fn(),
   recordAlphaEvent: vi.fn(async () => undefined),
   saveFeedbackReaction: vi.fn(),
@@ -69,6 +91,7 @@ vi.mock("../src/lib/api", () => ({
   submitEssayRevision: apiMocks.submitEssayRevision,
   demoLogin: apiMocks.demoLogin,
   getAlphaChildren: apiMocks.getAlphaChildren,
+  getDashboard: apiMocks.getDashboard,
   getMyAlphaChildSummary: apiMocks.getMyAlphaChildSummary,
   isUnauthorizedError: (error: unknown) =>
     typeof error === "object" &&
@@ -154,6 +177,40 @@ beforeEach(() => {
     next_task: { kind: "sentence", title: "再练一句", focus: "动作描写", minutes: "5" },
   });
   apiMocks.createSentenceTraining.mockResolvedValue(existingFreeInputResponse);
+  apiMocks.getDashboard.mockResolvedValue({
+    student: {
+      id: "s1",
+      name: "小星",
+      grade_label: "四年级",
+      persona: "real_child",
+      level: 1,
+      xp: 0,
+    },
+    ability_note: "等待入门小试点",
+    assessment_completed: false,
+    assessment_recommended: true,
+    child_abilities: {
+      reading_power: 40,
+      specific_writing_power: 40,
+      revision_power: 40,
+    },
+    today_tasks: {
+      main: {
+        kind: "assessment",
+        title: "入门小试炼",
+        focus: "第一张能力草图",
+        minutes: "3-5",
+      },
+      quick: {
+        kind: "sentence",
+        title: "句子工坊",
+        focus: "加细节",
+        minutes: "5-8",
+      },
+    },
+    map: ["句子工坊", "作文城堡", "阅读峡谷"],
+    coach_message: "今天先完成推荐任务，再看看哪里变强了。",
+  });
   apiMocks.createEssay.mockResolvedValue({
     essay: { id: "essay-1" },
     first_draft: {
@@ -786,6 +843,100 @@ test("sentence page loads an ai challenge by default", async () => {
   expect(apiMocks.createSentenceTraining).not.toHaveBeenCalled();
 });
 
+test("sentence page recommends initial assessment but allows continuing practice", async () => {
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <SentencePage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    );
+  });
+
+  expect(await screen.findByText("先点亮第一张能力草图")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "先去小试炼" })).toHaveAttribute(
+    "href",
+    "/children/s1/assessment",
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "今天先练句子" }));
+
+  await waitFor(() =>
+    expect(screen.queryByText("先点亮第一张能力草图")).not.toBeInTheDocument(),
+  );
+  expect(await screen.findByText("小猫跑了。")).toBeInTheDocument();
+});
+
+test("sentence page hides assessment recommendation after assessment completion", async () => {
+  apiMocks.getDashboard.mockResolvedValueOnce({
+    student: {
+      id: "s1",
+      name: "小星",
+      grade_label: "四年级",
+      persona: "real_child",
+      level: 1,
+      xp: 0,
+    },
+    ability_note: "第一张能力草图",
+    assessment_completed: true,
+    assessment_recommended: false,
+    child_abilities: {
+      reading_power: 40,
+      specific_writing_power: 46,
+      revision_power: 40,
+    },
+    today_tasks: {
+      main: {
+        kind: "essay",
+        title: "作文城堡",
+        focus: "把细节写具体",
+        minutes: "10-15",
+      },
+      quick: {
+        kind: "sentence",
+        title: "句子工坊",
+        focus: "加细节",
+        minutes: "5-8",
+      },
+    },
+    map: ["句子工坊", "作文城堡", "阅读峡谷"],
+    coach_message: "今天先完成推荐任务，再看看哪里变强了。",
+  });
+
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <SentencePage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    );
+  });
+
+  expect(await screen.findByText("小猫跑了。")).toBeInTheDocument();
+  expect(screen.queryByText("先点亮第一张能力草图")).not.toBeInTheDocument();
+});
+
+test("assessment recommendation dismissal resets when student id changes", async () => {
+  const { rerender } = render(<AssessmentRecommendationProbe studentId="s1" />);
+
+  expect(
+    await screen.findByText("recommendation shown for s1"),
+  ).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "dismiss recommendation" }));
+  await waitFor(() =>
+    expect(screen.getByText("recommendation hidden for s1")).toBeInTheDocument(),
+  );
+
+  rerender(<AssessmentRecommendationProbe studentId="s2" />);
+  expect(
+    await screen.findByText("recommendation shown for s2"),
+  ).toBeInTheDocument();
+
+  rerender(<AssessmentRecommendationProbe studentId="s1" />);
+  expect(
+    await screen.findByText("recommendation shown for s1"),
+  ).toBeInTheDocument();
+});
+
 test("sentence page completes generated challenge and shows short feedback", async () => {
   apiMocks.createSentenceChallenge.mockResolvedValueOnce(challengeResponse);
   apiMocks.completeSentenceChallenge.mockResolvedValueOnce({
@@ -962,6 +1113,29 @@ test("sentence page ignores stale sentence completion after student route change
   expect(screen.queryByText("旧孩子的句子反馈。")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("AI 教练反馈")).not.toBeInTheDocument();
   expect(screen.queryByText("这次 AI 教练的提示对你有帮助吗？")).not.toBeInTheDocument();
+});
+
+test("essay page recommends initial assessment but allows continuing writing", async () => {
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    );
+  });
+
+  expect(await screen.findByText("先点亮第一张能力草图")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "先去小试炼" })).toHaveAttribute(
+    "href",
+    "/children/s1/assessment",
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "今天先写作文" }));
+
+  await waitFor(() =>
+    expect(screen.queryByText("先点亮第一张能力草图")).not.toBeInTheDocument(),
+  );
+  expect(screen.getByLabelText("作文题目")).toBeInTheDocument();
 });
 
 test("essay page renders draft and revision feedback reactions with persisted ids", async () => {

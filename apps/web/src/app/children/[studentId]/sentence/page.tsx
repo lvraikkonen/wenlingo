@@ -4,6 +4,7 @@ import Link from "next/link";
 import { use, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Loader2, Sparkles } from "lucide-react";
+import { AssessmentRecommendationCard } from "../../../../components/AssessmentRecommendationCard";
 import { FamilyTopbar } from "../../../../components/FamilyTopbar";
 import { FeedbackReaction } from "../../../../components/FeedbackReaction";
 import { SettlementPanel } from "../../../../components/SettlementPanel";
@@ -15,6 +16,7 @@ import {
   type SentenceFocus,
   type SentenceTrainingResponse,
 } from "../../../../lib/api";
+import { useAssessmentRecommendation } from "../../../../lib/useAssessmentRecommendation";
 import type {
   SentenceChallenge,
   SentenceChallengeCompletionResponse,
@@ -42,6 +44,10 @@ export default function SentencePage({
 
 function SentencePageContent({ studentId }: { studentId: string }) {
   const activeStudentId = useRef<string | null>(studentId);
+  const {
+    shouldShowAssessmentRecommendation,
+    dismissAssessmentRecommendation,
+  } = useAssessmentRecommendation(studentId);
   const [mode, setMode] = useState<Mode>("challenge");
   const [challenge, setChallenge] = useState<SentenceChallenge | null>(null);
   const [challengeResult, setChallengeResult] =
@@ -201,6 +207,16 @@ function SentencePageContent({ studentId }: { studentId: string }) {
               </p>
             </div>
           </div>
+
+          {shouldShowAssessmentRecommendation ? (
+            <div className="mb-5">
+              <AssessmentRecommendationCard
+                studentId={studentId}
+                continueLabel="今天先练句子"
+                onContinue={dismissAssessmentRecommendation}
+              />
+            </div>
+          ) : null}
 
           {mode === "challenge" ? (
             <div className="space-y-5">
