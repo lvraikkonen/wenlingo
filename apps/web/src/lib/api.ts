@@ -5,7 +5,7 @@ import type {
   AlphaEventCreate,
   AlphaInviteValidationResponse,
   AlphaParentResponse,
-  AdminAlphaAIUsageRow,
+  AdminAlphaAIUsageResponse,
   AdminAlphaAccountActionResponse,
   AdminAlphaAccountRow,
   AdminAlphaFamilyDetail,
@@ -455,8 +455,8 @@ export function getAdminAlphaOverview(
 
 export function getAdminAlphaAIUsage(
   token: string,
-): Promise<{ usage: AdminAlphaAIUsageRow[] }> {
-  return requestJson<{ usage: AdminAlphaAIUsageRow[] }>(
+): Promise<AdminAlphaAIUsageResponse> {
+  return requestJson<AdminAlphaAIUsageResponse>(
     "/api/admin/alpha/ai-usage",
     {
       headers: { "X-Alpha-Admin-Token": token },

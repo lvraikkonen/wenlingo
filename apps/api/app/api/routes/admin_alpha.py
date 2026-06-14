@@ -360,6 +360,10 @@ def alpha_admin_ai_usage(
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ):
+    pricing_configured = (
+        settings.llm_input_cost_per_1k_tokens > 0
+        or settings.llm_output_cost_per_1k_tokens > 0
+    )
     aggregates: dict[tuple[str, str, str], dict[str, Any]] = {}
     for log in session.exec(select(LLMCallLog)).all():
         usage_date = _product_day(log.created_at, settings.llm_daily_limit_timezone)
@@ -406,7 +410,7 @@ def alpha_admin_ai_usage(
         row["daily_limit_hit_count"] = limit_hits[(row["date"], row["task_type"])]
         row["estimated_cost"] = round(row["estimated_cost"], 6)
         rows.append(row)
-    return {"usage": rows}
+    return {"pricing_configured": pricing_configured, "usage": rows}
 
 
 @router.get("/overview", dependencies=[Depends(require_alpha_admin_token)])

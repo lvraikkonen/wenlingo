@@ -217,13 +217,18 @@ describe("api client", () => {
   });
 
   test("getAdminAlphaAIUsage uses admin token header", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ usage: [] }));
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ pricing_configured: false, usage: [] }),
+    );
 
-    await getAdminAlphaAIUsage("secret");
+    const result = await getAdminAlphaAIUsage("secret");
 
+    expect(result).toEqual({ pricing_configured: false, usage: [] });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:8000/api/admin/alpha/ai-usage",
       expect.objectContaining({
+        credentials: "include",
+        cache: "no-store",
         headers: { "X-Alpha-Admin-Token": "secret" },
       }),
     );

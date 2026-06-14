@@ -235,6 +235,11 @@ export type AdminAlphaAIUsageRow = {
   daily_limit_hit_count: number;
 };
 
+export type AdminAlphaAIUsageResponse = {
+  pricing_configured: boolean;
+  usage: AdminAlphaAIUsageRow[];
+};
+
 export type AdminAlphaAccountRow = {
   account_id: string;
   email_masked: string;
