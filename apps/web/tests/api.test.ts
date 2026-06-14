@@ -41,6 +41,8 @@ const demoLoginResponse = {
 const dashboardResponse = {
   student,
   ability_note: "阅读理解稳定，表达可以继续具体化。",
+  assessment_completed: true,
+  assessment_recommended: false,
   child_abilities: {
     reading_power: 50,
     specific_writing_power: 54,

@@ -26,6 +26,8 @@ export type RecommendedTask = {
 export type DashboardResponse = {
   student: Student;
   ability_note: string;
+  assessment_completed: boolean;
+  assessment_recommended: boolean;
   child_abilities: {
     reading_power: number;
     specific_writing_power: number;

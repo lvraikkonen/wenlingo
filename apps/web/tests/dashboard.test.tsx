@@ -58,6 +58,8 @@ vi.mock("../src/lib/api", () => ({
       xp: 115,
     },
     ability_note: "第一张能力草图",
+    assessment_completed: true,
+    assessment_recommended: false,
     child_abilities: {
       reading_power: 50,
       specific_writing_power: 54,

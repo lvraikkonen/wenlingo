@@ -28,10 +28,15 @@ def student_dashboard(
     ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
     if not ability:
         raise HTTPException(status_code=404, detail="student not found")
-    has_assessment = session.exec(select(Assessment).where(Assessment.student_id == student_id)).first() is not None
+    has_assessment = (
+        session.exec(select(Assessment).where(Assessment.student_id == student_id)).first()
+        is not None
+    )
     return {
         "student": student,
         "ability_note": "第一张能力草图" if has_assessment else "等待入门小试点",
+        "assessment_completed": has_assessment,
+        "assessment_recommended": not has_assessment,
         "child_abilities": to_child_abilities(ability),
         "today_tasks": choose_today_tasks(ability).model_dump(),
         "map": ["句子工坊", "作文城堡", "阅读峡谷"],

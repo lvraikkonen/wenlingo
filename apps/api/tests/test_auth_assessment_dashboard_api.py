@@ -3,6 +3,7 @@ from sqlmodel import select
 from app.domain.enums import TaskType
 from app.domain.models import (
     AbilityHistory,
+    AbilityProfile,
     Assessment,
     Essay,
     EssayVersion,
@@ -71,11 +72,39 @@ def test_assessment_creates_first_ability_sketch_and_dashboard(session, client):
     }
     dashboard = client.get(f"/api/students/{student_id}/dashboard").json()
     assert dashboard["ability_note"] == "第一张能力草图"
+    assert dashboard["assessment_completed"] is True
+    assert dashboard["assessment_recommended"] is False
     assert dashboard["today_tasks"]["main"]["kind"] in {"essay", "sentence"}
     assert set(dashboard["child_abilities"].keys()) == {
         "reading_power",
         "specific_writing_power",
         "revision_power",
+    }
+
+
+def test_new_student_dashboard_recommends_initial_assessment(session, client):
+    parent = seed_demo_data(session)
+    student = StudentProfile(
+        id="new-student",
+        parent_id=parent.id,
+        name="小新",
+        persona="real_child",
+        is_real_child=True,
+    )
+    session.add(student)
+    session.add(AbilityProfile(student_id=student.id))
+    session.commit()
+
+    dashboard = client.get(f"/api/students/{student.id}/dashboard").json()
+
+    assert dashboard["ability_note"] == "等待入门小试点"
+    assert dashboard["assessment_completed"] is False
+    assert dashboard["assessment_recommended"] is True
+    assert dashboard["today_tasks"]["main"] == {
+        "kind": "assessment",
+        "title": "入门小试炼",
+        "focus": "第一张能力草图",
+        "minutes": "3-5",
     }
 
 
