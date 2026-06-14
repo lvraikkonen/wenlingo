@@ -14,6 +14,7 @@ import AssessmentPage from "../src/app/children/[studentId]/assessment/page";
 import EssayPage from "../src/app/children/[studentId]/essay/page";
 import SentencePage from "../src/app/children/[studentId]/sentence/page";
 import ParentChildSummaryPage from "../src/app/parent/children/[studentId]/summary/page";
+import { AiWaitingStatus } from "../src/components/AiWaitingStatus";
 import { FeedbackReaction } from "../src/components/FeedbackReaction";
 import { ParentSummaryFeedback } from "../src/components/ParentSummaryFeedback";
 import { ALPHA_SESSION_STORAGE_KEY } from "../src/lib/alphaSession";
@@ -305,6 +306,34 @@ test("FeedbackReaction renders three child-friendly reaction buttons", () => {
   expect(screen.getByRole("button", { name: "有帮助" })).toHaveTextContent("😊");
   expect(screen.getByRole("button", { name: "一般" })).toHaveTextContent("😐");
   expect(screen.getByRole("button", { name: "没帮助" })).toHaveTextContent("😞");
+});
+
+test("AiWaitingStatus advances messages and stays on the final message", async () => {
+  vi.useFakeTimers();
+  try {
+    render(
+      <AiWaitingStatus messages={["正在出题...", "第二步", "快好了！"]} />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("正在出题...");
+
+    await act(async () => {
+      vi.advanceTimersByTime(2500);
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("第二步");
+
+    await act(async () => {
+      vi.advanceTimersByTime(2500);
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("快好了！");
+
+    await act(async () => {
+      vi.advanceTimersByTime(2500);
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("快好了！");
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("clicking a reaction saves the selected feedback reaction with alpha session id", async () => {
@@ -843,6 +872,24 @@ test("sentence page loads an ai challenge by default", async () => {
   expect(apiMocks.createSentenceTraining).not.toHaveBeenCalled();
 });
 
+test("sentence page shows staged challenge loading copy", async () => {
+  const pending = deferred<typeof challengeResponse>();
+  apiMocks.createSentenceChallenge.mockReturnValueOnce(pending.promise);
+
+  await act(async () => {
+    render(
+      <Suspense>
+        <SentencePage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    );
+  });
+
+  expect(await screen.findByRole("status")).toHaveTextContent("正在出题");
+
+  pending.resolve(challengeResponse);
+  expect(await screen.findByText("小猫跑了。")).toBeInTheDocument();
+});
+
 test("sentence page recommends initial assessment but allows continuing practice", async () => {
   await act(async () => {
     render(
@@ -969,6 +1016,7 @@ test("sentence page completes generated challenge and shows short feedback", asy
     upgraded_sentence: "小猫瞪大眼睛，飞快地跑过草地。",
   });
   expect(await screen.findByText("你写得很有画面感！")).toBeInTheDocument();
+  expect(screen.getByText("这是一个参考写法，你的写法也很棒。")).toBeInTheDocument();
   expect(screen.getByText("小狗瞪大眼睛，飞快地冲过草地。")).toBeInTheDocument();
 });
 

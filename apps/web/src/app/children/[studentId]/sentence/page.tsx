@@ -4,6 +4,7 @@ import Link from "next/link";
 import { use, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Loader2, Sparkles } from "lucide-react";
+import { AiWaitingStatus } from "../../../../components/AiWaitingStatus";
 import { AssessmentRecommendationCard } from "../../../../components/AssessmentRecommendationCard";
 import { FamilyTopbar } from "../../../../components/FamilyTopbar";
 import { FeedbackReaction } from "../../../../components/FeedbackReaction";
@@ -31,6 +32,16 @@ const CHALLENGE_LOAD_ERROR_MESSAGE =
   "这次句子挑战没有准备成功。可以先自己带句子来练。";
 const SENTENCE_SUBMIT_ERROR_MESSAGE =
   "这次句子练习没有提交成功。先别急，检查一下网络后再试一次。";
+const CHALLENGE_LOADING_MESSAGES = [
+  "正在出题...",
+  "AI 教练正在想一个适合你的句子...",
+  "快好了！",
+] as const;
+const FEEDBACK_LOADING_MESSAGES = [
+  "AI 教练正在读你的句子...",
+  "正在找出你写得好的地方...",
+  "马上给你一个小建议。",
+] as const;
 
 export default function SentencePage({
   params,
@@ -221,12 +232,7 @@ function SentencePageContent({ studentId }: { studentId: string }) {
           {mode === "challenge" ? (
             <div className="space-y-5">
               {isLoadingChallenge ? (
-                <p
-                  className="rounded-lg bg-[var(--wen-bg)] px-4 py-3 text-sm font-semibold text-[var(--wen-orange)]"
-                  role="status"
-                >
-                  正在准备今天的句子挑战
-                </p>
+                <AiWaitingStatus messages={CHALLENGE_LOADING_MESSAGES} />
               ) : null}
 
               {challenge ? (
@@ -315,12 +321,10 @@ function SentencePageContent({ studentId }: { studentId: string }) {
           )}
 
           {isSubmitting ? (
-            <p
-              className="mt-4 rounded-lg bg-[var(--wen-bg)] px-4 py-3 text-sm font-semibold text-[var(--wen-orange)]"
-              role="status"
-            >
-              AI 教练正在看你的句子
-            </p>
+            <div className="mt-4">
+              <AiWaitingStatus messages={FEEDBACK_LOADING_MESSAGES} />
+              <span className="sr-only">AI 教练正在看你的句子</span>
+            </div>
           ) : null}
           {error ? (
             <p
@@ -346,6 +350,9 @@ function SentencePageContent({ studentId }: { studentId: string }) {
                   </p>
                   <p className="mt-2 text-sm">
                     {challengeResult.feedback.suggestion}
+                  </p>
+                  <p className="mt-4 text-xs font-bold text-[var(--wen-muted)]">
+                    这是一个参考写法，你的写法也很棒。
                   </p>
                   <p className="mt-2 text-sm font-semibold">
                     {challengeResult.feedback.example_upgrade}
