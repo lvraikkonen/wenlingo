@@ -69,6 +69,7 @@ If implementation conflicts with specs, do not silently change behavior. Report 
 - Prefer simple data models that support future evaluation and analytics.
 - All AI feedback schemas must be versioned.
 - All prompt changes must be traceable.
+- 从 V0.5b 之后，任何新增 LLM 任务不得在 service/route 中硬编码 prompt。必须先通过 `register_prompt()` 注册 `prompt_key`、`version` 和 `response_contract`，再由 task wrapper 通过 `get_prompt()` 获取。Prompt Registry 是唯一合法的 prompt 来源。
 - Database migrations must include tests or verification steps.
 
 ## Testing Rules
