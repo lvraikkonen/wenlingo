@@ -112,11 +112,9 @@ test("renders child dashboard as an action entry", async () => {
     "href",
     "/children/s1/essay",
   );
-  expect(screen.getByText("阅读峡谷")).toBeInTheDocument();
-  expect(map.getByRole("link", { name: "阅读峡谷" })).toHaveAttribute(
-    "href",
-    "/children/s1/reading",
-  );
+  expect(screen.getByText("阅读峡谷 · 即将开放")).toBeInTheDocument();
+  expect(map.queryByRole("link", { name: "阅读峡谷" })).not.toBeInTheDocument();
+  expect(map.queryByRole("link", { name: "阅读峡谷 · 即将开放" })).not.toBeInTheDocument();
   expect(screen.getByText("写具体力")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: /去写作文/ })).toHaveAttribute(
     "href",

@@ -24,15 +24,30 @@ export function PlanetMap({
     >
       <h2 className="text-xl font-bold">地图</h2>
       <div className="mt-4 flex flex-wrap gap-3">
-        {places.map((place) => (
-          <Link
-            key={place}
-            className="rounded-lg border border-[var(--wen-border)] px-4 py-2 font-semibold"
-            href={hrefForPlace(place)}
-          >
-            {place}
-          </Link>
-        ))}
+        {places.map((place) => {
+          const isReadingCanyon = place.includes("阅读");
+          if (isReadingCanyon) {
+            return (
+              <span
+                key={place}
+                aria-disabled="true"
+                className="rounded-lg border border-[var(--wen-border)] bg-[var(--wen-bg)] px-4 py-2 font-semibold text-[var(--wen-muted)]"
+              >
+                {place} · 即将开放
+              </span>
+            );
+          }
+
+          return (
+            <Link
+              key={place}
+              className="rounded-lg border border-[var(--wen-border)] px-4 py-2 font-semibold"
+              href={hrefForPlace(place)}
+            >
+              {place}
+            </Link>
+          );
+        })}
       </div>
     </nav>
   );
