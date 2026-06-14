@@ -1,8 +1,8 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
-import { expect, test, vi } from "vitest";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { beforeEach, expect, test, vi } from "vitest";
 import DashboardPage from "../src/app/children/[studentId]/page";
-import { getDashboard } from "../src/lib/api";
+import { getDashboard, recordAlphaEvent } from "../src/lib/api";
 
 const replace = vi.fn();
 
@@ -82,7 +82,14 @@ vi.mock("../src/lib/api", () => ({
     map: ["句子工坊", "作文城堡", "阅读峡谷"],
     coach_message: "今天先完成推荐任务，再看看哪里变强了。",
   })),
+  recordAlphaEvent: vi.fn(async () => undefined),
 }));
+
+beforeEach(() => {
+  cleanup();
+  window.localStorage.clear();
+  vi.clearAllMocks();
+});
 
 test("renders child dashboard as an action entry", async () => {
   const element = await DashboardPage({ params: Promise.resolve({ studentId: "s1" }) });
@@ -124,4 +131,29 @@ test("renders child dashboard as an action entry", async () => {
     "href",
     "/children/s1/sentence",
   );
+});
+
+test("records dashboard viewed event without legacy parent localStorage", async () => {
+  const element = await DashboardPage({ params: Promise.resolve({ studentId: "s1" }) });
+
+  render(element);
+
+  await waitFor(() => {
+    const alphaSessionId = window.localStorage.getItem(
+      "wenlingo_alpha_session_id",
+    );
+    expect(alphaSessionId).toEqual(expect.any(String));
+    expect(alphaSessionId).not.toBe("");
+    expect(vi.mocked(recordAlphaEvent)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(recordAlphaEvent)).toHaveBeenCalledWith({
+      event_type: "child_dashboard_viewed",
+      student_id: "s1",
+      alpha_session_id: alphaSessionId,
+      payload: {
+        path: "/children/s1",
+        status: "viewed",
+      },
+    });
+  });
+  expect(window.localStorage.getItem("wenlingo_alpha_parent_id")).toBeNull();
 });

@@ -2,9 +2,17 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { demoLogin, getAlphaChildren } from "../lib/api";
-import { getStoredAlphaParentId } from "../lib/alphaParent";
+import { demoLogin, getMyAlphaChildren } from "../lib/api";
 import type { Student } from "../lib/types";
+
+function shouldLoadDemoStudents(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("status" in error)) {
+    return false;
+  }
+
+  const status = (error as { status?: unknown }).status;
+  return status === 401 || status === 404;
+}
 
 export function FamilyTopbar({
   currentStudentId,
@@ -12,7 +20,6 @@ export function FamilyTopbar({
   currentStudentId: string;
 }) {
   const [students, setStudents] = useState<Student[]>([]);
-  const [alphaParentId] = useState(() => getStoredAlphaParentId());
   const [alphaStudentName, setAlphaStudentName] = useState<{
     studentId: string;
     name: string;
@@ -20,50 +27,55 @@ export function FamilyTopbar({
 
   useEffect(() => {
     let mounted = true;
+    setAlphaStudentName(null);
+    setStudents([]);
 
-    if (alphaParentId) {
-      getAlphaChildren(alphaParentId)
+    const loadDemoStudents = () => {
+      demoLogin()
         .then((result) => {
           if (mounted) {
-            const currentChild = result.children.find(
-              (child) => child.id === currentStudentId,
-            );
-            setAlphaStudentName({
-              studentId: currentStudentId,
-              name: currentChild?.name ?? currentStudentId,
-            });
+            setStudents(result.students);
           }
         })
         .catch(() => {
           if (mounted) {
-            setAlphaStudentName({
-              studentId: currentStudentId,
-              name: currentStudentId,
-            });
+            setStudents([]);
           }
         });
+    };
 
-      return () => {
-        mounted = false;
-      };
+    try {
+      getMyAlphaChildren()
+        .then((result) => {
+          if (!mounted) {
+            return;
+          }
+          if (result.children.length === 0) {
+            loadDemoStudents();
+            return;
+          }
+
+          const currentChild = result.children.find(
+            (child) => child.id === currentStudentId,
+          );
+          setAlphaStudentName({
+            studentId: currentStudentId,
+            name: currentChild?.name ?? currentStudentId,
+          });
+        })
+        .catch((error: unknown) => {
+          if (shouldLoadDemoStudents(error)) {
+            loadDemoStudents();
+          }
+        });
+    } catch {
+      setStudents([]);
     }
-
-    demoLogin()
-      .then((result) => {
-        if (mounted) {
-          setStudents(result.students);
-        }
-      })
-      .catch(() => {
-        if (mounted) {
-          setStudents([]);
-        }
-      });
 
     return () => {
       mounted = false;
     };
-  }, [alphaParentId, currentStudentId]);
+  }, [currentStudentId]);
 
   const sortedStudents = useMemo(
     () => [...students].sort((left, right) => left.id.localeCompare(right.id)),
@@ -74,9 +86,9 @@ export function FamilyTopbar({
   );
   const currentStudentName = currentStudent?.name ?? currentStudentId;
 
-  if (alphaParentId) {
+  if (alphaStudentName) {
     const currentAlphaStudentName =
-      alphaStudentName?.studentId === currentStudentId
+      alphaStudentName.studentId === currentStudentId
         ? alphaStudentName.name
         : currentStudentId;
 
