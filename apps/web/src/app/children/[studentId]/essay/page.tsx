@@ -3,6 +3,7 @@
 import { use, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { CheckCircle2, Loader2, Sparkles } from "lucide-react";
+import { AssessmentRecommendationCard } from "../../../../components/AssessmentRecommendationCard";
 import { FamilyTopbar } from "../../../../components/FamilyTopbar";
 import { FeedbackReaction } from "../../../../components/FeedbackReaction";
 import { SettlementPanel } from "../../../../components/SettlementPanel";
@@ -13,6 +14,7 @@ import {
   type EssayRevisionResponse,
   type Settlement,
 } from "../../../../lib/api";
+import { useAssessmentRecommendation } from "../../../../lib/useAssessmentRecommendation";
 
 export default function EssayPage({
   params,
@@ -26,6 +28,10 @@ export default function EssayPage({
 
 function EssayPageContent({ studentId }: { studentId: string }) {
   const activeStudentId = useRef<string | null>(studentId);
+  const {
+    shouldShowAssessmentRecommendation,
+    dismissAssessmentRecommendation,
+  } = useAssessmentRecommendation(studentId);
   const [title, setTitle] = useState("");
   const [draft, setDraft] = useState("");
   const [revision, setRevision] = useState("");
@@ -160,6 +166,14 @@ function EssayPageContent({ studentId }: { studentId: string }) {
       <FamilyTopbar currentStudentId={studentId} />
       <main className="min-h-screen px-5 py-8 sm:px-8">
       <div className="mx-auto max-w-4xl space-y-6">
+        {shouldShowAssessmentRecommendation ? (
+          <AssessmentRecommendationCard
+            studentId={studentId}
+            continueLabel="今天先写作文"
+            onContinue={dismissAssessmentRecommendation}
+          />
+        ) : null}
+
         <section className="rounded-lg border border-[var(--wen-border)] bg-white p-6 shadow-sm">
           <div className="flex items-center gap-2">
             <Sparkles

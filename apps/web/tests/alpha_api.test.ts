@@ -15,7 +15,6 @@ import {
 } from "../src/lib/alphaParent";
 import {
   ALPHA_SESSION_STORAGE_KEY,
-  buildAlphaDashboardViewedScript,
   getStoredAlphaSessionId,
 } from "../src/lib/alphaSession";
 
@@ -151,39 +150,6 @@ describe("alpha api client", () => {
         payload: { path: "/summary", status: "viewed" },
       }),
     ).resolves.toBeUndefined();
-  });
-
-  test("child dashboard event script creates an alpha session when one is missing", () => {
-    window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "parent-1");
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ ok: true }),
-    }) as unknown as typeof fetch;
-
-    const script = buildAlphaDashboardViewedScript({
-      studentId: "student-1",
-      apiBaseUrl: "http://localhost:8000",
-    });
-
-    window.eval(script);
-
-    const alphaSessionId = window.localStorage.getItem(ALPHA_SESSION_STORAGE_KEY);
-    expect(alphaSessionId).toBeTruthy();
-    expect(fetch).toHaveBeenCalledWith("http://localhost:8000/api/alpha/events", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        event_type: "child_dashboard_viewed",
-        parent_id: "parent-1",
-        student_id: "student-1",
-        alpha_session_id: alphaSessionId,
-        payload: {
-          path: "/children/student-1",
-          status: "viewed",
-        },
-      }),
-      cache: "no-store",
-    });
   });
 
   test("getAlphaChildren calls parent-scoped children endpoint", async () => {

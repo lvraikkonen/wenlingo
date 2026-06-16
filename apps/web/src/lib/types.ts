@@ -26,6 +26,8 @@ export type RecommendedTask = {
 export type DashboardResponse = {
   student: Student;
   ability_note: string;
+  assessment_completed: boolean;
+  assessment_recommended: boolean;
   child_abilities: {
     reading_power: number;
     specific_writing_power: number;
@@ -231,6 +233,11 @@ export type AdminAlphaAIUsageRow = {
   estimated_cost: number;
   failure_count: number;
   daily_limit_hit_count: number;
+};
+
+export type AdminAlphaAIUsageResponse = {
+  pricing_configured: boolean;
+  usage: AdminAlphaAIUsageRow[];
 };
 
 export type AdminAlphaAccountRow = {

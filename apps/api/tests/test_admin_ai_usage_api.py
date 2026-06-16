@@ -72,6 +72,7 @@ def test_admin_ai_usage_returns_daily_aggregates_with_limit_hits(session, monkey
 
     assert response.status_code == 200
     assert response.json() == {
+        "pricing_configured": False,
         "usage": [
             {
                 "date": "2026-06-08",
@@ -102,7 +103,7 @@ def test_admin_ai_usage_returns_empty_state(session, monkeypatch):
         )
 
     assert response.status_code == 200
-    assert response.json() == {"usage": []}
+    assert response.json() == {"pricing_configured": False, "usage": []}
 
 
 def test_admin_ai_usage_uses_configured_product_timezone_for_dates(session, monkeypatch):
@@ -141,17 +142,56 @@ def test_admin_ai_usage_uses_configured_product_timezone_for_dates(session, monk
         )
 
     assert response.status_code == 200
-    assert response.json()["usage"] == [
-        {
-            "date": "2026-06-08",
-            "task_type": "sentence_challenge_generation",
-            "model": "test-model",
-            "call_count": 1,
-            "prompt_tokens": 4,
-            "completion_tokens": 2,
-            "total_tokens": 6,
-            "estimated_cost": 0.0002,
-            "failure_count": 0,
-            "daily_limit_hit_count": 1,
-        }
-    ]
+    assert response.json() == {
+        "pricing_configured": False,
+        "usage": [
+            {
+                "date": "2026-06-08",
+                "task_type": "sentence_challenge_generation",
+                "model": "test-model",
+                "call_count": 1,
+                "prompt_tokens": 4,
+                "completion_tokens": 2,
+                "total_tokens": 6,
+                "estimated_cost": 0.0002,
+                "failure_count": 0,
+                "daily_limit_hit_count": 1,
+            }
+        ],
+    }
+
+
+def test_admin_ai_usage_reports_pricing_configured_when_rates_are_set(
+    session,
+    monkeypatch,
+):
+    monkeypatch.setenv("LLM_INPUT_COST_PER_1K_TOKENS", "0.001")
+    monkeypatch.setenv("LLM_OUTPUT_COST_PER_1K_TOKENS", "0.002")
+    session.add(
+        LLMCallLog(
+            task_type=TaskType.sentence,
+            task_name="sentence_challenge_feedback",
+            prompt_key="feedback",
+            provider="test-provider",
+            model="test-model",
+            input_summary="safe summary",
+            validation_ok=True,
+            prompt_tokens=100,
+            completion_tokens=50,
+            total_tokens=150,
+            estimated_cost=0.0002,
+            created_at=datetime(2026, 6, 8, 1, 30, tzinfo=timezone.utc),
+        )
+    )
+    session.commit()
+    app = create_admin_client(session, monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/admin/alpha/ai-usage",
+            headers={"X-Alpha-Admin-Token": "secret"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["pricing_configured"] is True
+    assert response.json()["usage"][0]["estimated_cost"] == 0.0002

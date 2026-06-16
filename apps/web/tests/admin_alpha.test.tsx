@@ -83,6 +83,7 @@ function createDeferred<T>() {
 }
 
 const usageResponse = {
+  pricing_configured: true,
   usage: [
     {
       date: "2026-06-08",
@@ -118,7 +119,10 @@ beforeEach(() => {
       },
     ],
   });
-  apiMocks.getAdminAlphaAIUsage.mockResolvedValue({ usage: [] });
+  apiMocks.getAdminAlphaAIUsage.mockResolvedValue({
+    pricing_configured: false,
+    usage: [],
+  });
   apiMocks.createAdminAlphaInvites.mockResolvedValue({
     invites: [
       {
@@ -201,7 +205,34 @@ test("admin renders grouped sections and ai usage aggregates", async () => {
   expect(screen.getByRole("heading", { name: "AI 使用量" })).toBeInTheDocument();
   expect(await screen.findByText("sentence_challenge_generation")).toBeInTheDocument();
   expect(screen.getByText("23")).toBeInTheDocument();
-  expect(screen.getByText("0.0015")).toBeInTheDocument();
+  expect(screen.getByText("$0.001500")).toBeInTheDocument();
+});
+
+test("admin renders unconfigured pricing instead of zero cost", async () => {
+  apiMocks.getAdminAlphaAIUsage.mockResolvedValueOnce({
+    pricing_configured: false,
+    usage: [
+      {
+        date: "2026-06-08",
+        task_type: "sentence_challenge_generation",
+        model: "test-model",
+        call_count: 1,
+        prompt_tokens: 10,
+        completion_tokens: 5,
+        total_tokens: 15,
+        estimated_cost: 0,
+        failure_count: 0,
+        daily_limit_hit_count: 0,
+      },
+    ],
+  });
+  window.sessionStorage.setItem("wenlingo_alpha_admin_token", "secret");
+
+  render(<AdminAlphaPage />);
+
+  expect(await screen.findByText("sentence_challenge_generation")).toBeInTheDocument();
+  expect(screen.getByText("未配置价格")).toBeInTheDocument();
+  expect(screen.queryAllByText("0").length).toBeGreaterThan(0);
 });
 
 test("admin hides revoked invites by default and loads them when toggled", async () => {

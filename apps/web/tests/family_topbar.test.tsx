@@ -2,8 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { FamilyTopbar } from "../src/components/FamilyTopbar";
-import { demoLogin, getAlphaChildren } from "../src/lib/api";
-import { ALPHA_PARENT_STORAGE_KEY } from "../src/lib/alphaParent";
+import { demoLogin, getMyAlphaChildren } from "../src/lib/api";
 
 const students = vi.hoisted(() => [
   {
@@ -45,31 +44,34 @@ vi.mock("../src/lib/api", () => ({
     parent: { id: "p1", email: "demo@example.com", display_name: "演示家长" },
     students,
   })),
-  getAlphaChildren: vi.fn(async () => ({
-    parent: { id: "alpha-parent-1", display_name: "小星家长" },
-    children: [
-      {
-        id: "alpha-student-1",
-        name: "小星",
-        grade_label: "四年级",
-        persona: "real_child",
-        level: 1,
-        xp: 0,
-        assessment_completed: false,
-        dashboard_url: "/children/alpha-student-1",
-        summary_url: "/parent/children/alpha-student-1/summary",
-      },
-    ],
-  })),
+  getMyAlphaChildren: vi.fn(),
 }));
 
 beforeEach(() => {
   cleanup();
   window.localStorage.clear();
   vi.clearAllMocks();
+  vi.mocked(getMyAlphaChildren).mockResolvedValue({
+    parent: { id: "parent-1", email: "parent@example.com", display_name: "小星家长" },
+    children: [
+      {
+        id: "s1",
+        nickname: "小宇",
+        name: "小宇",
+        grade_label: "四年级",
+        persona: "real_child",
+        is_real_child: true,
+        dashboard_url: "/children/s1",
+        summary_url: "/parent/children/s1/summary",
+        assessment_completed: false,
+      },
+    ],
+  });
 });
 
 test("renders family navigation and child switcher for current student", async () => {
+  vi.mocked(getMyAlphaChildren).mockRejectedValueOnce({ status: 401 });
+
   render(<FamilyTopbar currentStudentId="s1" />);
 
   expect(await screen.findByText("当前孩子：小宇")).toBeInTheDocument();
@@ -96,12 +98,9 @@ test("renders family navigation and child switcher for current student", async (
 });
 
 test("renders simplified alpha navigation without demo children", async () => {
-  window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "alpha-parent-1");
+  render(<FamilyTopbar currentStudentId="s1" />);
 
-  render(<FamilyTopbar currentStudentId="alpha-student-1" />);
-
-  expect(await screen.findByText("当前孩子：小星")).toBeInTheDocument();
-  expect(getAlphaChildren).toHaveBeenCalledWith("alpha-parent-1");
+  expect(await screen.findByText("当前孩子：小宇")).toBeInTheDocument();
   expect(demoLogin).not.toHaveBeenCalled();
   expect(screen.queryByRole("link", { name: "小晴" })).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "返回孩子列表" })).toHaveAttribute(
@@ -110,6 +109,32 @@ test("renders simplified alpha navigation without demo children", async () => {
   );
   expect(screen.getByRole("link", { name: "小文星球" })).toHaveAttribute(
     "href",
-    "/children/alpha-student-1",
+    "/children/s1",
   );
+});
+
+test("falls back to demo navigation when session parent has no children", async () => {
+  vi.mocked(getMyAlphaChildren).mockResolvedValueOnce({
+    parent: { id: "parent-empty", email: "parent@example.com", display_name: "小星家长" },
+    children: [],
+  });
+
+  render(<FamilyTopbar currentStudentId="s1" />);
+
+  expect(await screen.findByText("当前孩子：小宇")).toBeInTheDocument();
+  expect(demoLogin).toHaveBeenCalled();
+  expect(screen.getByRole("link", { name: "小晴" })).toHaveAttribute(
+    "href",
+    "/children/s2",
+  );
+});
+
+test("does not mask unexpected alpha children failures as demo navigation", async () => {
+  vi.mocked(getMyAlphaChildren).mockRejectedValueOnce({ status: 500 });
+
+  render(<FamilyTopbar currentStudentId="s1" />);
+
+  expect(await screen.findByText("当前孩子：s1")).toBeInTheDocument();
+  expect(demoLogin).not.toHaveBeenCalled();
+  expect(screen.queryByRole("link", { name: "小晴" })).not.toBeInTheDocument();
 });

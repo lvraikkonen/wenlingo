@@ -128,3 +128,26 @@ NEXT_PUBLIC_API_BASE_URL=<API public HTTPS origin, no trailing slash>
 After changing `CORS_ALLOW_ORIGINS`, `AUTH_ALLOWED_ORIGINS`, email, auth, LLM,
 or limit variables, redeploy/restart `wenlingo-api`. After changing
 `NEXT_PUBLIC_API_BASE_URL`, rebuild/redeploy `wenlingo-web`.
+
+### Daily Limit Smoke Trigger
+
+For V0.5b.1 Dev smoke, temporarily lower one sentence limit for the masked QA
+student/environment so the limit can be verified without ten real LLM calls:
+
+```text
+LLM_DAILY_LIMIT_ENABLED=true
+SENTENCE_CHALLENGE_DAILY_LIMIT_PER_STUDENT=1
+# or
+SENTENCE_FEEDBACK_DAILY_LIMIT_PER_STUDENT=1
+```
+
+After verifying the child rest message and Admin `Limits` count, restore normal
+Alpha values:
+
+```text
+SENTENCE_CHALLENGE_DAILY_LIMIT_PER_STUDENT=10
+SENTENCE_FEEDBACK_DAILY_LIMIT_PER_STUDENT=10
+```
+
+Record the temporary values, restore time, and final values in the release QA
+checklist.

@@ -41,6 +41,8 @@ const demoLoginResponse = {
 const dashboardResponse = {
   student,
   ability_note: "阅读理解稳定，表达可以继续具体化。",
+  assessment_completed: true,
+  assessment_recommended: false,
   child_abilities: {
     reading_power: 50,
     specific_writing_power: 54,
@@ -215,13 +217,18 @@ describe("api client", () => {
   });
 
   test("getAdminAlphaAIUsage uses admin token header", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ usage: [] }));
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ pricing_configured: false, usage: [] }),
+    );
 
-    await getAdminAlphaAIUsage("secret");
+    const result = await getAdminAlphaAIUsage("secret");
 
+    expect(result).toEqual({ pricing_configured: false, usage: [] });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:8000/api/admin/alpha/ai-usage",
       expect.objectContaining({
+        credentials: "include",
+        cache: "no-store",
         headers: { "X-Alpha-Admin-Token": "secret" },
       }),
     );
