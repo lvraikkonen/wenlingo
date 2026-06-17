@@ -5,11 +5,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import update
 from sqlmodel import select
 
-from app.api.deps import get_db_session, get_llm_provider
+from app.api.deps import get_ai_task_runner, get_db_session
 from app.api.routes import alpha as alpha_routes
 from app.api.routes import assessment as assessment_routes
 from app.api.routes import essays as essay_routes
 from app.api.routes import sentences as sentence_routes
+from app.core.config import get_settings
 from app.domain.models import (
     AlphaInviteCode,
     Assessment,
@@ -25,6 +26,7 @@ from app.domain.models import (
     utcnow,
 )
 from app.main import create_app
+from app.services.ai_runner import run_ai_task
 
 
 def hash_code(code: str) -> str:
@@ -81,9 +83,17 @@ def contains_key(value, key: str) -> bool:
     return False
 
 
-class ProviderFailureFallbackProvider:
+class ProviderFailureFallbackRunner:
     provider_name = "fake"
     model_name = "provider-failure-fallback"
+
+    async def run(self, **kwargs):
+        return await run_ai_task(
+            settings=get_settings(),
+            primary_provider=self,
+            fallback_provider=self,
+            **kwargs,
+        )
 
     async def complete_json(self, task_name, payload):
         raise RuntimeError(f"{task_name} provider failed")
@@ -416,7 +426,7 @@ def test_provider_fallback_records_failure_and_completion_events(session, client
     _, child = create_parent_and_child(client, session)
     app = create_app()
     app.dependency_overrides[get_db_session] = lambda: session
-    app.dependency_overrides[get_llm_provider] = lambda: ProviderFailureFallbackProvider()
+    app.dependency_overrides[get_ai_task_runner] = lambda: ProviderFailureFallbackRunner()
 
     with TestClient(app) as test_client:
         sentence_response = test_client.post(
