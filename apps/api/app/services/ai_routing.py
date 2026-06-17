@@ -149,6 +149,30 @@ COST_REGISTRY: dict[str, ModelPricing] = {
         0.0,
         "2026-06-17",
     ),
+    "primary_http:cheap-fast": ModelPricing(
+        "primary_http:cheap-fast",
+        "primary_http",
+        "cheap-fast",
+        0.0,
+        0.0,
+        "2026-06-17",
+    ),
+    "primary_http:strong-default": ModelPricing(
+        "primary_http:strong-default",
+        "primary_http",
+        "strong-default",
+        0.0,
+        0.0,
+        "2026-06-17",
+    ),
+    "fallback_http:strong-default": ModelPricing(
+        "fallback_http:strong-default",
+        "fallback_http",
+        "strong-default",
+        0.0,
+        0.0,
+        "2026-06-17",
+    ),
 }
 
 
@@ -285,24 +309,42 @@ def resolve_task_config(task_name: str) -> TaskConfig:
     return config
 
 
-def _model_with_override(settings: Settings, logical_model: LogicalModel) -> LogicalModel:
+def _model_with_override(
+    settings: Settings,
+    logical_model: LogicalModel,
+    provider_profile: str,
+    model_env: str,
+) -> LogicalModel:
     if _provider_mode(settings) != "http":
         return logical_model
-    override = (
-        getattr(settings, logical_model.model_env, "").strip()
-        if logical_model.model_env
-        else ""
-    )
-    if not override:
-        return logical_model
-    pricing_key = f"{logical_model.provider_profile}:{override}"
+    override = getattr(settings, model_env, "").strip()
+    model = override or logical_model.model
+    pricing_key = f"{provider_profile}:{model}"
     return LogicalModel(
         logical_model.logical_model_key,
-        logical_model.provider_profile,
-        override,
+        provider_profile,
+        model,
         pricing_key,
         logical_model.cost_tier,
-        logical_model.model_env,
+        model_env,
+    )
+
+
+def _primary_model(settings: Settings, logical_model: LogicalModel) -> LogicalModel:
+    return _model_with_override(
+        settings,
+        logical_model,
+        provider_profile="primary_http",
+        model_env="llm_primary_http_model",
+    )
+
+
+def _fallback_model(settings: Settings, logical_model: LogicalModel) -> LogicalModel:
+    return _model_with_override(
+        settings,
+        logical_model,
+        provider_profile="fallback_http",
+        model_env="llm_fallback_http_model",
     )
 
 
@@ -335,8 +377,8 @@ def resolve_task_route(
         raise RoutingConfigError(
             f"Prompt key {selected_prompt_key} is not allowed for task {task_name}"
         )
-    primary_model = _model_with_override(settings, LOGICAL_MODELS[task.primary_model])
-    fallback_model = _model_with_override(settings, LOGICAL_MODELS[task.fallback_model])
+    primary_model = _primary_model(settings, LOGICAL_MODELS[task.primary_model])
+    fallback_model = _fallback_model(settings, LOGICAL_MODELS[task.fallback_model])
     primary_profile = PROVIDER_PROFILES[primary_model.provider_profile]
     fallback_profile = PROVIDER_PROFILES[fallback_model.provider_profile]
     primary_pricing, primary_status = _pricing_for(settings, primary_model)

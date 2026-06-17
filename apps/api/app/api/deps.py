@@ -1,11 +1,13 @@
 from collections.abc import Generator
+from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException
 from sqlmodel import Session
 
 from app.core.config import Settings, get_settings
 from app.db.session import get_session
-from app.services.ai_routing import LogicalModel, ProviderProfile
+from app.services.ai_routing import LogicalModel, ProviderProfile, resolve_task_route
+from app.services.ai_runner import run_ai_task
 from app.services.llm_provider import HttpJsonLLMProvider, LLMProvider, MockLLMProvider
 
 
@@ -89,3 +91,37 @@ def provider_for_profile(
         status_code=503,
         detail=f"Unsupported LLM provider profile type: {profile.provider_type}",
     )
+
+
+@dataclass(frozen=True)
+class AITaskRunner:
+    settings: Settings
+
+    async def run(self, **kwargs):
+        route = resolve_task_route(
+            self.settings,
+            kwargs["task_name"],
+            kwargs.get("prompt_key"),
+        )
+        primary_provider = provider_for_profile(
+            settings=self.settings,
+            profile=route.primary_profile,
+            logical_model=route.primary_model,
+            timeout_seconds=route.task.primary_timeout_seconds,
+        )
+        fallback_provider = provider_for_profile(
+            settings=self.settings,
+            profile=route.fallback_profile,
+            logical_model=route.fallback_model,
+            timeout_seconds=route.task.fallback_timeout_seconds,
+        )
+        return await run_ai_task(
+            settings=self.settings,
+            primary_provider=primary_provider,
+            fallback_provider=fallback_provider,
+            **kwargs,
+        )
+
+
+def get_ai_task_runner(settings: Settings = Depends(get_settings)) -> AITaskRunner:
+    return AITaskRunner(settings=settings)

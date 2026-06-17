@@ -98,6 +98,30 @@ def test_mock_route_ignores_http_model_overrides_for_pricing():
     assert route.pricing_status == PricingStatus.CONFIGURED
 
 
+def test_http_route_uses_http_profiles_and_model_overrides():
+    route = resolve_task_route(
+        settings=Settings(
+            llm_provider="http",
+            llm_primary_http_model="cheap-prod-model",
+            llm_fallback_http_model="strong-prod-model",
+        ),
+        task_name="sentence_challenge_generation",
+        prompt_key="sentence_challenge_generation",
+    )
+
+    assert route.primary_profile.profile_name == "primary_http"
+    assert route.fallback_profile.profile_name == "fallback_http"
+    assert route.primary_model.provider_profile == "primary_http"
+    assert route.fallback_model.provider_profile == "fallback_http"
+    assert route.primary_model.model == "cheap-prod-model"
+    assert route.fallback_model.model == "strong-prod-model"
+    assert route.primary_model.pricing_key == "primary_http:cheap-prod-model"
+    assert route.fallback_model.pricing_key == "fallback_http:strong-prod-model"
+    assert route.primary_pricing is None
+    assert route.fallback_pricing is None
+    assert route.pricing_status == PricingStatus.UNCONFIGURED
+
+
 def test_staging_missing_pricing_fails_fast(monkeypatch):
     monkeypatch.delitem(COST_REGISTRY, "mock:cheap-fast", raising=False)
 
