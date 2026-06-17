@@ -225,14 +225,21 @@ export type AdminAlphaOverviewRow = {
 export type AdminAlphaAIUsageRow = {
   date: string;
   task_type: string;
+  provider: string;
   model: string;
+  final_status: string;
   call_count: number;
+  success_count: number;
+  fallback_success_count: number;
+  deterministic_fallback_count: number;
+  failure_count: number;
+  daily_limit_hit_count: number;
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
   estimated_cost: number;
-  failure_count: number;
-  daily_limit_hit_count: number;
+  pricing_status: string;
+  avg_latency_ms: number;
 };
 
 export type AdminAlphaAIUsageResponse = {

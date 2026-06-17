@@ -38,10 +38,6 @@ function formatPhoneStatus(row: AdminAlphaOverviewRow): string {
   return row.phone_bound ? "Phone bound" : "Phone not bound";
 }
 
-function formatEstimatedCost(cost: number): string {
-  return `$${cost.toFixed(6)}`;
-}
-
 function canRevokeInvite(row: AdminAlphaOverviewRow): boolean {
   return row.invite_status === "issued" && !row.parent_id;
 }
@@ -640,39 +636,45 @@ export default function AdminAlphaPage() {
                   <table aria-label="AI usage" className="min-w-full text-sm">
                     <thead>
                       <tr className="border-b border-[var(--wen-border)] bg-[var(--wen-bg)] text-left text-xs font-bold uppercase text-[var(--wen-muted)]">
-                        <th className="px-3 py-2">Date</th>
-                        <th className="px-3 py-2">Task</th>
-                        <th className="px-3 py-2">Model</th>
+                        <th className="px-3 py-2">Provider</th>
+                        <th className="px-3 py-2">Status</th>
                         <th className="px-3 py-2">Calls</th>
-                        <th className="px-3 py-2">Prompt</th>
-                        <th className="px-3 py-2">Completion</th>
-                        <th className="px-3 py-2">Total</th>
-                        <th className="px-3 py-2">Cost</th>
+                        <th className="px-3 py-2">Fallback</th>
+                        <th className="px-3 py-2">Local</th>
                         <th className="px-3 py-2">Failures</th>
-                        <th className="px-3 py-2">Limits</th>
+                        <th className="px-3 py-2">Limit hits</th>
+                        <th className="px-3 py-2">Tokens</th>
+                        <th className="px-3 py-2">Cost</th>
+                        <th className="px-3 py-2">Avg latency</th>
                       </tr>
                     </thead>
                     <tbody>
                       {usageRows.map((row) => (
                         <tr
-                          key={`${row.date}:${row.task_type}:${row.model}`}
+                          key={`${row.date}:${row.task_type}:${row.provider}:${row.model}:${row.final_status}`}
                           className="border-b border-[var(--wen-border)] last:border-b-0"
                         >
-                          <td className="px-3 py-2">{row.date}</td>
-                          <td className="px-3 py-2">{row.task_type}</td>
-                          <td className="px-3 py-2">{row.model}</td>
+                          <td className="px-3 py-2">{row.provider}</td>
+                          <td className="px-3 py-2">{row.final_status}</td>
                           <td className="px-3 py-2">{row.call_count}</td>
-                          <td className="px-3 py-2">{row.prompt_tokens}</td>
-                          <td className="px-3 py-2">{row.completion_tokens}</td>
-                          <td className="px-3 py-2">{row.total_tokens}</td>
                           <td className="px-3 py-2">
-                            {pricingConfigured
-                              ? formatEstimatedCost(row.estimated_cost)
-                              : "未配置价格"}
+                            {row.fallback_success_count}
+                          </td>
+                          <td className="px-3 py-2">
+                            {row.deterministic_fallback_count}
                           </td>
                           <td className="px-3 py-2">{row.failure_count}</td>
                           <td className="px-3 py-2">
                             {row.daily_limit_hit_count}
+                          </td>
+                          <td className="px-3 py-2">{row.total_tokens}</td>
+                          <td className="px-3 py-2">
+                            {pricingConfigured
+                              ? `$${row.estimated_cost.toFixed(6)}`
+                              : "未配置价格"}
+                          </td>
+                          <td className="px-3 py-2">
+                            {row.avg_latency_ms}ms
                           </td>
                         </tr>
                       ))}

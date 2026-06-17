@@ -88,14 +88,21 @@ const usageResponse = {
     {
       date: "2026-06-08",
       task_type: "sentence_challenge_generation",
+      provider: "test-provider",
       model: "test-model",
+      final_status: "fallback_success",
       call_count: 2,
+      success_count: 2,
+      fallback_success_count: 1,
+      deterministic_fallback_count: 0,
+      failure_count: 0,
+      daily_limit_hit_count: 1,
       prompt_tokens: 18,
       completion_tokens: 5,
       total_tokens: 23,
       estimated_cost: 0.0015,
-      failure_count: 1,
-      daily_limit_hit_count: 1,
+      pricing_status: "pricing_configured",
+      avg_latency_ms: 42,
     },
   ],
 };
@@ -203,9 +210,16 @@ test("admin renders grouped sections and ai usage aggregates", async () => {
   expect(screen.getByRole("heading", { name: "邀请管理" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "账号管理" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "AI 使用量" })).toBeInTheDocument();
-  expect(await screen.findByText("sentence_challenge_generation")).toBeInTheDocument();
-  expect(screen.getByText("23")).toBeInTheDocument();
-  expect(screen.getByText("$0.001500")).toBeInTheDocument();
+  expect(await screen.findByText("test-provider")).toBeInTheDocument();
+  const usageTable = screen.getByRole("table", { name: "AI usage" });
+  expect(within(usageTable).getByRole("columnheader", { name: "Provider" })).toBeInTheDocument();
+  expect(within(usageTable).getByRole("columnheader", { name: "Status" })).toBeInTheDocument();
+  expect(within(usageTable).getByRole("columnheader", { name: "Avg latency" })).toBeInTheDocument();
+  expect(within(usageTable).getByText("test-provider")).toBeInTheDocument();
+  expect(within(usageTable).getByText("fallback_success")).toBeInTheDocument();
+  expect(within(usageTable).getByText("23")).toBeInTheDocument();
+  expect(within(usageTable).getByText("$0.001500")).toBeInTheDocument();
+  expect(within(usageTable).getByText("42ms")).toBeInTheDocument();
 });
 
 test("admin renders unconfigured pricing instead of zero cost", async () => {
@@ -215,14 +229,21 @@ test("admin renders unconfigured pricing instead of zero cost", async () => {
       {
         date: "2026-06-08",
         task_type: "sentence_challenge_generation",
+        provider: "test-provider",
         model: "test-model",
+        final_status: "primary_success",
         call_count: 1,
+        success_count: 1,
+        fallback_success_count: 0,
+        deterministic_fallback_count: 0,
+        failure_count: 0,
+        daily_limit_hit_count: 0,
         prompt_tokens: 10,
         completion_tokens: 5,
         total_tokens: 15,
         estimated_cost: 0,
-        failure_count: 0,
-        daily_limit_hit_count: 0,
+        pricing_status: "pricing_unconfigured",
+        avg_latency_ms: 12,
       },
     ],
   });
@@ -230,8 +251,9 @@ test("admin renders unconfigured pricing instead of zero cost", async () => {
 
   render(<AdminAlphaPage />);
 
-  expect(await screen.findByText("sentence_challenge_generation")).toBeInTheDocument();
+  expect(await screen.findByText("test-provider")).toBeInTheDocument();
   expect(screen.getByText("未配置价格")).toBeInTheDocument();
+  expect(screen.getByText("12ms")).toBeInTheDocument();
   expect(screen.queryAllByText("0").length).toBeGreaterThan(0);
 });
 
@@ -260,7 +282,7 @@ test("admin clears stale data and token when revoked invite refresh fails", asyn
   render(<AdminAlphaPage />);
 
   expect(await screen.findByRole("button", { name: /家庭 01/ })).toBeInTheDocument();
-  expect(await screen.findByText("sentence_challenge_generation")).toBeInTheDocument();
+  expect(await screen.findByText("test-provider")).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("checkbox", { name: "显示已撤销邀请码" }));
 
@@ -271,7 +293,7 @@ test("admin clears stale data and token when revoked invite refresh fails", asyn
   expect(window.sessionStorage.getItem("wenlingo_alpha_admin_token")).toBeNull();
   expect(screen.queryByRole("button", { name: /家庭 01/ })).not.toBeInTheDocument();
   expect(screen.queryAllByText("pa***@example.com")).toHaveLength(0);
-  expect(screen.queryByText("sentence_challenge_generation")).not.toBeInTheDocument();
+  expect(screen.queryByText("test-provider")).not.toBeInTheDocument();
 });
 
 test("admin clears destructive action state after revoked refresh failure", async () => {
