@@ -137,10 +137,17 @@ class MockLLMProvider:
 
 
 class HttpJsonLLMProvider:
-    def __init__(self, api_key: str, model: str, base_url: str):
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        base_url: str,
+        timeout_seconds: int = 30,
+    ):
         self.api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/")
+        self.timeout_seconds = timeout_seconds
         self.provider_name = "http"
         self.model_name = model
 
@@ -169,7 +176,7 @@ class HttpJsonLLMProvider:
                 ),
             },
         ]
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             response = await client.post(
                 f"{self.base_url}/chat/completions",
                 headers={
