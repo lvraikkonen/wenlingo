@@ -18,6 +18,7 @@ from app.services.llm_contracts import (
     SentenceChallengeFeedback,
     SentenceFeedback,
 )
+from app.services.ai_routing import TaskFinalStatus
 from app.services.llm_provider import LLMProvider
 from app.services.llm_usage import llm_daily_limit_reached
 from app.services.sentence_challenges import (
@@ -107,6 +108,7 @@ def log_llm_result(
     validation_ok: bool,
     error_message: str,
     retry_count: int,
+    final_status: str = "",
     prompt_key: str | None = None,
     prompt_tokens: int = 0,
     completion_tokens: int = 0,
@@ -126,6 +128,7 @@ def log_llm_result(
         raw_response=raw_response,
         output_json=output_json,
         validation_ok=validation_ok,
+        final_status=final_status,
         error_message=error_message,
         retry_count=retry_count,
         prompt_tokens=prompt_tokens,
@@ -257,7 +260,6 @@ async def run_validated_llm_task(
             session=session,
             student_id=student_id,
             task_name=task_name,
-            provider_name=provider_name,
             limit=daily_limit_per_student_task,
             timezone_name=daily_limit_timezone,
         )
@@ -275,6 +277,7 @@ async def run_validated_llm_task(
             raw_response="",
             output_json=fallback.model_dump(),
             validation_ok=False,
+            final_status=TaskFinalStatus.DAILY_LIMIT_REACHED,
             error_message="daily limit reached",
             retry_count=0,
         )
@@ -315,6 +318,7 @@ async def run_validated_llm_task(
                     raw_response=response.raw_response,
                     output_json=output.model_dump(),
                     validation_ok=True,
+                    final_status=TaskFinalStatus.PRIMARY_SUCCESS,
                     error_message="",
                     retry_count=attempt_index,
                     prompt_tokens=prompt_tokens,
@@ -346,6 +350,7 @@ async def run_validated_llm_task(
             raw_response=raw_response,
             output_json=fallback.model_dump(),
             validation_ok=False,
+            final_status=TaskFinalStatus.DETERMINISTIC_FALLBACK_USED,
             error_message="; ".join(errors),
             retry_count=MAX_LLM_ATTEMPTS - 1,
         )
