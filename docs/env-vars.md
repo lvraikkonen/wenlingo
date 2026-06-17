@@ -133,9 +133,17 @@ MAGIC_CODE_FROM_EMAIL=<verified sender>
 RESEND_API_KEY=<server-side secret>
 MAGIC_CODE_DEV_ECHO=false
 LLM_PROVIDER=http
+# Legacy non-routed compatibility only; not sufficient for V0.5c routed tasks.
 LLM_API_KEY=<server-side secret>
 LLM_MODEL=<model>
 LLM_BASE_URL=<provider base URL>
+# V0.5c routed AI provider profiles.
+LLM_PRIMARY_HTTP_BASE_URL=<primary provider base URL>
+LLM_PRIMARY_HTTP_API_KEY=<server-side secret>
+LLM_PRIMARY_HTTP_MODEL=<primary routed model>
+LLM_FALLBACK_HTTP_BASE_URL=<fallback provider base URL>
+LLM_FALLBACK_HTTP_API_KEY=<server-side secret>
+LLM_FALLBACK_HTTP_MODEL=<fallback routed model>
 LLM_DAILY_LIMIT_ENABLED=true
 SENTENCE_CHALLENGE_DAILY_LIMIT_PER_STUDENT=10
 SENTENCE_FEEDBACK_DAILY_LIMIT_PER_STUDENT=10

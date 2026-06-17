@@ -196,11 +196,20 @@ AI usage settings:
 
 | Variable | Default |
 | --- | --- |
+| `LLM_PROVIDER` | `http` for real provider calls |
+| `LLM_PRIMARY_HTTP_BASE_URL` | Primary provider base URL |
+| `LLM_PRIMARY_HTTP_API_KEY` | Primary provider server-side secret |
+| `LLM_PRIMARY_HTTP_MODEL` | Primary routed model with Cost Registry pricing |
+| `LLM_FALLBACK_HTTP_BASE_URL` | Fallback provider base URL |
+| `LLM_FALLBACK_HTTP_API_KEY` | Fallback provider server-side secret |
+| `LLM_FALLBACK_HTTP_MODEL` | Fallback routed model with Cost Registry pricing |
 | `SENTENCE_CHALLENGE_DAILY_LIMIT_PER_STUDENT` | `10` |
 | `SENTENCE_FEEDBACK_DAILY_LIMIT_PER_STUDENT` | `10` |
 | `LLM_DAILY_LIMIT_TIMEZONE` | `Asia/Shanghai` |
 | `LLM_INPUT_COST_PER_1K_TOKENS` | `0` |
 | `LLM_OUTPUT_COST_PER_1K_TOKENS` | `0` |
+
+Legacy non-routed `LLM_API_KEY`, `LLM_MODEL`, and `LLM_BASE_URL` may still be needed for older compatibility paths, but they are not sufficient for V0.5c routed tasks.
 
 ### V0.5c AI Routing Smoke
 
@@ -213,7 +222,7 @@ Before inviting or expanding Alpha families on a V0.5c deploy:
 - Run one controlled fallback-success smoke.
 - Run one deterministic local fallback smoke.
 - Run one daily-limit smoke and confirm no provider call is made after the limit.
-- Open Admin AI usage and confirm final status, fallback counts, pricing status, token totals, and average latency appear without raw child text or raw provider responses.
+- Open Admin `AI 使用量` / AI usage and confirm final status, fallback counts, pricing status, token totals, and average latency appear without raw child text or raw provider responses.
 
 Rollback rule: roll back the deployment or pin the previous known-good commit. Do not route around ModelRouter with global `LLM_MODEL`.
 
@@ -318,9 +327,15 @@ Backend variables:
 | `DATABASE_URL` | Reference the PostgreSQL service `DATABASE_URL` from Railway's variable reference picker. |
 | `CORS_ALLOW_ORIGINS` | The generated public HTTPS origin for `wenlingo-web` after Public Networking is enabled, with no trailing slash. |
 | `LLM_PROVIDER` | `http` |
-| `LLM_API_KEY` | The server-side key from the selected LLM provider account. |
-| `LLM_MODEL` | The model name selected for Alpha. |
-| `LLM_BASE_URL` | The base URL from the selected LLM provider. |
+| `LLM_PRIMARY_HTTP_BASE_URL` | Primary provider base URL for V0.5c routed tasks. |
+| `LLM_PRIMARY_HTTP_API_KEY` | Primary provider server-side secret. |
+| `LLM_PRIMARY_HTTP_MODEL` | Primary routed model with Cost Registry pricing. |
+| `LLM_FALLBACK_HTTP_BASE_URL` | Fallback provider base URL for V0.5c routed tasks. |
+| `LLM_FALLBACK_HTTP_API_KEY` | Fallback provider server-side secret. |
+| `LLM_FALLBACK_HTTP_MODEL` | Fallback routed model with Cost Registry pricing. |
+| `LLM_API_KEY` | Legacy non-routed compatibility key; not sufficient for V0.5c routed tasks. |
+| `LLM_MODEL` | Legacy non-routed compatibility model; do not use as a ModelRouter bypass. |
+| `LLM_BASE_URL` | Legacy non-routed compatibility base URL. |
 | `LLM_PROMPT_VERSION` | `v0.2-quality-spine-2026-05-14` |
 
 Use a full HTTPS origin for `CORS_ALLOW_ORIGINS`, for example:
