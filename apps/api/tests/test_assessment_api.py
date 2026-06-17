@@ -21,6 +21,7 @@ from app.domain.models import (
 )
 from app.main import create_app
 from app.services.essay_workflow import ASSESSMENT_ESSAY_STATUS
+from app.services.ai_routing import TaskFinalStatus
 from app.services.llm_provider import LLMProviderResponse
 
 
@@ -204,6 +205,7 @@ def test_daily_limit_assessment_uses_fallback_without_failure_event(session):
             model=QuotaLimitedAssessmentProvider.model_name,
             input_summary="previous assessment sentence request",
             validation_ok=True,
+            final_status=TaskFinalStatus.PRIMARY_SUCCESS,
         )
     )
     session.commit()

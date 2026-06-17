@@ -22,6 +22,7 @@ from app.domain.models import (
 from app.domain.seed import seed_demo_data
 from app.main import create_app
 from app.services.auth_security import hash_secret
+from app.services.ai_routing import TaskFinalStatus
 from app.services.llm_provider import LLMProviderResponse
 from app.services.sentence_challenges import fallback_challenge_feedback
 
@@ -488,6 +489,7 @@ def test_daily_generation_limit_returns_rest_message_without_provider_call(sessi
             input_summary="句子挑战生成",
             output_json={},
             validation_ok=True,
+            final_status=TaskFinalStatus.PRIMARY_SUCCESS,
             created_at=datetime.now(UTC),
         )
     )
