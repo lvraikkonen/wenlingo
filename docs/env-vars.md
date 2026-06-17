@@ -76,6 +76,24 @@ Set these on `wenlingo-api` unless noted otherwise.
 | `LLM_INPUT_COST_PER_1K_TOKENS` | `0.0` | Optional | No | API restart | Cost estimate input rate. |
 | `LLM_OUTPUT_COST_PER_1K_TOKENS` | `0.0` | Optional | No | API restart | Cost estimate output rate. |
 
+## V0.5c AI Routing
+
+V0.5c routes AI tasks through code-level task and model registries. Environment variables provide credentials and deployment-specific model overrides only.
+
+| Variable | Required | Description |
+|---|---|---|
+| `LLM_PROVIDER` | yes | `mock` for local tests, `http` for OpenAI-compatible HTTP profiles. |
+| `LLM_PRIMARY_HTTP_BASE_URL` | staging/production real provider | Base URL for the primary OpenAI-compatible provider profile. |
+| `LLM_PRIMARY_HTTP_API_KEY` | staging/production real provider | API key for the primary profile. |
+| `LLM_PRIMARY_HTTP_MODEL` | optional | Concrete model override for the primary logical model. Must have Cost Registry pricing in staging/production. |
+| `LLM_FALLBACK_HTTP_BASE_URL` | staging/production real provider | Base URL for the fallback OpenAI-compatible provider profile. |
+| `LLM_FALLBACK_HTTP_API_KEY` | staging/production real provider | API key for the fallback profile. |
+| `LLM_FALLBACK_HTTP_MODEL` | optional | Concrete model override for the fallback logical model. Must have Cost Registry pricing in staging/production. |
+| `LLM_DAILY_LIMIT_ENABLED` | recommended in Dev/Alpha | Enables task-level daily limits. |
+| `LLM_DAILY_LIMIT_TIMEZONE` | yes | Product day timezone, default `Asia/Shanghai`. |
+
+Do not use global `LLM_MODEL` as a production AI routing bypass after V0.5c. All enabled production AI tasks must resolve through ModelRouter.
+
 ### Legacy Migration
 
 | Variable | Default | Required | Secret | Redeploy needed | Notes |

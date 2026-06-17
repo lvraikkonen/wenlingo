@@ -202,6 +202,21 @@ AI usage settings:
 | `LLM_INPUT_COST_PER_1K_TOKENS` | `0` |
 | `LLM_OUTPUT_COST_PER_1K_TOKENS` | `0` |
 
+### V0.5c AI Routing Smoke
+
+Before inviting or expanding Alpha families on a V0.5c deploy:
+
+- Confirm startup passes AI routing validation.
+- Confirm each enabled task resolves a primary and fallback logical model.
+- Confirm staging/production routed models have Cost Registry pricing.
+- Run one sentence challenge primary-success smoke.
+- Run one controlled fallback-success smoke.
+- Run one deterministic local fallback smoke.
+- Run one daily-limit smoke and confirm no provider call is made after the limit.
+- Open Admin AI usage and confirm final status, fallback counts, pricing status, token totals, and average latency appear without raw child text or raw provider responses.
+
+Rollback rule: roll back the deployment or pin the previous known-good commit. Do not route around ModelRouter with global `LLM_MODEL`.
+
 ### V0.5b AI Sentence Challenge Smoke
 
 1. Dev Echo login with code `123456` in `ENVIRONMENT=development`.
