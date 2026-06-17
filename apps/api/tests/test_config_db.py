@@ -44,6 +44,17 @@ def test_settings_load_alpha_admin_token():
     assert settings.alpha_admin_token == "secret-token"
 
 
+def test_settings_load_ai_routing_provider_profile_defaults():
+    settings = Settings(_env_file=None)
+
+    assert settings.llm_primary_http_base_url == ""
+    assert settings.llm_primary_http_api_key == ""
+    assert settings.llm_primary_http_model == ""
+    assert settings.llm_fallback_http_base_url == ""
+    assert settings.llm_fallback_http_api_key == ""
+    assert settings.llm_fallback_http_model == ""
+
+
 def test_settings_load_v05a_auth_defaults():
     settings = Settings(_env_file=None)
 

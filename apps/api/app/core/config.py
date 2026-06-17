@@ -13,6 +13,12 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = ""
     llm_base_url: str = ""
+    llm_primary_http_base_url: str = ""
+    llm_primary_http_api_key: str = ""
+    llm_primary_http_model: str = ""
+    llm_fallback_http_base_url: str = ""
+    llm_fallback_http_api_key: str = ""
+    llm_fallback_http_model: str = ""
     llm_daily_limit_enabled: bool = False
     llm_daily_limit_per_student_task: int = 5
     sentence_challenge_daily_limit_per_student: int = 10
