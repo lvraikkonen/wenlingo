@@ -303,6 +303,20 @@ class LLMCallLog(SQLModel, table=True):
     prompt_key: str = Field(default="unknown", index=True)
     provider: str = "mock"
     model: str = "mock"
+    resolved_provider: str = Field(default="", index=True)
+    resolved_model: str = Field(default="", index=True)
+    primary_provider: str = Field(default="", index=True)
+    primary_model: str = ""
+    fallback_provider: str = Field(default="", index=True)
+    fallback_model: str = ""
+    fallback_reason: str = Field(default="", index=True)
+    attempt_count: int = 0
+    final_status: str = Field(default="", index=True)
+    pricing_status: str = Field(default="", index=True)
+    attempt_summaries: list[dict[str, Any]] = Field(
+        default_factory=list,
+        sa_column=Column(JSON, nullable=False),
+    )
     prompt_version: str = "v0.2-quality-spine-2026-05-14"
     input_summary: str
     raw_response: str = ""

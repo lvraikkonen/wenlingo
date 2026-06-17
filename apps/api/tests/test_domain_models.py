@@ -227,6 +227,78 @@ def test_llm_call_log_records_prompt_usage_latency_and_cost():
     assert log.latency_ms == 321
 
 
+def test_llm_call_log_records_v05c_task_observability_fields():
+    log = LLMCallLog(
+        student_id="student-1",
+        task_type=TaskType.sentence,
+        task_name="sentence_challenge_generation",
+        prompt_key="sentence_challenge_generation",
+        provider="openai",
+        model="strong-model",
+        resolved_provider="openai",
+        resolved_model="strong-model",
+        primary_provider="openrouter",
+        primary_model="cheap-model",
+        fallback_provider="openai",
+        fallback_model="strong-model",
+        fallback_reason="schema_validation_failed",
+        attempt_count=2,
+        final_status="fallback_success",
+        pricing_status="configured",
+        attempt_summaries=[
+            {
+                "attempt_index": 1,
+                "role": "primary",
+                "provider": "openrouter",
+                "model": "cheap-model",
+                "status": "schema_validation_failed",
+                "error_class": "schema_validation_failed",
+                "latency_ms": 8200,
+                "prompt_tokens": 300,
+                "completion_tokens": 120,
+                "estimated_cost": 0.00012,
+                "pricing_status": "configured",
+            },
+            {
+                "attempt_index": 2,
+                "role": "fallback",
+                "provider": "openai",
+                "model": "strong-model",
+                "status": "success",
+                "error_class": "",
+                "latency_ms": 5300,
+                "prompt_tokens": 300,
+                "completion_tokens": 110,
+                "estimated_cost": 0.0012,
+                "pricing_status": "configured",
+            },
+        ],
+        prompt_version="v0.5c-test",
+        input_summary="句子挑战生成；年级：四年级；目标：action_expression",
+        raw_response="{}",
+        output_json={},
+        validation_ok=True,
+        prompt_tokens=600,
+        completion_tokens=230,
+        total_tokens=830,
+        estimated_cost=0.00132,
+        latency_ms=13500,
+    )
+
+    assert log.resolved_provider == "openai"
+    assert log.resolved_model == "strong-model"
+    assert log.primary_provider == "openrouter"
+    assert log.primary_model == "cheap-model"
+    assert log.fallback_provider == "openai"
+    assert log.fallback_model == "strong-model"
+    assert log.fallback_reason == "schema_validation_failed"
+    assert log.attempt_count == 2
+    assert log.final_status == "fallback_success"
+    assert log.pricing_status == "configured"
+    assert log.attempt_summaries[0]["role"] == "primary"
+    assert log.attempt_summaries[1]["status"] == "success"
+
+
 def test_essay_version_tracks_revision_task_metadata_and_llm_log_link():
     version = EssayVersion(
         essay_id="essay-1",
