@@ -7,7 +7,7 @@ from app.api.auth_deps import (
     require_auth_mode_state_change,
     require_student_for_auth_mode,
 )
-from app.api.deps import get_db_session, get_llm_provider
+from app.api.deps import AITaskRunner, get_ai_task_runner, get_db_session
 from app.api.feedback_state import feedback_reaction_value
 from app.api.routes.alpha import record_product_event
 from app.core.config import Settings, get_settings
@@ -20,7 +20,6 @@ from app.services.ai_tasks import (
     sentence_upgrade_feedback,
 )
 from app.services.gamification import settle_task
-from app.services.llm_provider import LLMProvider
 from app.services.recommendations import choose_today_tasks
 from app.services.sentence_challenges import (
     CHALLENGE_TYPE_SPECS,
@@ -122,7 +121,7 @@ async def create_sentence_challenge(
     student_id: str,
     _request: SentenceChallengeGenerate,
     session: Session = Depends(get_db_session),
-    provider: LLMProvider = Depends(get_llm_provider),
+    runner: AITaskRunner = Depends(get_ai_task_runner),
     settings: Settings = Depends(get_settings),
     context: ParentContext | None = Depends(require_auth_mode_state_change),
 ):
@@ -135,16 +134,11 @@ async def create_sentence_challenge(
 
     target_skill = choose_challenge_target_skill(session, student.id)
     result = await sentence_challenge_generation(
-        provider=provider,
+        runner=runner,
         target_skill=target_skill,
         grade_label=student.grade_label,
         session=session,
         student_id=student.id,
-        daily_limit_enabled=settings.llm_daily_limit_enabled,
-        daily_limit_per_student_task=settings.sentence_challenge_daily_limit_per_student,
-        daily_limit_timezone=settings.llm_daily_limit_timezone,
-        input_cost_per_1k_tokens=settings.llm_input_cost_per_1k_tokens,
-        output_cost_per_1k_tokens=settings.llm_output_cost_per_1k_tokens,
     )
     challenge = result.output
     if result.status == "daily_limit_reached":
@@ -202,7 +196,7 @@ async def complete_sentence_challenge(
     training_id: str,
     request: SentenceChallengeComplete,
     session: Session = Depends(get_db_session),
-    provider: LLMProvider = Depends(get_llm_provider),
+    runner: AITaskRunner = Depends(get_ai_task_runner),
     settings: Settings = Depends(get_settings),
     context: ParentContext | None = Depends(require_auth_mode_state_change),
 ):
@@ -220,17 +214,12 @@ async def complete_sentence_challenge(
         raise HTTPException(status_code=404, detail="sentence training not found")
 
     feedback_result = await sentence_challenge_feedback(
-        provider=provider,
+        runner=runner,
         source_sentence=training.source_sentence,
         upgraded_sentence=request.upgraded_sentence,
         target_skill=training.target_skill,
         session=session,
         student_id=student.id,
-        daily_limit_enabled=settings.llm_daily_limit_enabled,
-        daily_limit_per_student_task=settings.sentence_feedback_daily_limit_per_student,
-        daily_limit_timezone=settings.llm_daily_limit_timezone,
-        input_cost_per_1k_tokens=settings.llm_input_cost_per_1k_tokens,
-        output_cost_per_1k_tokens=settings.llm_output_cost_per_1k_tokens,
     )
     feedback = feedback_result.output
     if feedback_result.status == "daily_limit_reached":
@@ -316,7 +305,7 @@ async def create_sentence_training(
     student_id: str,
     request: SentenceTrainingCreate,
     session: Session = Depends(get_db_session),
-    provider: LLMProvider = Depends(get_llm_provider),
+    runner: AITaskRunner = Depends(get_ai_task_runner),
     settings: Settings = Depends(get_settings),
     context: ParentContext | None = Depends(require_auth_mode_state_change),
 ):
@@ -327,18 +316,13 @@ async def create_sentence_training(
     focus = request.focus.value
     try:
         feedback_result = await sentence_upgrade_feedback(
-            provider=provider,
+            runner=runner,
             source_sentence=request.source_sentence,
             upgraded_sentence=request.upgraded_sentence,
             focus=focus,
             session=session,
             prompt_version=settings.llm_prompt_version,
             student_id=student_id,
-            daily_limit_enabled=settings.llm_daily_limit_enabled,
-            daily_limit_per_student_task=settings.sentence_feedback_daily_limit_per_student,
-            daily_limit_timezone=settings.llm_daily_limit_timezone,
-            input_cost_per_1k_tokens=settings.llm_input_cost_per_1k_tokens,
-            output_cost_per_1k_tokens=settings.llm_output_cost_per_1k_tokens,
         )
     except Exception:
         session.rollback()

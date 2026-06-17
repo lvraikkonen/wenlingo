@@ -1,80 +1,109 @@
-import json
-
 from sqlmodel import select
 
-from app.api.deps import get_llm_provider
+from app.api.deps import get_ai_task_runner
 from app.domain.models import LLMCallLog, StudentProfile
 from app.domain.seed import seed_demo_data
-from app.services.llm_provider import LLMProviderResponse
+from app.services.ai_runner import AITaskResult
+from app.services.ai_tasks import log_llm_result
+from app.services.llm_contracts import (
+    EssayFeedback,
+    EssayRevisionComparison,
+    RevisionTask,
+    SentenceFeedback,
+)
 
 
-class RecordingEssayProvider:
+class RecordingEssayRunner:
     provider_name = "fake-route-provider"
     model_name = "fake-route-model"
 
     def __init__(self):
         self.calls: list[str] = []
 
-    async def complete_json(self, task_name, payload):
+    async def run(self, **kwargs):
+        task_name = kwargs["task_name"]
         self.calls.append(task_name)
         if task_name == "essay_feedback":
-            parsed = {
-                "strengths": ["能写清楚发生了什么", "有一处心情表达"],
-                "improvements": ["第二段缺少动作细节"],
-                "problem_monsters": ["细节缺口"],
-                "sentence_notes": ["把开心换成看到、听到、做到的细节。"],
-                "revision_tasks": [
-                    {"instruction": "给第二段加一个动作描写", "target": "第二段"}
+            output = EssayFeedback(
+                strengths=["能写清楚发生了什么", "有一处心情表达"],
+                improvements=["第二段缺少动作细节"],
+                problem_monsters=["细节缺口"],
+                sentence_notes=["把开心换成看到、听到、做到的细节。"],
+                revision_tasks=[
+                    RevisionTask(instruction="给第二段加一个动作描写", target="第二段")
                 ],
-            }
+            )
         elif task_name == "essay_revision_comparison":
-            parsed = {
-                "encouragement": "你把最重要的画面写清楚了。",
-                "improved_dimensions": ["细节更多"],
-                "evidence": ["手心都出汗了"],
-                "next_step": "下一次把结尾感受写清楚。",
-            }
+            output = EssayRevisionComparison(
+                encouragement="你把最重要的画面写清楚了。",
+                improved_dimensions=["细节更多"],
+                evidence=["手心都出汗了"],
+                next_step="下一次把结尾感受写清楚。",
+            )
         else:
             raise AssertionError(f"unexpected task: {task_name}")
-        return LLMProviderResponse(
-            parsed_json=parsed,
-            raw_response=json.dumps(parsed, ensure_ascii=False),
+        log = log_llm_result(
+            session=kwargs["session"],
+            student_id=kwargs["student_id"],
+            task_type=kwargs["task_type"],
+            task_name=task_name,
+            prompt_key=kwargs["prompt_key"],
             provider=self.provider_name,
             model=self.model_name,
+            prompt_version=kwargs["prompt_version"],
+            input_summary=kwargs["input_summary"],
+            raw_response="{}",
+            output_json=output.model_dump(),
+            validation_ok=True,
+            error_message="",
+            retry_count=0,
         )
+        return AITaskResult(output=output, log=log, status="ok")
 
 
-class RecordingSentenceProvider:
+class RecordingSentenceRunner:
     provider_name = "fake-sentence-provider"
     model_name = "fake-sentence-model"
 
     def __init__(self):
         self.calls: list[str] = []
 
-    async def complete_json(self, task_name, payload):
+    async def run(self, **kwargs):
+        task_name = kwargs["task_name"]
         self.calls.append(task_name)
-        parsed = {
-            "encouragement": "你把画面写得更清楚了。",
-            "specific_improvement": "加入了可看见的细节",
-            "next_step": "再加一个动作，会更生动。",
-            "ability_delta": {"expression": 4, "observation": 4},
-            "problem_monsters": ["空泛表达"],
-        }
-        return LLMProviderResponse(
-            parsed_json=parsed,
-            raw_response=json.dumps(parsed, ensure_ascii=False),
+        output = SentenceFeedback(
+            encouragement="你把画面写得更清楚了。",
+            specific_improvement="加入了可看见的细节",
+            next_step="再加一个动作，会更生动。",
+            ability_delta={"expression": 4, "observation": 4},
+            problem_monsters=["空泛表达"],
+        )
+        log = log_llm_result(
+            session=kwargs["session"],
+            student_id=kwargs["student_id"],
+            task_type=kwargs["task_type"],
+            task_name=task_name,
+            prompt_key=kwargs["prompt_key"],
             provider=self.provider_name,
             model=self.model_name,
+            prompt_version=kwargs["prompt_version"],
+            input_summary=kwargs["input_summary"],
+            raw_response="{}",
+            output_json=output.model_dump(),
+            validation_ok=True,
+            error_message="",
+            retry_count=0,
         )
+        return AITaskResult(output=output, log=log, status="ok")
 
 
-def test_essay_routes_use_provider_dependency_override(session, client):
+def test_essay_routes_use_runner_dependency_override(session, client):
     parent = seed_demo_data(session)
     student = session.exec(
         select(StudentProfile).where(StudentProfile.parent_id == parent.id)
     ).first()
-    provider = RecordingEssayProvider()
-    client.app.dependency_overrides[get_llm_provider] = lambda: provider
+    runner = RecordingEssayRunner()
+    client.app.dependency_overrides[get_ai_task_runner] = lambda: runner
 
     start = client.post(
         f"/api/students/{student.id}/essays",
@@ -96,16 +125,16 @@ def test_essay_routes_use_provider_dependency_override(session, client):
         },
     )
     assert revision.status_code == 201
-    assert provider.calls == ["essay_feedback", "essay_revision_comparison"]
+    assert runner.calls == ["essay_feedback", "essay_revision_comparison"]
 
 
-def test_sentence_route_uses_provider_dependency_override_and_logs_student_context(session, client):
+def test_sentence_route_uses_runner_dependency_override_and_logs_student_context(session, client):
     parent = seed_demo_data(session)
     student = session.exec(
         select(StudentProfile).where(StudentProfile.parent_id == parent.id)
     ).first()
-    provider = RecordingSentenceProvider()
-    client.app.dependency_overrides[get_llm_provider] = lambda: provider
+    runner = RecordingSentenceRunner()
+    client.app.dependency_overrides[get_ai_task_runner] = lambda: runner
 
     response = client.post(
         f"/api/students/{student.id}/sentences",
@@ -118,6 +147,6 @@ def test_sentence_route_uses_provider_dependency_override_and_logs_student_conte
 
     logs = session.exec(select(LLMCallLog).where(LLMCallLog.student_id == student.id)).all()
     assert response.status_code == 201
-    assert provider.calls == ["sentence_upgrade_feedback"]
+    assert runner.calls == ["sentence_upgrade_feedback"]
     assert logs[0].task_name == "sentence_upgrade_feedback"
     assert logs[0].provider == "fake-sentence-provider"

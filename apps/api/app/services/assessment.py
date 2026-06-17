@@ -15,10 +15,10 @@ from app.domain.models import (
     StudentProfile,
 )
 from app.services.abilities import VALID_ABILITY_NAMES, apply_ability_delta, to_child_abilities
+from app.services.ai_routing import TaskFallbackReason
 from app.services.ai_tasks import essay_feedback, sentence_upgrade_feedback
 from app.services.essay_workflow import ASSESSMENT_ESSAY_STATUS, draft_ability_deltas
 from app.services.gamification import settle_task
-from app.services.llm_provider import LLMProvider
 
 ASSESSMENT_SUMMARY = "完成入门小试炼，生成第一张能力草图。"
 ASSESSMENT_ESSAY_TITLE = "入门小写作"
@@ -32,7 +32,11 @@ def _raise_for_provider_failure(log: LLMCallLog | None) -> None:
     if log.error_message in DAILY_LIMIT_ERROR_MESSAGES:
         return
     errors = [error.strip() for error in log.error_message.split(";") if error.strip()]
-    if all(error.startswith("validation error:") for error in errors):
+    if all(
+        error.startswith("validation error:")
+        or error.endswith(TaskFallbackReason.SCHEMA_VALIDATION_FAILED)
+        for error in errors
+    ):
         return
     raise RuntimeError(log.error_message)
 
@@ -61,7 +65,7 @@ async def complete_entry_assessment(
     session: Session,
     student: StudentProfile,
     ability: AbilityProfile,
-    provider: LLMProvider,
+    runner,
     settings: Settings,
     sentence_before: str,
     sentence_after: str,
@@ -69,18 +73,13 @@ async def complete_entry_assessment(
 ) -> EntryAssessmentResult:
     focus = SentenceFocus.detail.value
     sentence_result = await sentence_upgrade_feedback(
-        provider=provider,
+        runner=runner,
         source_sentence=sentence_before,
         upgraded_sentence=sentence_after,
         focus=focus,
         session=session,
         prompt_version=settings.llm_prompt_version,
         student_id=student.id,
-        daily_limit_enabled=settings.llm_daily_limit_enabled,
-        daily_limit_per_student_task=settings.sentence_feedback_daily_limit_per_student,
-        daily_limit_timezone=settings.llm_daily_limit_timezone,
-        input_cost_per_1k_tokens=settings.llm_input_cost_per_1k_tokens,
-        output_cost_per_1k_tokens=settings.llm_output_cost_per_1k_tokens,
     )
     sentence_feedback = sentence_result.output
     _raise_for_provider_failure(sentence_result.log)
@@ -103,17 +102,12 @@ async def complete_entry_assessment(
     )
 
     essay_result = await essay_feedback(
-        provider=provider,
-        title=ASSESSMENT_ESSAY_TITLE,
-        draft=short_writing,
+        runner,
+        ASSESSMENT_ESSAY_TITLE,
+        short_writing,
         session=session,
         prompt_version=settings.llm_prompt_version,
         student_id=student.id,
-        daily_limit_enabled=settings.llm_daily_limit_enabled,
-        daily_limit_per_student_task=settings.llm_daily_limit_per_student_task,
-        daily_limit_timezone=settings.llm_daily_limit_timezone,
-        input_cost_per_1k_tokens=settings.llm_input_cost_per_1k_tokens,
-        output_cost_per_1k_tokens=settings.llm_output_cost_per_1k_tokens,
     )
     essay_output = essay_result.output
     _raise_for_provider_failure(essay_result.log)

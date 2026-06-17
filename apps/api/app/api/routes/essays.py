@@ -9,7 +9,7 @@ from app.api.auth_deps import (
     require_essay_for_auth_mode,
     require_student_for_auth_mode,
 )
-from app.api.deps import get_db_session, get_llm_provider
+from app.api.deps import AITaskRunner, get_ai_task_runner, get_db_session
 from app.api.feedback_state import feedback_reaction_value
 from app.api.routes.alpha import record_product_event
 from app.core.config import Settings, get_settings
@@ -25,7 +25,6 @@ from app.services.essay_workflow import (
     revision_ability_deltas,
 )
 from app.services.gamification import settle_task
-from app.services.llm_provider import LLMProvider
 
 router = APIRouter(tags=["essays"])
 DAILY_LIMIT_ERROR_MESSAGES = {"daily limit exceeded", "daily limit reached"}
@@ -61,7 +60,7 @@ async def create_essay(
     student_id: str,
     request: EssayCreate,
     session: Session = Depends(get_db_session),
-    provider: LLMProvider = Depends(get_llm_provider),
+    runner: AITaskRunner = Depends(get_ai_task_runner),
     settings: Settings = Depends(get_settings),
     context: ParentContext | None = Depends(require_auth_mode_state_change),
 ):
@@ -71,17 +70,12 @@ async def create_essay(
         raise HTTPException(status_code=404, detail="student not found")
     try:
         feedback_result = await essay_feedback(
-            provider,
+            runner,
             request.title,
             request.draft,
             session=session,
             prompt_version=settings.llm_prompt_version,
             student_id=student_id,
-            daily_limit_enabled=settings.llm_daily_limit_enabled,
-            daily_limit_per_student_task=settings.llm_daily_limit_per_student_task,
-            daily_limit_timezone=settings.llm_daily_limit_timezone,
-            input_cost_per_1k_tokens=settings.llm_input_cost_per_1k_tokens,
-            output_cost_per_1k_tokens=settings.llm_output_cost_per_1k_tokens,
         )
         feedback = feedback_result.output
     except ValueError as exc:
@@ -161,7 +155,7 @@ async def submit_revision(
     essay_id: str,
     request: EssayRevisionCreate,
     session: Session = Depends(get_db_session),
-    provider: LLMProvider = Depends(get_llm_provider),
+    runner: AITaskRunner = Depends(get_ai_task_runner),
     settings: Settings = Depends(get_settings),
     context: ParentContext | None = Depends(require_auth_mode_state_change),
 ):
@@ -192,17 +186,12 @@ async def submit_revision(
         raise HTTPException(status_code=404, detail="student not found")
     try:
         comparison_result = await essay_revision_comparison(
-            provider,
+            runner,
             first_draft.content,
             request.content,
             session=session,
             prompt_version=settings.llm_prompt_version,
             student_id=essay.student_id,
-            daily_limit_enabled=settings.llm_daily_limit_enabled,
-            daily_limit_per_student_task=settings.llm_daily_limit_per_student_task,
-            daily_limit_timezone=settings.llm_daily_limit_timezone,
-            input_cost_per_1k_tokens=settings.llm_input_cost_per_1k_tokens,
-            output_cost_per_1k_tokens=settings.llm_output_cost_per_1k_tokens,
         )
     except Exception:
         session.rollback()

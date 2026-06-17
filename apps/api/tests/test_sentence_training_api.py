@@ -2,8 +2,8 @@ from fastapi.testclient import TestClient
 from sqlmodel import select
 
 from app.api.routes import sentences as sentence_routes
-from app.api.deps import get_db_session, get_llm_provider
-from app.core.config import Settings, get_settings
+from app.api.deps import get_ai_task_runner, get_db_session
+from app.core.config import get_settings
 from app.domain.enums import TaskType
 from app.domain.models import (
     AbilityHistory,
@@ -14,6 +14,7 @@ from app.domain.models import (
 )
 from app.domain.seed import seed_demo_data
 from app.main import create_app
+from app.services.ai_runner import run_ai_task
 from app.services.ai_tasks import LLMTaskResult
 from app.services.llm_contracts import SentenceFeedback
 from app.services.llm_provider import LLMProviderResponse
@@ -56,10 +57,18 @@ def test_sentence_training_persists_feedback_ability_and_game_event(session, cli
     }
 
 
-def test_sentence_training_uses_fallback_when_provider_returns_only_noncanonical_deltas(session):
-    class NonCanonicalDeltaProvider:
+def test_sentence_training_uses_fallback_when_runner_returns_only_noncanonical_deltas(session):
+    class NonCanonicalDeltaRunner:
         provider_name = "http"
         model_name = "test-model"
+
+        async def run(self, **kwargs):
+            return await run_ai_task(
+                settings=get_settings(),
+                primary_provider=self,
+                fallback_provider=self,
+                **kwargs,
+            )
 
         async def complete_json(self, task_name, payload):
             response_payload = {
@@ -85,7 +94,7 @@ def test_sentence_training_uses_fallback_when_provider_returns_only_noncanonical
     observation_before = ability_before.observation
     app = create_app()
     app.dependency_overrides[get_db_session] = lambda: session
-    app.dependency_overrides[get_llm_provider] = lambda: NonCanonicalDeltaProvider()
+    app.dependency_overrides[get_ai_task_runner] = lambda: NonCanonicalDeltaRunner()
 
     with TestClient(app) as test_client:
         response = test_client.post(
@@ -147,12 +156,11 @@ def test_sentence_training_rejects_overlong_sentences(session, client):
     assert response.status_code == 422
 
 
-def test_sentence_training_uses_sentence_feedback_limit_and_timezone(
-    session, monkeypatch
-):
+def test_sentence_training_passes_runner_to_feedback_wrapper(session, monkeypatch):
     parent = seed_demo_data(session)
     student = parent_students(session, parent.id)[0]
     captured_kwargs = {}
+    runner = object()
 
     async def capture_sentence_feedback(**kwargs):
         captured_kwargs.update(kwargs)
@@ -172,13 +180,7 @@ def test_sentence_training_uses_sentence_feedback_limit_and_timezone(
     )
     app = create_app()
     app.dependency_overrides[get_db_session] = lambda: session
-    app.dependency_overrides[get_llm_provider] = lambda: object()
-    app.dependency_overrides[get_settings] = lambda: Settings(
-        llm_daily_limit_enabled=True,
-        llm_daily_limit_per_student_task=99,
-        sentence_feedback_daily_limit_per_student=3,
-        llm_daily_limit_timezone="Asia/Tokyo",
-    )
+    app.dependency_overrides[get_ai_task_runner] = lambda: runner
 
     with TestClient(app) as test_client:
         response = test_client.post(
@@ -192,5 +194,5 @@ def test_sentence_training_uses_sentence_feedback_limit_and_timezone(
     app.dependency_overrides.clear()
 
     assert response.status_code == 201
-    assert captured_kwargs["daily_limit_per_student_task"] == 3
-    assert captured_kwargs["daily_limit_timezone"] == "Asia/Tokyo"
+    assert captured_kwargs["runner"] is runner
+    assert "provider" not in captured_kwargs

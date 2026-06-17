@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import select
 
-from app.api.deps import get_db_session, get_llm_provider
+from app.api.deps import get_ai_task_runner, get_db_session
 from app.core.config import Settings, get_settings
 from app.domain.enums import StudentPersona, TaskType
 from app.domain.models import (
@@ -21,8 +21,9 @@ from app.domain.models import (
 )
 from app.domain.seed import seed_demo_data
 from app.main import create_app
+from app.services.ai_runner import run_ai_task
 from app.services.auth_security import hash_secret
-from app.services.ai_routing import TaskFinalStatus
+from app.services.ai_routing import TASK_CONFIGS, TaskFinalStatus
 from app.services.llm_provider import LLMProviderResponse
 from app.services.sentence_challenges import fallback_challenge_feedback
 
@@ -49,13 +50,22 @@ CHALLENGE_RESPONSES = {
 }
 
 
-class ChallengeProvider:
+class ChallengeRunner:
     provider_name = "http"
     model_name = "test-model"
 
-    def __init__(self):
+    def __init__(self, settings=None):
+        self.settings = settings or get_settings()
         self.calls = []
         self.payloads = []
+
+    async def run(self, **kwargs):
+        return await run_ai_task(
+            settings=self.settings,
+            primary_provider=self,
+            fallback_provider=self,
+            **kwargs,
+        )
 
     async def complete_json(self, task_name, payload):
         self.calls.append(task_name)
@@ -93,10 +103,12 @@ def parent_students(session, parent_id):
     return session.exec(select(StudentProfile).where(StudentProfile.parent_id == parent_id)).all()
 
 
-def challenge_client(session, provider, settings=None):
+def challenge_client(session, runner, settings=None):
     app = create_app()
     app.dependency_overrides[get_db_session] = lambda: session
-    app.dependency_overrides[get_llm_provider] = lambda: provider
+    if settings is not None:
+        runner.settings = settings
+    app.dependency_overrides[get_ai_task_runner] = lambda: runner
     if settings is not None:
         app.dependency_overrides[get_settings] = lambda: settings
     return app, TestClient(app)
@@ -141,8 +153,8 @@ def test_challenge_generation_declares_empty_request_body_contract():
 def test_challenge_generation_persists_generated_training(session):
     parent = seed_demo_data(session)
     student = parent_students(session, parent.id)[0]
-    provider = ChallengeProvider()
-    app, client = challenge_client(session, provider)
+    runner = ChallengeRunner()
+    app, client = challenge_client(session, runner)
 
     with client:
         response = client.post(
@@ -161,8 +173,8 @@ def test_challenge_generation_persists_generated_training(session):
     assert challenge["id"] == training.id
     assert challenge["source_sentence"] == "小花开了。"
     assert challenge["grade_label"] == student.grade_label
-    assert provider.calls == ["sentence_challenge_generation"]
-    assert provider.payloads[0]["target_skill"] == "expand_sentence"
+    assert runner.calls == ["sentence_challenge_generation"]
+    assert runner.payloads[0]["target_skill"] == "expand_sentence"
 
 
 @pytest.mark.parametrize(
@@ -197,8 +209,8 @@ def test_challenge_generation_cycles_target_skill_by_completed_count(
             )
         )
     session.commit()
-    provider = ChallengeProvider()
-    app, client = challenge_client(session, provider)
+    runner = ChallengeRunner()
+    app, client = challenge_client(session, runner)
 
     with client:
         response = client.post(
@@ -208,7 +220,7 @@ def test_challenge_generation_cycles_target_skill_by_completed_count(
     app.dependency_overrides.clear()
 
     assert response.status_code == 201
-    assert provider.payloads[0]["target_skill"] == expected_target_skill
+    assert runner.payloads[0]["target_skill"] == expected_target_skill
     assert response.json()["challenge"]["target_skill"] == expected_target_skill
 
 
@@ -218,8 +230,8 @@ def test_challenge_generation_uses_student_grade_label(session):
     student.grade_label = "五年级"
     session.add(student)
     session.commit()
-    provider = ChallengeProvider()
-    app, client = challenge_client(session, provider)
+    runner = ChallengeRunner()
+    app, client = challenge_client(session, runner)
 
     with client:
         response = client.post(
@@ -252,8 +264,8 @@ def test_challenge_completion_updates_same_row_and_settles_once(session):
         )
     )
     session.commit()
-    provider = ChallengeProvider()
-    app, client = challenge_client(session, provider)
+    runner = ChallengeRunner()
+    app, client = challenge_client(session, runner)
 
     with client:
         generation = client.post(
@@ -287,10 +299,10 @@ def test_challenge_completion_updates_same_row_and_settles_once(session):
 def test_auth_required_challenge_generation_rejects_unauthenticated_request(session):
     parent = seed_demo_data(session)
     student = parent_students(session, parent.id)[0]
-    provider = ChallengeProvider()
+    runner = ChallengeRunner()
     app, client = challenge_client(
         session,
-        provider,
+        runner,
         Settings(auth_required_for_alpha=True, auth_secret_pepper="test-pepper"),
     )
 
@@ -303,17 +315,17 @@ def test_auth_required_challenge_generation_rejects_unauthenticated_request(sess
 
     assert response.status_code == 401
     assert response.json()["detail"] == "parent session required"
-    assert provider.calls == []
+    assert runner.calls == []
 
 
 def test_auth_required_challenge_generation_accepts_empty_json_body(session):
     parent = seed_demo_data(session)
     student = parent_students(session, parent.id)[0]
     token = link_parent_session(session, parent)
-    provider = ChallengeProvider()
+    runner = ChallengeRunner()
     app, client = challenge_client(
         session,
-        provider,
+        runner,
         Settings(auth_required_for_alpha=True, auth_secret_pepper="test-pepper"),
     )
 
@@ -327,7 +339,7 @@ def test_auth_required_challenge_generation_accepts_empty_json_body(session):
 
     assert response.status_code == 201
     assert response.json()["challenge"]["target_skill"] == "expand_sentence"
-    assert provider.calls == ["sentence_challenge_generation"]
+    assert runner.calls == ["sentence_challenge_generation"]
 
 
 def test_repeated_challenge_completion_returns_409(session):
@@ -347,8 +359,8 @@ def test_repeated_challenge_completion_returns_409(session):
     )
     session.add(training)
     session.commit()
-    provider = ChallengeProvider()
-    app, client = challenge_client(session, provider)
+    runner = ChallengeRunner()
+    app, client = challenge_client(session, runner)
 
     with client:
         response = client.post(
@@ -391,8 +403,8 @@ def test_challenge_completion_rejects_cross_family_training_with_404(session):
     )
     session.add(other_training)
     session.commit()
-    provider = ChallengeProvider()
-    app, client = challenge_client(session, provider)
+    runner = ChallengeRunner()
+    app, client = challenge_client(session, runner)
 
     with client:
         response = client.post(
@@ -424,8 +436,8 @@ def test_challenge_completion_rejects_malformed_generated_row_without_award(sess
     )
     session.add(training)
     session.commit()
-    provider = ChallengeProvider()
-    app, client = challenge_client(session, provider)
+    runner = ChallengeRunner()
+    app, client = challenge_client(session, runner)
 
     with client:
         response = client.post(
@@ -436,7 +448,7 @@ def test_challenge_completion_rejects_malformed_generated_row_without_award(sess
 
     assert response.status_code == 404
     assert response.json()["detail"] == "sentence training not found"
-    assert provider.calls == []
+    assert runner.calls == []
     session.refresh(training)
     session.refresh(ability)
     assert training.status == "generated"
@@ -461,8 +473,8 @@ def test_challenge_completion_rejects_short_answer(session):
     )
     session.add(training)
     session.commit()
-    provider = ChallengeProvider()
-    app, client = challenge_client(session, provider)
+    runner = ChallengeRunner()
+    app, client = challenge_client(session, runner)
 
     with client:
         response = client.post(
@@ -477,30 +489,30 @@ def test_challenge_completion_rejects_short_answer(session):
 def test_daily_generation_limit_returns_rest_message_without_provider_call(session):
     parent = seed_demo_data(session)
     student = parent_students(session, parent.id)[0]
-    session.add(
-        LLMCallLog(
-            student_id=student.id,
-            task_type=TaskType.sentence,
-            task_name="sentence_challenge_generation",
-            prompt_key="sentence_challenge_generation",
-            provider="http",
-            model="test-model",
-            prompt_version="test",
-            input_summary="句子挑战生成",
-            output_json={},
-            validation_ok=True,
-            final_status=TaskFinalStatus.PRIMARY_SUCCESS,
-            created_at=datetime.now(UTC),
+    for index in range(TASK_CONFIGS["sentence_challenge_generation"].daily_limit):
+        session.add(
+            LLMCallLog(
+                student_id=student.id,
+                task_type=TaskType.sentence,
+                task_name="sentence_challenge_generation",
+                prompt_key="sentence_challenge_generation",
+                provider="http",
+                model="test-model",
+                prompt_version="test",
+                input_summary=f"句子挑战生成 {index}",
+                output_json={},
+                validation_ok=True,
+                final_status=TaskFinalStatus.PRIMARY_SUCCESS,
+                created_at=datetime.now(UTC),
+            )
         )
-    )
     session.commit()
-    provider = ChallengeProvider()
+    runner = ChallengeRunner()
     app, client = challenge_client(
         session,
-        provider,
+        runner,
         Settings(
             llm_daily_limit_enabled=True,
-            sentence_challenge_daily_limit_per_student=1,
             llm_daily_limit_timezone="Asia/Shanghai",
         ),
     )
@@ -514,11 +526,11 @@ def test_daily_generation_limit_returns_rest_message_without_provider_call(sessi
 
     assert response.status_code == 429
     assert response.json()["detail"] == "今天的句子挑战已经完成很多啦，休息一下，明天继续闯关！"
-    assert provider.calls == []
+    assert runner.calls == []
 
 
 def test_feedback_provider_failure_still_completes_with_fallback_feedback(session):
-    class FailingFeedbackProvider(ChallengeProvider):
+    class FailingFeedbackRunner(ChallengeRunner):
         async def complete_json(self, task_name, payload):
             if task_name == "sentence_challenge_feedback":
                 self.calls.append(task_name)
@@ -542,8 +554,8 @@ def test_feedback_provider_failure_still_completes_with_fallback_feedback(sessio
         )
     )
     session.commit()
-    provider = FailingFeedbackProvider()
-    app, client = challenge_client(session, provider)
+    runner = FailingFeedbackRunner()
+    app, client = challenge_client(session, runner)
 
     with client:
         generation = client.post(

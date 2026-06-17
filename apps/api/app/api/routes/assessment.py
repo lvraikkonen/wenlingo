@@ -7,13 +7,12 @@ from app.api.auth_deps import (
     require_auth_mode_state_change,
     require_student_for_auth_mode,
 )
-from app.api.deps import get_db_session, get_llm_provider
+from app.api.deps import AITaskRunner, get_ai_task_runner, get_db_session
 from app.api.feedback_state import feedback_reaction_value
 from app.api.routes.alpha import record_product_event
 from app.core.config import Settings, get_settings
 from app.domain.models import AbilityProfile
 from app.services.assessment import complete_entry_assessment
-from app.services.llm_provider import LLMProvider
 
 router = APIRouter(prefix="/api/students", tags=["assessment"])
 
@@ -32,7 +31,7 @@ async def create_assessment(
     student_id: str,
     request: AssessmentCreate,
     session: Session = Depends(get_db_session),
-    provider: LLMProvider = Depends(get_llm_provider),
+    runner: AITaskRunner = Depends(get_ai_task_runner),
     settings: Settings = Depends(get_settings),
     context: ParentContext | None = Depends(require_auth_mode_state_change),
 ):
@@ -47,7 +46,7 @@ async def create_assessment(
             session=session,
             student=student,
             ability=ability,
-            provider=provider,
+            runner=runner,
             settings=settings,
             sentence_before=request.sentence_before,
             sentence_after=request.sentence_after,

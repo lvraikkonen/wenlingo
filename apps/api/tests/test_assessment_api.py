@@ -3,7 +3,7 @@ import json
 from fastapi.testclient import TestClient
 from sqlmodel import select
 
-from app.api.deps import get_db_session, get_llm_provider
+from app.api.deps import get_ai_task_runner, get_db_session
 from app.core.config import Settings, get_settings
 from app.domain.enums import TaskType
 from app.domain.models import (
@@ -20,8 +20,9 @@ from app.domain.models import (
     StudentProfile,
 )
 from app.main import create_app
+from app.services.ai_runner import run_ai_task
 from app.services.essay_workflow import ASSESSMENT_ESSAY_STATUS
-from app.services.ai_routing import TaskFinalStatus
+from app.services.ai_routing import TASK_CONFIGS, TaskFinalStatus
 from app.services.llm_provider import LLMProviderResponse
 
 
@@ -49,9 +50,20 @@ def valid_assessment_payload() -> dict[str, str]:
     }
 
 
-class AlwaysInvalidAssessmentProvider:
+class AlwaysInvalidAssessmentRunner:
     provider_name = "fake"
     model_name = "assessment-invalid"
+
+    def __init__(self, settings=None):
+        self.settings = settings or get_settings()
+
+    async def run(self, **kwargs):
+        return await run_ai_task(
+            settings=self.settings,
+            primary_provider=self,
+            fallback_provider=self,
+            **kwargs,
+        )
 
     async def complete_json(self, task_name, payload):
         parsed = {"bad": "shape"}
@@ -63,9 +75,20 @@ class AlwaysInvalidAssessmentProvider:
         )
 
 
-class RaiseOnEssayFeedbackProvider:
+class RaiseOnEssayFeedbackRunner:
     provider_name = "fake"
     model_name = "assessment-essay-error"
+
+    def __init__(self, settings=None):
+        self.settings = settings or get_settings()
+
+    async def run(self, **kwargs):
+        return await run_ai_task(
+            settings=self.settings,
+            primary_provider=self,
+            fallback_provider=self,
+            **kwargs,
+        )
 
     async def complete_json(self, task_name, payload):
         if task_name == "sentence_upgrade_feedback":
@@ -87,9 +110,20 @@ class RaiseOnEssayFeedbackProvider:
         raise ValueError(f"Unknown LLM task: {task_name}")
 
 
-class QuotaLimitedAssessmentProvider:
+class QuotaLimitedAssessmentRunner:
     provider_name = "http"
     model_name = "assessment-quota"
+
+    def __init__(self, settings=None):
+        self.settings = settings or get_settings()
+
+    async def run(self, **kwargs):
+        return await run_ai_task(
+            settings=self.settings,
+            primary_provider=self,
+            fallback_provider=self,
+            **kwargs,
+        )
 
     async def complete_json(self, task_name, payload):
         if task_name == "essay_feedback":
@@ -176,7 +210,7 @@ def test_schema_valid_fallback_can_complete_assessment(session):
     student = create_default_child(session)
     app = create_app()
     app.dependency_overrides[get_db_session] = lambda: session
-    app.dependency_overrides[get_llm_provider] = lambda: AlwaysInvalidAssessmentProvider()
+    app.dependency_overrides[get_ai_task_runner] = lambda: AlwaysInvalidAssessmentRunner()
 
     with TestClient(app) as test_client:
         response = test_client.post(
@@ -194,29 +228,51 @@ def test_schema_valid_fallback_can_complete_assessment(session):
     assert response.json()["ability_sketch"]["specific_writing_power"] > 40
 
 
-def test_daily_limit_assessment_uses_fallback_without_failure_event(session):
+def test_assessment_logs_configured_prompt_version(session):
     student = create_default_child(session)
-    session.add(
-        LLMCallLog(
-            student_id=student.id,
-            task_type=TaskType.sentence,
-            task_name="sentence_upgrade_feedback",
-            provider=QuotaLimitedAssessmentProvider.provider_name,
-            model=QuotaLimitedAssessmentProvider.model_name,
-            input_summary="previous assessment sentence request",
-            validation_ok=True,
-            final_status=TaskFinalStatus.PRIMARY_SUCCESS,
-        )
-    )
-    session.commit()
     app = create_app()
     app.dependency_overrides[get_db_session] = lambda: session
-    app.dependency_overrides[get_llm_provider] = lambda: QuotaLimitedAssessmentProvider()
     app.dependency_overrides[get_settings] = lambda: Settings(
-        llm_daily_limit_enabled=True,
-        llm_daily_limit_per_student_task=1,
-        sentence_feedback_daily_limit_per_student=1,
+        llm_prompt_version="assessment-test-v1"
     )
+
+    with TestClient(app) as test_client:
+        response = test_client.post(
+            f"/api/students/{student.id}/assessment",
+            json=valid_assessment_payload(),
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    logs = session.exec(select(LLMCallLog)).all()
+    assert {log.task_name for log in logs} == {"sentence_upgrade_feedback", "essay_feedback"}
+    assert {log.prompt_version for log in logs} == {"assessment-test-v1"}
+
+
+def test_daily_limit_assessment_uses_fallback_without_failure_event(session):
+    student = create_default_child(session)
+    for index in range(TASK_CONFIGS["sentence_upgrade_feedback"].daily_limit):
+        session.add(
+            LLMCallLog(
+                student_id=student.id,
+                task_type=TaskType.sentence,
+                task_name="sentence_upgrade_feedback",
+                provider=QuotaLimitedAssessmentRunner.provider_name,
+                model=QuotaLimitedAssessmentRunner.model_name,
+                input_summary=f"previous assessment sentence request {index}",
+                validation_ok=True,
+                final_status=TaskFinalStatus.PRIMARY_SUCCESS,
+            )
+        )
+    session.commit()
+    settings = Settings(
+        llm_daily_limit_enabled=True,
+        llm_daily_limit_timezone="Asia/Shanghai",
+    )
+    app = create_app()
+    app.dependency_overrides[get_db_session] = lambda: session
+    app.dependency_overrides[get_ai_task_runner] = lambda: QuotaLimitedAssessmentRunner(settings)
+    app.dependency_overrides[get_settings] = lambda: settings
 
     with TestClient(app) as test_client:
         response = test_client.post(
@@ -235,9 +291,9 @@ def test_daily_limit_assessment_uses_fallback_without_failure_event(session):
         select(ProductEvent).where(ProductEvent.event_type == "ai_feedback_failed")
     ).all() == []
     logs = session.exec(select(LLMCallLog)).all()
-    assert [log.provider for log in logs] == ["http", "local_fallback", "http"]
-    assert logs[1].error_message == "daily limit reached"
-    assert logs[1].validation_ok is False
+    assert [log.provider for log in logs[-2:]] == ["local_fallback", "http"]
+    assert logs[-2].error_message == "daily limit reached"
+    assert logs[-2].validation_ok is False
     ability = session.exec(
         select(AbilityProfile).where(AbilityProfile.student_id == student.id)
     ).one()
@@ -273,7 +329,7 @@ def test_unhandled_assessment_error_rolls_back_partial_rows(session):
     student = create_default_child(session)
     app = create_app()
     app.dependency_overrides[get_db_session] = lambda: session
-    app.dependency_overrides[get_llm_provider] = lambda: RaiseOnEssayFeedbackProvider()
+    app.dependency_overrides[get_ai_task_runner] = lambda: RaiseOnEssayFeedbackRunner()
 
     with TestClient(app, raise_server_exceptions=False) as test_client:
         response = test_client.post(
