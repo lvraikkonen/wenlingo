@@ -16,17 +16,68 @@ Codex with Superpowers is the primary implementation agent.
 
 Do not take over implementation unless explicitly asked.
 
-## gstack Usage
+## gstack
 
-Use gstack-style review workflows for:
-- Product strategy review
-- Learning loop review
-- UX review from child and parent perspectives
-- Architecture review
-- Engineering plan review
-- QA and release readiness review
+gstack is installed at `~/.claude/skills/gstack`. All gstack skills are invoked via the Skill tool.
 
-Preferred outputs:
+### Web Browsing
+
+Always use the `/browse` skill from gstack for all web browsing. Never use `mcp__claude-in-chrome__*` tools.
+
+### Available Skills
+
+Review & Strategy:
+- `/office-hours` — Product brainstorming and ideation
+- `/plan-ceo-review` — CEO/product strategy review
+- `/plan-eng-review` — Architecture and engineering review
+- `/plan-design-review` — Design system/plan review
+- `/design-consultation` — Design consultation
+- `/design-shotgun` — Rapid design exploration
+- `/design-html` — HTML design implementation
+- `/devex-review` — Developer experience review
+- `/plan-devex-review` — DevEx planning review
+- `/autoplan` — Full review pipeline (multi-perspective)
+- `/retro` — Retrospective
+
+QA & Testing:
+- `/qa` — Full QA testing
+- `/qa-only` — QA testing without report
+- `/browse` — Web browsing via headless browser
+- `/connect-chrome` — Connect to Chrome browser
+
+Code Review & Ship:
+- `/review` — Code review / diff check
+- `/ship` — Ship and deploy
+- `/land-and-deploy` — Land branch and deploy
+- `/canary` — Canary deployment
+- `/benchmark` — Performance benchmarking
+
+Investigation & Debugging:
+- `/investigate` — Bug investigation
+- `/careful` — Careful/cautious mode
+- `/guard` — Enable guard mode
+- `/freeze` — Freeze dependencies
+- `/unfreeze` — Unfreeze dependencies
+
+Documentation & Context:
+- `/document-release` — Release documentation
+- `/document-generate` — Generate documentation
+- `/context-save` — Save session context
+- `/context-restore` — Resume session context
+- `/learn` — Learn from context
+
+Setup & Config:
+- `/setup-browser-cookies` — Configure browser cookies
+- `/setup-deploy` — Configure deployment
+- `/setup-gbrain` — Configure gbrain
+- `/gstack-upgrade` — Upgrade gstack
+
+Agents:
+- `/codex` — Codex implementation agent
+- `/cso` — Chief Strategy Officer agent
+
+### Preferred Outputs
+
 - specs/*-product-review.md
 - specs/*-architecture-review.md
 - specs/*-learning-loop-design.md
