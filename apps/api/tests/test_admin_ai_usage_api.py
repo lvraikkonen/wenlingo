@@ -136,6 +136,71 @@ def test_admin_ai_usage_returns_empty_state(session, monkeypatch):
     assert response.json() == {"pricing_configured": False, "usage": []}
 
 
+def test_admin_ai_usage_uses_product_events_for_limit_hit_count(
+    session,
+    monkeypatch,
+):
+    blocked_at = datetime(2026, 6, 8, 7, 0, tzinfo=timezone.utc)
+    session.add(
+        LLMCallLog(
+            task_type=TaskType.sentence,
+            task_name="sentence_challenge_generation",
+            prompt_key="challenge",
+            provider="legacy-provider",
+            model="legacy-model",
+            resolved_provider="resolved-provider",
+            resolved_model="resolved-model",
+            input_summary="safe summary",
+            validation_ok=False,
+            final_status="daily_limit_reached",
+            pricing_status="pricing_unconfigured",
+            latency_ms=125,
+            created_at=blocked_at,
+        )
+    )
+    session.add(
+        ProductEvent(
+            event_type="ai_daily_limit_reached",
+            payload={"task_type": "sentence_challenge_generation"},
+            created_at=blocked_at,
+        )
+    )
+    session.commit()
+    app = create_admin_client(session, monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/admin/alpha/ai-usage",
+            headers={"X-Alpha-Admin-Token": "secret"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "pricing_configured": False,
+        "usage": [
+            {
+                "date": "2026-06-08",
+                "task_type": "sentence_challenge_generation",
+                "provider": "resolved-provider",
+                "model": "resolved-model",
+                "final_status": "daily_limit_reached",
+                "call_count": 1,
+                "success_count": 0,
+                "fallback_success_count": 0,
+                "deterministic_fallback_count": 0,
+                "failure_count": 0,
+                "daily_limit_hit_count": 1,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "estimated_cost": 0.0,
+                "pricing_status": "pricing_unconfigured",
+                "avg_latency_ms": 125,
+            }
+        ],
+    }
+
+
 def test_admin_ai_usage_uses_configured_product_timezone_for_dates(session, monkeypatch):
     monkeypatch.setenv("LLM_DAILY_LIMIT_TIMEZONE", "Asia/Shanghai")
     utc_boundary_time = datetime(2026, 6, 7, 18, 0, tzinfo=timezone.utc)

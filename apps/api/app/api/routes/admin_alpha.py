@@ -411,8 +411,6 @@ def alpha_admin_ai_usage(
             row["deterministic_fallback_count"] += 1
         elif status == "failed":
             row["failure_count"] += 1
-        elif status == "daily_limit_reached":
-            row["daily_limit_hit_count"] += 1
         row["prompt_tokens"] += log.prompt_tokens
         row["completion_tokens"] += log.completion_tokens
         row["total_tokens"] += log.total_tokens
