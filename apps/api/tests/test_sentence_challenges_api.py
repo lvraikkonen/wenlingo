@@ -529,6 +529,50 @@ def test_daily_generation_limit_returns_rest_message_without_provider_call(sessi
     assert runner.calls == []
 
 
+def test_daily_generation_limit_uses_sentence_env_override(session):
+    parent = seed_demo_data(session)
+    student = parent_students(session, parent.id)[0]
+    for index in range(2):
+        session.add(
+            LLMCallLog(
+                student_id=student.id,
+                task_type=TaskType.sentence,
+                task_name="sentence_challenge_generation",
+                prompt_key="sentence_challenge_generation",
+                provider="http",
+                model="test-model",
+                prompt_version="test",
+                input_summary=f"句子挑战生成 {index}",
+                output_json={},
+                validation_ok=True,
+                final_status=TaskFinalStatus.PRIMARY_SUCCESS,
+                created_at=datetime.now(UTC),
+            )
+        )
+    session.commit()
+    runner = ChallengeRunner()
+    app, client = challenge_client(
+        session,
+        runner,
+        Settings(
+            llm_daily_limit_enabled=True,
+            sentence_challenge_daily_limit_per_student=2,
+            llm_daily_limit_timezone="Asia/Shanghai",
+        ),
+    )
+
+    with client:
+        response = client.post(
+            f"/api/students/{student.id}/sentence-challenges",
+            json={},
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == "今天的句子挑战已经完成很多啦，休息一下，明天继续闯关！"
+    assert runner.calls == []
+
+
 def test_feedback_provider_failure_still_completes_with_fallback_feedback(session):
     class FailingFeedbackRunner(ChallengeRunner):
         async def complete_json(self, task_name, payload):

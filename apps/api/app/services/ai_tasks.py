@@ -394,6 +394,7 @@ async def sentence_challenge_generation(
     grade_label: str,
     session: Session | None = None,
     student_id: str | None = None,
+    daily_limit: int | None = None,
 ) -> LLMTaskResult[SentenceChallenge]:
     _validate_sentence_challenge_grade_label(grade_label)
     fallback_challenge(target_skill, grade_label)
@@ -411,6 +412,7 @@ async def sentence_challenge_generation(
             grade_label,
         ),
         input_summary=f"句子挑战生成；年级：{grade_label}；目标：{target_skill}",
+        daily_limit=daily_limit,
         prompt_version=prompt.version,
         validate_output=lambda challenge: _validate_sentence_challenge_response_context(
             challenge,
@@ -427,6 +429,7 @@ async def sentence_challenge_feedback(
     upgraded_sentence: str,
     session: Session | None = None,
     student_id: str | None = None,
+    daily_limit: int | None = None,
 ) -> LLMTaskResult[SentenceChallengeFeedback]:
     fallback_challenge_feedback(target_skill)
     prompt = get_prompt("sentence_challenge_feedback")
@@ -449,6 +452,7 @@ async def sentence_challenge_feedback(
             f"句子挑战反馈；目标：{target_skill}；"
             f"原句长度：{len(source_sentence)}；升级句长度：{len(upgraded_sentence)}"
         ),
+        daily_limit=daily_limit,
         prompt_version=prompt.version,
     )
 

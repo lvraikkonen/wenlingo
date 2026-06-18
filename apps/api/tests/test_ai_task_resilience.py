@@ -123,6 +123,22 @@ async def test_sentence_challenge_generation_wrapper_passes_runner_contract():
 
 
 @pytest.mark.asyncio
+async def test_sentence_challenge_generation_wrapper_passes_daily_limit_override():
+    runner = RecordingRunner(sentence_challenge_output())
+
+    await sentence_challenge_generation(
+        runner=runner,
+        target_skill="action_expression",
+        grade_label="四年级",
+        session=None,
+        student_id="s1",
+        daily_limit=2,
+    )
+
+    assert runner.calls[0]["daily_limit"] == 2
+
+
+@pytest.mark.asyncio
 async def test_sentence_upgrade_feedback_wrapper_passes_runner_contract_and_wraps_payload():
     output = sentence_feedback_output()
     runner = RecordingRunner(output)
@@ -202,6 +218,23 @@ async def test_sentence_challenge_feedback_wrapper_passes_runner_contract_and_wr
     assert callable(call["deterministic_fallback_factory"])
     fallback = call["deterministic_fallback_factory"](None)
     assert fallback.highlight == "你给句子加上了清楚的细节。"
+
+
+@pytest.mark.asyncio
+async def test_sentence_challenge_feedback_wrapper_passes_daily_limit_override():
+    runner = RecordingRunner(challenge_feedback_output())
+
+    await sentence_challenge_feedback(
+        runner=runner,
+        target_skill="action_expression",
+        source_sentence="小猫跑了。",
+        upgraded_sentence="小猫飞快地跑过草地。",
+        session=None,
+        student_id="s1",
+        daily_limit=2,
+    )
+
+    assert runner.calls[0]["daily_limit"] == 2
 
 
 @pytest.mark.asyncio

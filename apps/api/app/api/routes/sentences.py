@@ -139,6 +139,7 @@ async def create_sentence_challenge(
         grade_label=student.grade_label,
         session=session,
         student_id=student.id,
+        daily_limit=settings.sentence_challenge_daily_limit_per_student,
     )
     challenge = result.output
     if result.status == "daily_limit_reached":
@@ -220,6 +221,7 @@ async def complete_sentence_challenge(
         target_skill=training.target_skill,
         session=session,
         student_id=student.id,
+        daily_limit=settings.sentence_feedback_daily_limit_per_student,
     )
     feedback = feedback_result.output
     if feedback_result.status == "daily_limit_reached":
