@@ -6,7 +6,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.domain.models import DailyTaskLimitCounter, LLMCallLog, utcnow
+from app.domain.models import DailyTaskLimitCounter, LLMCallLog, new_uuid, utcnow
 
 
 PRODUCT_OUTPUT_FINAL_STATUSES = {
@@ -21,6 +21,8 @@ class DailyLimitReservation:
     reserved: bool
     counter_id: str | None
     product_day: str
+    reservation_token: str | None = None
+    reservation_expires_at: datetime | None = None
 
 
 def local_day_start_utc(now: datetime, timezone_name: str) -> datetime:
@@ -61,20 +63,48 @@ def llm_daily_limit_reached(
     return int(count) >= limit
 
 
-def _release_stale_reservation(counter: DailyTaskLimitCounter, now: datetime) -> None:
-    reservation_expires_at = counter.reservation_expires_at
-    if reservation_expires_at is not None and reservation_expires_at.tzinfo is None:
-        reservation_expires_at = reservation_expires_at.replace(tzinfo=timezone.utc)
+def _ensure_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _reservation_expiry_from_iso(value: str) -> datetime:
+    return _ensure_utc(datetime.fromisoformat(value))
+
+
+def _refresh_reservation_state(counter: DailyTaskLimitCounter) -> None:
+    active_reservations = dict(counter.active_reservations or {})
+    counter.active_reservations = active_reservations
+    counter.reserved_count = len(active_reservations)
+    if not active_reservations:
+        counter.reservation_expires_at = None
+        return
+    counter.reservation_expires_at = max(
+        _reservation_expiry_from_iso(expires_at)
+        for expires_at in active_reservations.values()
+    )
+
+
+def _release_stale_reservations(counter: DailyTaskLimitCounter, now: datetime) -> None:
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
-    if (
-        counter.reserved_count > 0
-        and reservation_expires_at is not None
-        and reservation_expires_at <= now
-    ):
-        counter.released_count += counter.reserved_count
-        counter.reserved_count = 0
-        counter.reservation_expires_at = None
+    active_reservations = dict(counter.active_reservations or {})
+    if not active_reservations and counter.reserved_count > 0:
+        active_reservations = {
+            "__legacy__": _ensure_utc(counter.reservation_expires_at).isoformat()
+        } if counter.reservation_expires_at is not None else {}
+
+    current_reservations = {
+        token: expires_at
+        for token, expires_at in active_reservations.items()
+        if _reservation_expiry_from_iso(expires_at) > now
+    }
+    released_count = len(active_reservations) - len(current_reservations)
+    if released_count > 0:
+        counter.released_count += released_count
+        counter.active_reservations = current_reservations
+        _refresh_reservation_state(counter)
         counter.updated_at = now
 
 
@@ -108,6 +138,18 @@ def _load_daily_task_counter_for_update(
             task_name=task_name,
             product_day=product_day,
         )
+    ).first()
+
+
+def _load_daily_task_counter_by_id_for_update(
+    *,
+    session: Session,
+    counter_id: str,
+) -> DailyTaskLimitCounter | None:
+    return session.exec(
+        select(DailyTaskLimitCounter)
+        .where(DailyTaskLimitCounter.id == counter_id)
+        .with_for_update()
     ).first()
 
 
@@ -178,69 +220,117 @@ def reserve_daily_task_limit_slot(
         limit=limit,
     )
 
-    _release_stale_reservation(counter, now)
+    _release_stale_reservations(counter, now)
     counter.limit_value = limit
     if counter.reserved_count + counter.consumed_count >= limit:
         session.add(counter)
         session.flush()
         return DailyLimitReservation(False, counter.id, product_day)
 
-    counter.reserved_count += 1
-    # This is a counter-level expiry, not per-slot. Refresh it on each new
-    # reservation so older reservations cannot release newer ones early.
-    counter.reservation_expires_at = now + timedelta(seconds=reservation_ttl_seconds)
+    reservation_token = new_uuid()
+    reservation_expires_at = now + timedelta(seconds=reservation_ttl_seconds)
+    active_reservations = dict(counter.active_reservations or {})
+    active_reservations[reservation_token] = _ensure_utc(reservation_expires_at).isoformat()
+    counter.active_reservations = active_reservations
+    _refresh_reservation_state(counter)
     counter.updated_at = now
     session.add(counter)
     session.flush()
-    return DailyLimitReservation(True, counter.id, product_day)
-
-
-def consume_daily_task_reservation(*, session: Session, counter_id: str | None) -> None:
-    if counter_id is None:
-        return
-    counter = session.get(DailyTaskLimitCounter, counter_id)
-    if counter is None:
-        return
-    if counter.reserved_count > 0:
-        counter.reserved_count -= 1
-    counter.consumed_count += 1
-    counter.reservation_expires_at = (
-        None if counter.reserved_count == 0 else counter.reservation_expires_at
+    return DailyLimitReservation(
+        True,
+        counter.id,
+        product_day,
+        reservation_token,
+        reservation_expires_at,
     )
-    counter.updated_at = utcnow()
-    session.add(counter)
-    session.flush()
 
 
-def release_daily_task_reservation(*, session: Session, counter_id: str | None) -> None:
+def _finalize_daily_task_reservation(
+    *,
+    session: Session,
+    counter_id: str | None,
+    reservation_token: str | None,
+    final_status: str,
+) -> None:
     if counter_id is None:
         return
-    counter = session.get(DailyTaskLimitCounter, counter_id)
+    counter = _load_daily_task_counter_by_id_for_update(session=session, counter_id=counter_id)
     if counter is None:
         return
-    if counter.reserved_count > 0:
+    now = utcnow()
+
+    if reservation_token is not None:
+        active_reservations = dict(counter.active_reservations or {})
+        if reservation_token not in active_reservations:
+            session.add(counter)
+            session.flush()
+            return
+        del active_reservations[reservation_token]
+        counter.active_reservations = active_reservations
+    elif counter.reserved_count > 0:
         counter.reserved_count -= 1
+    else:
+        if final_status in {"consume", "fail"}:
+            counter.updated_at = now
+            session.add(counter)
+            session.flush()
+        return
+
+    if final_status == "consume":
+        counter.consumed_count += 1
+    elif final_status == "release":
         counter.released_count += 1
-    counter.reservation_expires_at = (
-        None if counter.reserved_count == 0 else counter.reservation_expires_at
-    )
-    counter.updated_at = utcnow()
+    elif final_status == "fail":
+        counter.failed_count += 1
+
+    if reservation_token is not None:
+        _refresh_reservation_state(counter)
+    else:
+        counter.reservation_expires_at = (
+            None if counter.reserved_count == 0 else counter.reservation_expires_at
+        )
+    counter.updated_at = now
     session.add(counter)
     session.flush()
 
 
-def fail_daily_task_reservation(*, session: Session, counter_id: str | None) -> None:
-    if counter_id is None:
-        return
-    counter = session.get(DailyTaskLimitCounter, counter_id)
-    if counter is None:
-        return
-    if counter.reserved_count > 0:
-        counter.reserved_count -= 1
-    counter.failed_count += 1
-    counter.reservation_expires_at = (
-        None if counter.reserved_count == 0 else counter.reservation_expires_at
+def consume_daily_task_reservation(
+    *,
+    session: Session,
+    counter_id: str | None,
+    reservation_token: str | None = None,
+) -> None:
+    _finalize_daily_task_reservation(
+        session=session,
+        counter_id=counter_id,
+        reservation_token=reservation_token,
+        final_status="consume",
     )
-    counter.updated_at = utcnow()
-    session.add(counter)
-    session.flush()
+
+
+def release_daily_task_reservation(
+    *,
+    session: Session,
+    counter_id: str | None,
+    reservation_token: str | None = None,
+) -> None:
+    _finalize_daily_task_reservation(
+        session=session,
+        counter_id=counter_id,
+        reservation_token=reservation_token,
+        final_status="release",
+    )
+
+
+def fail_daily_task_reservation(
+    *,
+    session: Session,
+    counter_id: str | None,
+    reservation_token: str | None = None,
+) -> None:
+    _finalize_daily_task_reservation(
+        session=session,
+        counter_id=counter_id,
+        reservation_token=reservation_token,
+        final_status="fail",
+    )

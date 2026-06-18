@@ -22,6 +22,7 @@ def upgrade() -> None:
         sa.Column("consumed_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("failed_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("released_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("active_reservations", sa.JSON(), nullable=False, server_default="{}"),
         sa.Column("reservation_expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["student_id"], ["studentprofile.id"]),

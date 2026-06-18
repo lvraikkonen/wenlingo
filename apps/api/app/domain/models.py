@@ -351,6 +351,10 @@ class DailyTaskLimitCounter(SQLModel, table=True):
     consumed_count: int = 0
     failed_count: int = 0
     released_count: int = 0
+    active_reservations: dict[str, str] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False),
+    )
     reservation_expires_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True, index=True),

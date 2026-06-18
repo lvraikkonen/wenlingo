@@ -132,10 +132,12 @@ def test_reserve_daily_task_limit_slot_allows_one_slot_and_blocks_next(session):
     )
 
     assert first.reserved is True
+    assert first.reservation_token is not None
     assert second.reserved is False
     counter = session.exec(select(DailyTaskLimitCounter)).one()
     assert counter.reserved_count == 1
     assert counter.consumed_count == 0
+    assert first.reservation_token in counter.active_reservations
 
 
 def test_consume_and_release_daily_task_reservation(session):
@@ -148,11 +150,16 @@ def test_consume_and_release_daily_task_reservation(session):
         now=datetime(2026, 6, 8, 1, 0, tzinfo=timezone.utc),
     )
 
-    consume_daily_task_reservation(session=session, counter_id=reservation.counter_id)
+    consume_daily_task_reservation(
+        session=session,
+        counter_id=reservation.counter_id,
+        reservation_token=reservation.reservation_token,
+    )
 
     counter = session.get(DailyTaskLimitCounter, reservation.counter_id)
     assert counter.reserved_count == 0
     assert counter.consumed_count == 1
+    assert reservation.reservation_token not in counter.active_reservations
 
     second = reserve_daily_task_limit_slot(
         session=session,
@@ -162,12 +169,17 @@ def test_consume_and_release_daily_task_reservation(session):
         timezone_name="Asia/Shanghai",
         now=datetime(2026, 6, 8, 1, 2, tzinfo=timezone.utc),
     )
-    release_daily_task_reservation(session=session, counter_id=second.counter_id)
+    release_daily_task_reservation(
+        session=session,
+        counter_id=second.counter_id,
+        reservation_token=second.reservation_token,
+    )
 
     session.refresh(counter)
     assert counter.reserved_count == 0
     assert counter.consumed_count == 1
     assert counter.released_count == 1
+    assert second.reservation_token not in counter.active_reservations
 
 
 def test_fail_daily_task_reservation_releases_slot_and_records_failure(session):
@@ -180,12 +192,52 @@ def test_fail_daily_task_reservation_releases_slot_and_records_failure(session):
         now=datetime(2026, 6, 8, 1, 0, tzinfo=timezone.utc),
     )
 
-    fail_daily_task_reservation(session=session, counter_id=reservation.counter_id)
+    fail_daily_task_reservation(
+        session=session,
+        counter_id=reservation.counter_id,
+        reservation_token=reservation.reservation_token,
+    )
 
     counter = session.get(DailyTaskLimitCounter, reservation.counter_id)
     assert counter.reserved_count == 0
     assert counter.failed_count == 1
     assert counter.reservation_expires_at is None
+    assert reservation.reservation_token not in counter.active_reservations
+
+
+def test_stale_old_reservation_finalizer_does_not_release_newer_reservation(session):
+    first = reserve_daily_task_limit_slot(
+        session=session,
+        student_id="s1",
+        task_name="sentence_challenge_generation",
+        limit=1,
+        timezone_name="Asia/Shanghai",
+        now=datetime(2026, 6, 8, 1, 0, tzinfo=timezone.utc),
+        reservation_ttl_seconds=30,
+    )
+    second = reserve_daily_task_limit_slot(
+        session=session,
+        student_id="s1",
+        task_name="sentence_challenge_generation",
+        limit=1,
+        timezone_name="Asia/Shanghai",
+        now=datetime(2026, 6, 8, 1, 1, tzinfo=timezone.utc),
+        reservation_ttl_seconds=120,
+    )
+
+    release_daily_task_reservation(
+        session=session,
+        counter_id=first.counter_id,
+        reservation_token=first.reservation_token,
+    )
+
+    counter = session.get(DailyTaskLimitCounter, first.counter_id)
+    assert first.reserved is True
+    assert second.reserved is True
+    assert counter.reserved_count == 1
+    assert counter.released_count == 1
+    assert second.reservation_token in counter.active_reservations
+    assert first.reservation_token not in counter.active_reservations
 
 
 def test_stale_reservation_is_released_before_limit_check(session):
@@ -213,3 +265,4 @@ def test_stale_reservation_is_released_before_limit_check(session):
     counter = session.get(DailyTaskLimitCounter, first.counter_id)
     assert counter.reserved_count == 1
     assert counter.released_count == 1
+    assert second.reservation_token in counter.active_reservations

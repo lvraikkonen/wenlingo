@@ -15,5 +15,6 @@ def test_v05c1_daily_task_limit_counter_has_migration():
     assert "product_day" in migration_text
     assert "reserved_count" in migration_text
     assert "consumed_count" in migration_text
+    assert "active_reservations" in migration_text
     assert "reservation_expires_at" in migration_text
     assert "uq_daily_task_limit_counter_key" in migration_text
