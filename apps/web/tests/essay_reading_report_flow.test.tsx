@@ -5,7 +5,7 @@ import { Suspense } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import EssayPage from "../src/app/children/[studentId]/essay/page";
 import ReadingPage from "../src/app/children/[studentId]/reading/page";
-import ReportPage from "../src/app/parent/[studentId]/report/page";
+import { ReportPageContent } from "../src/app/parent/[studentId]/report/page";
 
 const apiMocks = vi.hoisted(() => ({
   createEssay: vi.fn(),
@@ -205,7 +205,7 @@ test("reading page shows friendly construction state", async () => {
 });
 
 test("report page renders parent-safe stage report", async () => {
-  render(await ReportPage({ params: Promise.resolve({ studentId: "s1" }) }));
+  render(<ReportPageContent studentId="s1" />);
 
   expect(
     await screen.findByText("本阶段完成了 1 次句子训练和 1 次阅读练习。"),

@@ -116,6 +116,27 @@ def test_sentence_challenge_feedback_contract_is_short():
     assert feedback.example_upgrade.endswith("。")
 
 
+@pytest.mark.asyncio
+async def test_mock_provider_returns_sentence_challenge_contract_outputs():
+    provider = MockLLMProvider()
+
+    challenge_response = await provider.complete_json(
+        "sentence_challenge_generation",
+        {"target_skill": "action_expression", "grade_label": "四年级"},
+    )
+    feedback_response = await provider.complete_json(
+        "sentence_challenge_feedback",
+        {"target_skill": "action_expression"},
+    )
+
+    challenge = SentenceChallenge.model_validate(challenge_response.parsed_json)
+    feedback = SentenceChallengeFeedback.model_validate(feedback_response.parsed_json)
+
+    assert challenge.target_skill == "action_expression"
+    assert challenge.grade_label == "四年级"
+    assert feedback.example_upgrade.endswith("。")
+
+
 @pytest.mark.parametrize(
     ("contract", "payload"),
     [

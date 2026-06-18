@@ -60,10 +60,12 @@ function EssayPageContent({ studentId }: { studentId: string }) {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    activeStudentId.current = studentId;
+
     return () => {
       activeStudentId.current = null;
     };
-  }, []);
+  }, [studentId]);
 
   function toggleTask(instruction: string) {
     setSelectedTasks((current) =>

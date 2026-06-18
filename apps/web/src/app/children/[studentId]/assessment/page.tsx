@@ -181,10 +181,12 @@ function AssessmentPageContent({ studentId }: { studentId: string }) {
   const canSubmitWriting = shortWriting.trim().length >= 20;
 
   useEffect(() => {
+    activeStudentId.current = studentId;
+
     return () => {
       activeStudentId.current = null;
     };
-  }, []);
+  }, [studentId]);
 
   const progress = useMemo(
     () =>

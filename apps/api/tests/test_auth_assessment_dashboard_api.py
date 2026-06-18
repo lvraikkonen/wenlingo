@@ -1,5 +1,7 @@
+from fastapi.testclient import TestClient
 from sqlmodel import select
 
+from app.api.deps import get_db_session
 from app.domain.enums import TaskType
 from app.domain.models import (
     AbilityHistory,
@@ -11,6 +13,7 @@ from app.domain.models import (
     StudentProfile,
 )
 from app.domain.seed import seed_demo_data
+from app.main import create_app
 from app.services.essay_workflow import ASSESSMENT_ESSAY_STATUS
 
 
@@ -27,6 +30,27 @@ def test_demo_login_returns_four_students(session, client):
     payload = response.json()
     assert payload["parent"]["email"] == "demo@wenlingo.local"
     assert len(payload["students"]) == 4
+
+
+def test_demo_login_sets_session_cookie_when_alpha_auth_is_required(
+    session,
+    monkeypatch,
+):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
+    monkeypatch.setenv("AUTH_SESSION_COOKIE_SECURE", "false")
+    app = create_app()
+    app.dependency_overrides[get_db_session] = lambda: session
+
+    with TestClient(app) as test_client:
+        response = test_client.post("/api/auth/demo-login")
+        dashboard = test_client.get("/api/students/s1/dashboard")
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    assert "wenlingo_parent_session" in response.cookies
+    assert dashboard.status_code == 200
+    assert dashboard.json()["student"]["id"] == "s1"
 
 
 def test_assessment_creates_first_ability_sketch_and_dashboard(session, client):

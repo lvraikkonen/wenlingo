@@ -113,6 +113,30 @@ test("renders simplified alpha navigation without demo children", async () => {
   );
 });
 
+test("keeps demo family navigation for canonical demo children under auth", async () => {
+  vi.mocked(getMyAlphaChildren).mockResolvedValueOnce({
+    parent: { id: "p1", email: "demo@wenlingo.local", display_name: "内测家长" },
+    children: students.map((student) => ({
+      ...student,
+      nickname: student.name,
+      is_real_child: student.id === "s1",
+      dashboard_url: `/children/${student.id}`,
+      summary_url: `/parent/children/${student.id}/summary`,
+      assessment_completed: false,
+    })),
+  });
+
+  render(<FamilyTopbar currentStudentId="s1" />);
+
+  expect(await screen.findByText("当前孩子：小宇")).toBeInTheDocument();
+  expect(demoLogin).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("主导航")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "小晴" })).toHaveAttribute(
+    "href",
+    "/children/s2",
+  );
+});
+
 test("falls back to demo navigation when session parent has no children", async () => {
   vi.mocked(getMyAlphaChildren).mockResolvedValueOnce({
     parent: { id: "parent-empty", email: "parent@example.com", display_name: "小星家长" },

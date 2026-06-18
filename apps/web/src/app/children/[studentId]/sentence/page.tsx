@@ -73,6 +73,7 @@ function SentencePageContent({ studentId }: { studentId: string }) {
 
   useEffect(() => {
     let active = true;
+    activeStudentId.current = studentId;
 
     createSentenceChallenge(studentId)
       .then((response) => {

@@ -3,7 +3,30 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { demoLogin, getMyAlphaChildren } from "../lib/api";
-import type { Student } from "../lib/types";
+import type { AlphaChild, Student } from "../lib/types";
+
+const DEMO_STUDENT_IDS = ["s1", "s2", "s3", "s4"];
+
+function isCanonicalDemoChildren(children: AlphaChild[]) {
+  return (
+    children.length === DEMO_STUDENT_IDS.length &&
+    children
+      .map((child) => child.id)
+      .sort()
+      .every((id, index) => id === DEMO_STUDENT_IDS[index])
+  );
+}
+
+function alphaChildrenToDemoStudents(children: AlphaChild[]): Student[] {
+  return children.map((child) => ({
+    id: child.id,
+    name: child.name,
+    grade_label: child.grade_label,
+    persona: child.persona as Student["persona"],
+    level: "level" in child && typeof child.level === "number" ? child.level : 1,
+    xp: "xp" in child && typeof child.xp === "number" ? child.xp : 0,
+  }));
+}
 
 function shouldLoadDemoStudents(error: unknown): boolean {
   if (typeof error !== "object" || error === null || !("status" in error)) {
@@ -52,6 +75,10 @@ export function FamilyTopbar({
           }
           if (result.children.length === 0) {
             loadDemoStudents();
+            return;
+          }
+          if (isCanonicalDemoChildren(result.children)) {
+            setStudents(alphaChildrenToDemoStudents(result.children));
             return;
           }
 

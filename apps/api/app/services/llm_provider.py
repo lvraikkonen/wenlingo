@@ -7,6 +7,7 @@ import httpx
 
 from app.prompts.registry import get_prompt
 from app.prompts.system import PRIMARY_COACH_SYSTEM_PROMPT
+from app.services.sentence_challenges import fallback_challenge, fallback_challenge_feedback
 
 LEGACY_RESPONSE_CONTRACTS = {
     "material_questions": (
@@ -101,6 +102,25 @@ class MockLLMProvider:
                 "evidence": ["手心都出汗了", "摇摇晃晃骑过花坛"],
                 "next_step": "下一次可以把结尾的感受写得更清楚。",
             }
+            return LLMProviderResponse(
+                parsed_json=payload,
+                raw_response=json.dumps(payload, ensure_ascii=False),
+                provider=self.provider_name,
+                model=self.model_name,
+            )
+        if task_name == "sentence_challenge_generation":
+            payload = fallback_challenge(
+                payload["target_skill"],
+                payload["grade_label"],
+            ).model_dump()
+            return LLMProviderResponse(
+                parsed_json=payload,
+                raw_response=json.dumps(payload, ensure_ascii=False),
+                provider=self.provider_name,
+                model=self.model_name,
+            )
+        if task_name == "sentence_challenge_feedback":
+            payload = fallback_challenge_feedback(payload["target_skill"]).model_dump()
             return LLMProviderResponse(
                 parsed_json=payload,
                 raw_response=json.dumps(payload, ensure_ascii=False),
