@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -8,7 +9,7 @@ from sqlmodel import select
 from app.api import deps
 from app.core.config import Settings
 from app.domain.enums import TaskType
-from app.domain.models import LLMCallLog
+from app.domain.models import DailyTaskLimitCounter, LLMCallLog
 from app.services.ai_routing import (
     COST_REGISTRY,
     ModelPricing,
@@ -438,7 +439,11 @@ async def test_double_failure_uses_deterministic_fallback(session):
 
 
 @pytest.mark.asyncio
-async def test_daily_limit_uses_deterministic_fallback_without_provider_call(session):
+async def test_daily_limit_uses_deterministic_fallback_without_provider_call(session, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.llm_usage.utcnow",
+        lambda: datetime(2026, 6, 18, 1, 0, tzinfo=timezone.utc),
+    )
     settings = Settings(
         llm_provider="mock",
         llm_daily_limit_enabled=True,
@@ -446,21 +451,12 @@ async def test_daily_limit_uses_deterministic_fallback_without_provider_call(ses
         llm_daily_limit_timezone="Asia/Shanghai",
     )
     session.add(
-        LLMCallLog(
+        DailyTaskLimitCounter(
             student_id="s1",
-            task_type=TaskType.sentence,
             task_name="sentence_upgrade_feedback",
-            prompt_key="sentence_upgrade_feedback",
-            provider="primary",
-            model="cheap-fast",
-            final_status=TaskFinalStatus.PRIMARY_SUCCESS,
-            prompt_version="test-v1",
-            input_summary="existing use",
-            raw_response="{}",
-            output_json={},
-            validation_ok=True,
-            error_message="",
-            retry_count=0,
+            product_day="2026-06-18",
+            limit_value=1,
+            consumed_count=1,
         )
     )
     session.flush()
@@ -521,6 +517,11 @@ async def test_daily_limit_uses_deterministic_fallback_without_provider_call(ses
     assert saved.attempt_summaries == []
     assert saved.pricing_status == PricingStatus.CONFIGURED
     assert saved.prompt_version == "sentence_upgrade_feedback"
+    counter = session.exec(select(DailyTaskLimitCounter)).one()
+    assert counter.reserved_count == 0
+    assert counter.consumed_count == 1
+    assert counter.failed_count == 0
+    assert counter.active_reservations == {}
     assert fallback_factory.contexts == [
         FailureContext(
             task_name="sentence_upgrade_feedback",
@@ -528,6 +529,99 @@ async def test_daily_limit_uses_deterministic_fallback_without_provider_call(ses
             errors=("daily limit reached",),
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_ai_task_consumes_counter_only_after_user_visible_output(session, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.llm_usage.utcnow",
+        lambda: datetime(2026, 6, 18, 1, 0, tzinfo=timezone.utc),
+    )
+    settings = Settings(
+        llm_provider="mock",
+        llm_daily_limit_enabled=True,
+        llm_daily_limit_timezone="Asia/Shanghai",
+    )
+    primary = FakeProvider(
+        provider_name="primary",
+        model_name="cheap-fast",
+        actions=[
+            response(
+                message="hello child",
+                provider="primary",
+                model="cheap-fast",
+            )
+        ],
+    )
+    fallback = FakeProvider(provider_name="fallback", model_name="strong-default", actions=[])
+
+    await run_ai_task(
+        settings=settings,
+        session=session,
+        task_type=TaskType.sentence,
+        task_name="sentence_upgrade_feedback",
+        student_id="s1",
+        payload={"draft": "tiny draft"},
+        output_schema=TinyOutput,
+        prompt_key="sentence_upgrade_feedback",
+        input_summary="tiny test",
+        deterministic_fallback_factory=local_fallback,
+        primary_provider=primary,
+        fallback_provider=fallback,
+        daily_limit=1,
+    )
+
+    counter = session.exec(select(DailyTaskLimitCounter)).one()
+    assert counter.reserved_count == 0
+    assert counter.consumed_count == 1
+    assert counter.failed_count == 0
+    assert counter.active_reservations == {}
+
+
+@pytest.mark.asyncio
+async def test_run_ai_task_releases_counter_when_no_safe_output(session, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.llm_usage.utcnow",
+        lambda: datetime(2026, 6, 18, 1, 0, tzinfo=timezone.utc),
+    )
+    settings = Settings(
+        llm_provider="mock",
+        llm_daily_limit_enabled=True,
+        llm_daily_limit_timezone="Asia/Shanghai",
+    )
+    primary = FakeProvider(
+        provider_name="primary",
+        model_name="cheap-fast",
+        actions=[RuntimeError("primary failed")],
+    )
+    fallback = FakeProvider(
+        provider_name="fallback",
+        model_name="strong-default",
+        actions=[RuntimeError("fallback failed")],
+    )
+
+    with pytest.raises(RuntimeError, match="AI task failed"):
+        await run_ai_task(
+            settings=settings,
+            session=session,
+            task_type=TaskType.sentence,
+            task_name="sentence_upgrade_feedback",
+            student_id="s1",
+            payload={"draft": "tiny draft"},
+            output_schema=TinyOutput,
+            prompt_key="sentence_upgrade_feedback",
+            input_summary="tiny test",
+            deterministic_fallback_factory=None,
+            primary_provider=primary,
+            fallback_provider=fallback,
+            daily_limit=1,
+        )
+
+    counter = session.exec(select(DailyTaskLimitCounter)).one()
+    assert counter.reserved_count == 0
+    assert counter.consumed_count == 0
+    assert counter.failed_count == 1
+    assert counter.active_reservations == {}
 
 
 @pytest.mark.asyncio

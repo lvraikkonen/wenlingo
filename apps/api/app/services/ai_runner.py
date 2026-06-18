@@ -19,7 +19,11 @@ from app.services.ai_routing import (
     resolve_task_route,
 )
 from app.services.llm_provider import LLMProvider, LLMProviderResponse
-from app.services.llm_usage import llm_daily_limit_reached
+from app.services.llm_usage import (
+    consume_daily_task_reservation,
+    fail_daily_task_reservation,
+    reserve_daily_task_limit_slot,
+)
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -313,50 +317,58 @@ async def run_ai_task(
     route = resolve_task_route(settings, task_name, prompt_key)
     effective_limit = daily_limit if daily_limit is not None else route.task.daily_limit
     effective_prompt_version = prompt_version or route.prompt_key
+    reservation_counter_id: str | None = None
+    reservation_token: str | None = None
 
     if (
         session is not None
         and student_id is not None
         and settings.llm_daily_limit_enabled
-        and llm_daily_limit_reached(
+        and effective_limit is not None
+    ):
+        reservation = reserve_daily_task_limit_slot(
             session=session,
             student_id=student_id,
             task_name=task_name,
             limit=effective_limit,
             timezone_name=settings.llm_daily_limit_timezone,
         )
-    ):
-        if deterministic_fallback_factory is None:
-            raise RuntimeError("LLM daily limit reached and no deterministic fallback is configured")
-        fallback_context = FailureContext(
-            task_name=task_name,
-            fallback_reason=TaskFinalStatus.DAILY_LIMIT_REACHED,
-            errors=("daily limit reached",),
-        )
-        output = _coerce_fallback_output(
-            deterministic_fallback_factory,
-            output_schema,
-            fallback_context,
-        )
-        log = _record_log(
-            session=session,
-            student_id=student_id,
-            task_type=task_type,
-            task_name=task_name,
-            prompt_key=route.prompt_key,
-            prompt_version=effective_prompt_version,
-            input_summary=input_summary,
-            attempts=[],
-            final_status=TaskFinalStatus.DAILY_LIMIT_REACHED,
-            output=output,
-            raw_response="",
-            fallback_reason="",
-            error_message="daily limit reached",
-            resolved_provider="local_fallback",
-            resolved_model="local_fallback",
-            pricing_status=route.pricing_status,
-        )
-        return AITaskResult(output=output, log=log, status=TaskFinalStatus.DAILY_LIMIT_REACHED)
+        reservation_counter_id = reservation.counter_id
+        reservation_token = reservation.reservation_token
+        if not reservation.reserved:
+            if deterministic_fallback_factory is None:
+                raise RuntimeError(
+                    "LLM daily limit reached and no deterministic fallback is configured"
+                )
+            fallback_context = FailureContext(
+                task_name=task_name,
+                fallback_reason=TaskFinalStatus.DAILY_LIMIT_REACHED,
+                errors=("daily limit reached",),
+            )
+            output = _coerce_fallback_output(
+                deterministic_fallback_factory,
+                output_schema,
+                fallback_context,
+            )
+            log = _record_log(
+                session=session,
+                student_id=student_id,
+                task_type=task_type,
+                task_name=task_name,
+                prompt_key=route.prompt_key,
+                prompt_version=effective_prompt_version,
+                input_summary=input_summary,
+                attempts=[],
+                final_status=TaskFinalStatus.DAILY_LIMIT_REACHED,
+                output=output,
+                raw_response="",
+                fallback_reason="",
+                error_message="daily limit reached",
+                resolved_provider="local_fallback",
+                resolved_model="local_fallback",
+                pricing_status=route.pricing_status,
+            )
+            return AITaskResult(output=output, log=log, status=TaskFinalStatus.DAILY_LIMIT_REACHED)
 
     attempts: list[AttemptRecord] = []
     errors: list[str] = []
@@ -391,6 +403,12 @@ async def run_ai_task(
             resolved_provider=primary_response.provider,
             resolved_model=primary_response.model,
         )
+        if session is not None:
+            consume_daily_task_reservation(
+                session=session,
+                counter_id=reservation_counter_id,
+                reservation_token=reservation_token,
+            )
         return AITaskResult(output=primary_output, log=log, status=TaskFinalStatus.PRIMARY_SUCCESS)
     errors.append(f"primary {primary_reason}")
 
@@ -424,6 +442,12 @@ async def run_ai_task(
             resolved_provider=fallback_response.provider,
             resolved_model=fallback_response.model,
         )
+        if session is not None:
+            consume_daily_task_reservation(
+                session=session,
+                counter_id=reservation_counter_id,
+                reservation_token=reservation_token,
+            )
         return AITaskResult(output=fallback_output, log=log, status=TaskFinalStatus.FALLBACK_SUCCESS)
     errors.append(f"fallback {fallback_reason}")
 
@@ -456,10 +480,22 @@ async def run_ai_task(
             resolved_provider="local_fallback",
             resolved_model="local_fallback",
         )
+        if session is not None:
+            consume_daily_task_reservation(
+                session=session,
+                counter_id=reservation_counter_id,
+                reservation_token=reservation_token,
+            )
         return AITaskResult(
             output=output,
             log=log,
             status=TaskFinalStatus.DETERMINISTIC_FALLBACK_USED,
         )
 
+    if session is not None:
+        fail_daily_task_reservation(
+            session=session,
+            counter_id=reservation_counter_id,
+            reservation_token=reservation_token,
+        )
     raise RuntimeError(f"AI task failed: {'; '.join(errors)}") from None
