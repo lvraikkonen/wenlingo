@@ -83,6 +83,7 @@ test("redirects authenticated session with linked parent to children page", asyn
 
 test("existing account login verifies email without requiring invite", async () => {
   const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
+  let sessionChecks = 0;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -90,7 +91,20 @@ test("existing account login verifies email without requiring invite", async () 
       fetchCalls.push({ url, init });
 
       if (url.endsWith("/api/auth/session")) {
-        return jsonResponse({ authenticated: false });
+        sessionChecks += 1;
+        return jsonResponse(
+          sessionChecks === 1
+            ? { authenticated: false }
+            : {
+                authenticated: true,
+                account: {
+                  email_masked: "p***@example.com",
+                  phone_bound: false,
+                  last_login_at: null,
+                },
+                parent: { id: "parent-1", display_name: "小星家长" },
+              },
+        );
       }
       if (url.endsWith("/api/auth/magic-codes/request")) {
         return jsonResponse({ message: "sent" });
@@ -144,8 +158,111 @@ test("existing account login verifies email without requiring invite", async () 
     "/api/auth/session",
     "/api/auth/magic-codes/request",
     "/api/auth/magic-codes/verify",
+    "/api/auth/session",
   ]);
   expect(window.localStorage.getItem(ALPHA_PARENT_STORAGE_KEY)).toBeNull();
+});
+
+test("shows session unavailable after verify succeeds but session is missing", async () => {
+  const fetchCalls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      fetchCalls.push(new URL(url, "https://wenlingo.test").pathname);
+
+      if (url.endsWith("/api/auth/session")) {
+        return jsonResponse({ authenticated: false });
+      }
+      if (url.endsWith("/api/auth/magic-codes/request")) {
+        return jsonResponse({ message: "sent" });
+      }
+      if (url.endsWith("/api/auth/magic-codes/verify")) {
+        return jsonResponse({
+          authenticated: true,
+          account: {
+            email_masked: "p***@example.com",
+            phone_bound: false,
+            last_login_at: null,
+          },
+          parent: { id: "parent-1", display_name: "小星家长" },
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    }),
+  );
+
+  render(<AlphaStartPage />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "已有账号登录" }));
+  fireEvent.change(screen.getByLabelText("邮箱"), {
+    target: { value: "parent@example.com" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "获取验证码" }));
+  fireEvent.change(await screen.findByLabelText("6 位验证码"), {
+    target: { value: "123456" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "登录 Alpha" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "登录状态没有保存成功，请刷新后重新登录。",
+  );
+  expect(screen.getByRole("button", { name: "重新登录" })).toBeInTheDocument();
+  expect(screen.queryByLabelText("内测邀请码")).not.toBeInTheDocument();
+  expect(push).not.toHaveBeenCalledWith("/parent/children");
+  expect(fetchCalls).toContain("/api/auth/magic-codes/verify");
+});
+
+test("shows session unavailable for legacy login when linked verify does not persist session", async () => {
+  window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "legacy-parent-1");
+  const fetchCalls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      fetchCalls.push(new URL(url, "https://wenlingo.test").pathname);
+
+      if (url.endsWith("/api/auth/session")) {
+        return jsonResponse({ authenticated: false });
+      }
+      if (url.endsWith("/api/auth/magic-codes/request")) {
+        return jsonResponse({ message: "sent" });
+      }
+      if (url.endsWith("/api/auth/magic-codes/verify")) {
+        return jsonResponse({
+          authenticated: true,
+          account: {
+            email_masked: "p***@example.com",
+            phone_bound: false,
+            last_login_at: null,
+          },
+          parent: { id: "legacy-parent-1", display_name: "旧 Alpha 家庭" },
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    }),
+  );
+
+  render(<AlphaStartPage />);
+
+  fireEvent.change(await screen.findByLabelText("邮箱"), {
+    target: { value: "parent@example.com" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "获取验证码" }));
+  fireEvent.change(await screen.findByLabelText("6 位验证码"), {
+    target: { value: "123456" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "绑定并继续" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "登录状态没有保存成功，请刷新后重新登录。",
+  );
+  expect(screen.getByRole("button", { name: "重新登录" })).toBeInTheDocument();
+  expect(push).not.toHaveBeenCalledWith("/parent/children");
+  expect(getMyAlphaChildren).not.toHaveBeenCalled();
+  expect(fetchCalls).not.toContain("/api/alpha/legacy-parent-bind");
 });
 
 test("new family creation routes without writing legacy parent id", async () => {
@@ -393,7 +510,9 @@ test("requests code, verifies code, binds legacy parent, then routes to children
 test("retries legacy bind after verified login without verifying code again", async () => {
   window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "legacy-parent-1");
   window.localStorage.setItem(ALPHA_SESSION_STORAGE_KEY, "session-1");
-  vi.mocked(getMyAlphaChildren).mockRejectedValue(new Error("not linked yet"));
+  vi.mocked(getMyAlphaChildren).mockRejectedValueOnce(
+    new Error("not linked yet"),
+  );
   const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
   let bindAttempts = 0;
 
@@ -591,7 +710,7 @@ test("routes to children when legacy bind fails but session parent children is r
             phone_masked: "138****1234",
             last_login_at: null,
           },
-          parent_id: "legacy-parent-1",
+          parent: null,
         });
       }
       if (url.endsWith("/api/alpha/legacy-parent-bind")) {

@@ -29,6 +29,18 @@ const API_BASE_URL = rawApiBaseUrl === "/api" ? "" : rawApiBaseUrl;
 const DISABLED_ACCOUNT_MESSAGE = "账号暂不可用，请联系邀请人。";
 const UNLINKED_ACCOUNT_MESSAGE = "这个邮箱还没有 Alpha 家庭，请使用邀请码创建。";
 type EntryMode = "create_family" | "existing_account";
+type AlphaStartAuthState =
+  | "enter_email"
+  | "enter_code"
+  | "verifying_code"
+  | "code_error"
+  | "session_unavailable"
+  | "unlinked_account"
+  | "disabled_account"
+  | "authenticated_redirecting";
+
+const SESSION_UNAVAILABLE_MESSAGE =
+  "登录状态没有保存成功，请刷新后重新登录。";
 
 function isDisabledAccountError(error: unknown): boolean {
   return (
@@ -81,6 +93,8 @@ export default function AlphaStartPage() {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [codeRequested, setCodeRequested] = useState(false);
+  const [authState, setAuthState] =
+    useState<AlphaStartAuthState>("enter_email");
   const [alphaSessionId] = useState(() => getStoredAlphaSessionId());
   const storedParentId = useSyncExternalStore(
     subscribeToAlphaParentStorage,
@@ -231,6 +245,7 @@ export default function AlphaStartPage() {
         alpha_session_id: alphaSessionId,
       });
       setCodeRequested(true);
+      setAuthState("enter_code");
     } catch {
       setError(
         isLegacyMigration
@@ -281,19 +296,46 @@ export default function AlphaStartPage() {
 
     setIsSubmitting(true);
     setError("");
+    setAuthState("verifying_code");
     try {
-      const verifiedSession = await verifyMagicCode({
-        email: trimmedEmail,
-        code: trimmedCode,
-      });
+      let verifiedSession: AuthSession;
+      try {
+        verifiedSession = await verifyMagicCode({
+          email: trimmedEmail,
+          code: trimmedCode,
+        });
+      } catch (error) {
+        if (isDisabledAccountError(error)) {
+          setAuthState("disabled_account");
+          setError(DISABLED_ACCOUNT_MESSAGE);
+          return;
+        }
+        setAuthState("code_error");
+        setError("验证码不正确或已过期，请重新输入。");
+        return;
+      }
 
       const verifiedParentId = linkedParentId(verifiedSession);
       if (verifiedParentId) {
+        let currentSession: AuthSession | null = null;
+        try {
+          currentSession = await getAuthSession();
+        } catch {
+          currentSession = null;
+        }
+        if (!currentSession || !linkedParentId(currentSession)) {
+          setAuthState("session_unavailable");
+          setError(SESSION_UNAVAILABLE_MESSAGE);
+          return;
+        }
+        setAuthSession(currentSession);
+        setAuthState("authenticated_redirecting");
         router.push("/parent/children");
         return;
       }
 
       if (entryMode === "existing_account") {
+        setAuthState("unlinked_account");
         setError(UNLINKED_ACCOUNT_MESSAGE);
         return;
       }
@@ -319,10 +361,6 @@ export default function AlphaStartPage() {
       });
       router.push(response.children_url);
     } catch (error) {
-      if (isDisabledAccountError(error)) {
-        setError(DISABLED_ACCOUNT_MESSAGE);
-        return;
-      }
       if (isLegacyMigration && (await recoverLinkedSessionAfterBindFailure())) {
         return;
       }
@@ -351,6 +389,27 @@ export default function AlphaStartPage() {
     setCodeRequested(false);
     setCode("");
     setError("");
+  }
+
+  function renderSessionUnavailableRetry() {
+    if (authState !== "session_unavailable") {
+      return null;
+    }
+
+    return (
+      <button
+        className="mt-3 rounded-lg border border-red-200 px-4 py-2 text-sm font-bold text-red-700"
+        type="button"
+        onClick={() => {
+          setAuthState("enter_email");
+          setCodeRequested(false);
+          setCode("");
+          setError("");
+        }}
+      >
+        重新登录
+      </button>
+    );
   }
 
   return (
@@ -425,9 +484,10 @@ export default function AlphaStartPage() {
               </button>
             </div>
             {error ? (
-              <p role="alert" className="text-sm font-semibold text-red-600">
+              <div role="alert" className="text-sm font-semibold text-red-600">
                 {error}
-              </p>
+                {renderSessionUnavailableRetry()}
+              </div>
             ) : null}
           </form>
         ) : (
@@ -529,9 +589,10 @@ export default function AlphaStartPage() {
               </button>
             </form>
             {error ? (
-              <p role="alert" className="mt-4 text-sm font-semibold text-red-600">
+              <div role="alert" className="mt-4 text-sm font-semibold text-red-600">
                 {error}
-              </p>
+                {renderSessionUnavailableRetry()}
+              </div>
             ) : null}
           </>
         )}
