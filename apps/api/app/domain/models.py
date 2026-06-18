@@ -330,3 +330,29 @@ class LLMCallLog(SQLModel, table=True):
     estimated_cost: float = 0.0
     latency_ms: int = 0
     created_at: datetime = timestamp_field()
+
+
+class DailyTaskLimitCounter(SQLModel, table=True):
+    __table_args__ = (
+        UniqueConstraint(
+            "student_id",
+            "task_name",
+            "product_day",
+            name="uq_daily_task_limit_counter_key",
+        ),
+    )
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    student_id: str = Field(foreign_key="studentprofile.id", index=True)
+    task_name: str = Field(index=True)
+    product_day: str = Field(index=True)
+    limit_value: int
+    reserved_count: int = 0
+    consumed_count: int = 0
+    failed_count: int = 0
+    released_count: int = 0
+    reservation_expires_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
+    updated_at: datetime = timestamp_field()
