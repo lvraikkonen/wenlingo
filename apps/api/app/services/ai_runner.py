@@ -458,11 +458,20 @@ async def run_ai_task(
             fallback_reason=deterministic_reason,
             errors=tuple(errors),
         )
-        output = _coerce_fallback_output(
-            deterministic_fallback_factory,
-            output_schema,
-            fallback_context,
-        )
+        try:
+            output = _coerce_fallback_output(
+                deterministic_fallback_factory,
+                output_schema,
+                fallback_context,
+            )
+        except Exception:
+            if session is not None:
+                fail_daily_task_reservation(
+                    session=session,
+                    counter_id=reservation_counter_id,
+                    reservation_token=reservation_token,
+                )
+            raise
         log = _record_log(
             session=session,
             student_id=student_id,

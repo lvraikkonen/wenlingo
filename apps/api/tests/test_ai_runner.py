@@ -3,7 +3,7 @@ from typing import Any
 
 import httpx
 import pytest
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from sqlmodel import select
 
 from app.api import deps
@@ -612,6 +612,58 @@ async def test_run_ai_task_releases_counter_when_no_safe_output(session, monkeyp
             prompt_key="sentence_upgrade_feedback",
             input_summary="tiny test",
             deterministic_fallback_factory=None,
+            primary_provider=primary,
+            fallback_provider=fallback,
+            daily_limit=1,
+        )
+
+    counter = session.exec(select(DailyTaskLimitCounter)).one()
+    assert counter.reserved_count == 0
+    assert counter.consumed_count == 0
+    assert counter.failed_count == 1
+    assert counter.active_reservations == {}
+
+
+@pytest.mark.asyncio
+async def test_run_ai_task_fails_counter_when_deterministic_fallback_is_invalid(
+    session,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "app.services.llm_usage.utcnow",
+        lambda: datetime(2026, 6, 18, 1, 0, tzinfo=timezone.utc),
+    )
+    settings = Settings(
+        llm_provider="mock",
+        llm_daily_limit_enabled=True,
+        llm_daily_limit_timezone="Asia/Shanghai",
+    )
+    primary = FakeProvider(
+        provider_name="primary",
+        model_name="cheap-fast",
+        actions=[RuntimeError("primary failed")],
+    )
+    fallback = FakeProvider(
+        provider_name="fallback",
+        model_name="strong-default",
+        actions=[RuntimeError("fallback failed")],
+    )
+
+    def invalid_fallback(context: FailureContext) -> dict[str, str]:
+        return {"message": "no"}
+
+    with pytest.raises(ValidationError):
+        await run_ai_task(
+            settings=settings,
+            session=session,
+            task_type=TaskType.sentence,
+            task_name="sentence_upgrade_feedback",
+            student_id="s1",
+            payload={"draft": "tiny draft"},
+            output_schema=TinyOutput,
+            prompt_key="sentence_upgrade_feedback",
+            input_summary="tiny test",
+            deterministic_fallback_factory=invalid_fallback,
             primary_provider=primary,
             fallback_provider=fallback,
             daily_limit=1,
