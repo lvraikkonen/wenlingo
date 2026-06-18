@@ -3,6 +3,7 @@ from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.domain.models import DailyTaskLimitCounter, LLMCallLog, utcnow
@@ -77,6 +78,83 @@ def _release_stale_reservation(counter: DailyTaskLimitCounter, now: datetime) ->
         counter.updated_at = now
 
 
+def _daily_task_counter_statement(
+    *,
+    student_id: str,
+    task_name: str,
+    product_day: str,
+):
+    return (
+        select(DailyTaskLimitCounter)
+        .where(
+            DailyTaskLimitCounter.student_id == student_id,
+            DailyTaskLimitCounter.task_name == task_name,
+            DailyTaskLimitCounter.product_day == product_day,
+        )
+        .with_for_update()
+    )
+
+
+def _load_daily_task_counter_for_update(
+    *,
+    session: Session,
+    student_id: str,
+    task_name: str,
+    product_day: str,
+) -> DailyTaskLimitCounter | None:
+    return session.exec(
+        _daily_task_counter_statement(
+            student_id=student_id,
+            task_name=task_name,
+            product_day=product_day,
+        )
+    ).first()
+
+
+def _create_or_load_daily_task_counter_for_update(
+    *,
+    session: Session,
+    student_id: str,
+    task_name: str,
+    product_day: str,
+    limit: int,
+) -> DailyTaskLimitCounter:
+    counter = _load_daily_task_counter_for_update(
+        session=session,
+        student_id=student_id,
+        task_name=task_name,
+        product_day=product_day,
+    )
+    if counter is not None:
+        return counter
+
+    counter = DailyTaskLimitCounter(
+        student_id=student_id,
+        task_name=task_name,
+        product_day=product_day,
+        limit_value=limit,
+        reserved_count=0,
+        consumed_count=0,
+        failed_count=0,
+        released_count=0,
+    )
+    try:
+        with session.begin_nested():
+            session.add(counter)
+            session.flush()
+        return counter
+    except IntegrityError:
+        counter = _load_daily_task_counter_for_update(
+            session=session,
+            student_id=student_id,
+            task_name=task_name,
+            product_day=product_day,
+        )
+        if counter is None:
+            raise
+        return counter
+
+
 def reserve_daily_task_limit_slot(
     *,
     session: Session,
@@ -92,26 +170,13 @@ def reserve_daily_task_limit_slot(
         return DailyLimitReservation(True, None, local_product_day(now, timezone_name))
 
     product_day = local_product_day(now, timezone_name)
-    counter = session.exec(
-        select(DailyTaskLimitCounter).where(
-            DailyTaskLimitCounter.student_id == student_id,
-            DailyTaskLimitCounter.task_name == task_name,
-            DailyTaskLimitCounter.product_day == product_day,
-        )
-    ).first()
-    if counter is None:
-        counter = DailyTaskLimitCounter(
-            student_id=student_id,
-            task_name=task_name,
-            product_day=product_day,
-            limit_value=limit,
-            reserved_count=0,
-            consumed_count=0,
-            failed_count=0,
-            released_count=0,
-        )
-        session.add(counter)
-        session.flush()
+    counter = _create_or_load_daily_task_counter_for_update(
+        session=session,
+        student_id=student_id,
+        task_name=task_name,
+        product_day=product_day,
+        limit=limit,
+    )
 
     _release_stale_reservation(counter, now)
     counter.limit_value = limit
@@ -121,6 +186,8 @@ def reserve_daily_task_limit_slot(
         return DailyLimitReservation(False, counter.id, product_day)
 
     counter.reserved_count += 1
+    # This is a counter-level expiry, not per-slot. Refresh it on each new
+    # reservation so older reservations cannot release newer ones early.
     counter.reservation_expires_at = now + timedelta(seconds=reservation_ttl_seconds)
     counter.updated_at = now
     session.add(counter)

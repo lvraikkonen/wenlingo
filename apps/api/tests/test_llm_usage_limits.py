@@ -6,6 +6,7 @@ from app.domain.enums import TaskType
 from app.domain.models import DailyTaskLimitCounter, LLMCallLog
 from app.services.llm_usage import (
     consume_daily_task_reservation,
+    fail_daily_task_reservation,
     local_product_day,
     llm_daily_limit_reached,
     local_day_start_utc,
@@ -167,6 +168,24 @@ def test_consume_and_release_daily_task_reservation(session):
     assert counter.reserved_count == 0
     assert counter.consumed_count == 1
     assert counter.released_count == 1
+
+
+def test_fail_daily_task_reservation_releases_slot_and_records_failure(session):
+    reservation = reserve_daily_task_limit_slot(
+        session=session,
+        student_id="s1",
+        task_name="sentence_challenge_feedback",
+        limit=1,
+        timezone_name="Asia/Shanghai",
+        now=datetime(2026, 6, 8, 1, 0, tzinfo=timezone.utc),
+    )
+
+    fail_daily_task_reservation(session=session, counter_id=reservation.counter_id)
+
+    counter = session.get(DailyTaskLimitCounter, reservation.counter_id)
+    assert counter.reserved_count == 0
+    assert counter.failed_count == 1
+    assert counter.reservation_expires_at is None
 
 
 def test_stale_reservation_is_released_before_limit_check(session):

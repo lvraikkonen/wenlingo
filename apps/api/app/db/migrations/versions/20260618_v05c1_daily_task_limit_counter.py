@@ -4,7 +4,7 @@ import sqlalchemy as sa
 from alembic import op
 
 
-revision = "20260618_v05c1_daily_task_limit_counter"
+revision = "20260618_v05c1_daily_limit"
 down_revision = "20260617_v05c_ai_platform"
 branch_labels = None
 depends_on = None
