@@ -15,6 +15,15 @@ const apiMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../src/lib/api", () => ({
+  ApiRequestError: class ApiRequestError extends Error {
+    status: number;
+
+    constructor(status: number) {
+      super(`Request failed: ${status}`);
+      this.name = "ApiRequestError";
+      this.status = status;
+    }
+  },
   createAssessment: apiMocks.createAssessment,
   createSentenceChallenge: apiMocks.createSentenceChallenge,
   completeSentenceChallenge: apiMocks.completeSentenceChallenge,
@@ -34,6 +43,17 @@ const challengeResponse = {
     grade_label: "四年级",
   },
 };
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return { promise, resolve, reject };
+}
 
 beforeEach(() => {
   apiMocks.demoLogin.mockResolvedValue({
@@ -210,6 +230,11 @@ test("sentence page shows ai feedback and settlement", async () => {
       resolveSentenceTraining = resolve;
     },
   );
+  let resolveChallenge!: (value: typeof challengeResponse) => void;
+  const pendingChallenge = new Promise<typeof challengeResponse>((resolve) => {
+    resolveChallenge = resolve;
+  });
+  apiMocks.createSentenceChallenge.mockReturnValueOnce(pendingChallenge);
   apiMocks.createSentenceTraining.mockReturnValueOnce(pendingSentenceTraining);
 
   await act(async () => {
@@ -220,6 +245,14 @@ test("sentence page shows ai feedback and settlement", async () => {
     );
   });
 
+  expect(await screen.findByText("正在出题...")).toBeInTheDocument();
+  await act(async () => {
+    resolveChallenge(challengeResponse);
+    await pendingChallenge;
+  });
+  expect(
+    await screen.findByRole("button", { name: "提交给 AI 教练" }),
+  ).toBeEnabled();
   await userEvent.click(
     await screen.findByRole("button", { name: "自己带句子来练" }),
   );
@@ -233,11 +266,15 @@ test("sentence page shows ai feedback and settlement", async () => {
   );
 
   expect(screen.getByText("把一句话升级成小画面")).toBeInTheDocument();
+  expect(await screen.findByText("AI 教练正在读你的句子...")).toBeInTheDocument();
   expect(screen.getByText("AI 教练正在看你的句子")).toBeInTheDocument();
   await act(async () => {
     resolveSentenceTraining(sentenceResponse);
     await pendingSentenceTraining;
   });
+  expect(
+    await screen.findByRole("heading", { name: "AI 教练反馈" }),
+  ).toBeInTheDocument();
   expect(
     await screen.findByText("你把画面写得更清楚了。"),
   ).toBeInTheDocument();
@@ -250,6 +287,10 @@ test("sentence page shows ai feedback and settlement", async () => {
   expect(screen.getByRole("link", { name: "给家长看报告" })).toHaveAttribute(
     "href",
     "/parent/s1/report",
+  );
+  expect(screen.getByRole("link", { name: "返回孩子列表" })).toHaveAttribute(
+    "href",
+    "/parent/children",
   );
   expect(await screen.findByText("加入了可看见的细节")).toBeInTheDocument();
   expect(screen.getByText("+25 XP")).toBeInTheDocument();
@@ -408,6 +449,115 @@ test("sentence page disables submit while pending and reports failures", async (
     "这次句子练习没有提交成功。先别急，检查一下网络后再试一次。",
   );
   await waitFor(() => expect(submit).not.toBeDisabled());
+});
+
+test.each(["resolve", "reject"] as const)(
+  "sentence page ignores stale challenge %s while free-input validation is pending",
+  async (settlement) => {
+    const challengeLoad = deferred<typeof challengeResponse>();
+    const sentenceTraining = deferred<
+      Awaited<ReturnType<typeof apiMocks.createSentenceTraining>>
+    >();
+    apiMocks.createSentenceChallenge.mockReturnValueOnce(challengeLoad.promise);
+    apiMocks.createSentenceTraining.mockReturnValueOnce(sentenceTraining.promise);
+
+    await act(async () => {
+      render(
+        <Suspense fallback={null}>
+          <SentencePage params={Promise.resolve({ studentId: "s1" })} />
+        </Suspense>,
+      );
+    });
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "自己带句子来练" }),
+    );
+    await userEvent.type(await screen.findByLabelText("原句"), "公园很美。");
+    await userEvent.type(screen.getByLabelText("升级后的句子"), "公园里花香很浓。");
+    const submit = screen.getByRole("button", { name: "提交给 AI 教练" });
+
+    await userEvent.click(submit);
+
+    expect(await screen.findByText("AI 教练正在读你的句子...")).toBeInTheDocument();
+    expect(submit).toBeDisabled();
+
+    await act(async () => {
+      if (settlement === "resolve") {
+        challengeLoad.resolve(challengeResponse);
+        await challengeLoad.promise;
+      } else {
+        challengeLoad.reject(new Error("stale challenge failed"));
+        await challengeLoad.promise.catch(() => undefined);
+      }
+    });
+
+    expect(screen.getByText("AI 教练正在读你的句子...")).toBeInTheDocument();
+    expect(submit).toBeDisabled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    sentenceTraining.resolve({
+      training: { id: "sentence-training-1" },
+      feedback: {
+        encouragement: "你把画面写得更清楚了。",
+        specific_improvement: "加入了可看见的细节",
+        next_step: "再加一个动作，会更生动。",
+        problem_monsters: ["空泛表达"],
+      },
+      settlement: {
+        xp_delta: 25,
+        level_after: 2,
+        badge_code: "first_sentence_upgrade",
+      },
+    });
+
+    expect(
+      await screen.findByText("你把画面写得更清楚了。"),
+    ).toBeInTheDocument();
+  },
+);
+
+test("sentence page disables mode switch while challenge validation is pending", async () => {
+  const challengeCompletion = deferred<
+    Awaited<ReturnType<typeof apiMocks.completeSentenceChallenge>>
+  >();
+  apiMocks.completeSentenceChallenge.mockReturnValueOnce(challengeCompletion.promise);
+
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <SentencePage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    );
+  });
+
+  await userEvent.type(
+    await screen.findByLabelText("升级后的句子"),
+    "小猫瞪大眼睛，飞快地跑过草地。",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "提交给 AI 教练" }));
+
+  expect(await screen.findByText("AI 教练正在读你的句子...")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "提交给 AI 教练" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "自己带句子来练" })).toBeDisabled();
+
+  challengeCompletion.resolve({
+    training: { id: "training-1" },
+    feedback: {
+      encouragement: "你写得很有画面感！",
+      highlight: "你加上了飞快地冲过去，动作更清楚了。",
+      suggestion: "还可以加一点表情或心情。",
+      example_upgrade: "小狗瞪大眼睛，飞快地冲过草地。",
+    },
+    settlement: { xp_delta: 25, level_after: 2 },
+    next_task: {
+      kind: "sentence",
+      title: "再练一句",
+      focus: "动作描写",
+      minutes: "5",
+    },
+  });
+
+  expect(await screen.findByText("你写得很有画面感！")).toBeInTheDocument();
 });
 
 test("assessment sketch uses no charting package", async () => {

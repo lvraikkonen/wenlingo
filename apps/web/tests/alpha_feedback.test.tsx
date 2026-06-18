@@ -1018,6 +1018,10 @@ test("sentence page completes generated challenge and shows short feedback", asy
   expect(await screen.findByText("你写得很有画面感！")).toBeInTheDocument();
   expect(screen.getByText("这是一个参考写法，你的写法也很棒。")).toBeInTheDocument();
   expect(screen.getByText("小狗瞪大眼睛，飞快地冲过草地。")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "返回孩子列表" })).toHaveAttribute(
+    "href",
+    "/parent/children",
+  );
 });
 
 test("sentence page daily limit response shows rest message", async () => {

@@ -25,6 +25,13 @@ import type {
 
 const DEFAULT_SENTENCE_FOCUS: SentenceFocus = "加细节";
 type Mode = "challenge" | "free_input";
+type AIInteractionState =
+  | "idle"
+  | "generating"
+  | "validating"
+  | "fallback"
+  | "completed"
+  | "failed";
 
 const DAILY_LIMIT_MESSAGE =
   "今天的句子挑战已经完成很多啦，休息一下，明天继续闯关！";
@@ -55,6 +62,7 @@ export default function SentencePage({
 
 function SentencePageContent({ studentId }: { studentId: string }) {
   const activeStudentId = useRef<string | null>(studentId);
+  const interactionVersion = useRef(0);
   const {
     shouldShowAssessmentRecommendation,
     dismissAssessmentRecommendation,
@@ -67,32 +75,41 @@ function SentencePageContent({ studentId }: { studentId: string }) {
     useState<SentenceTrainingResponse | null>(null);
   const [sourceSentence, setSourceSentence] = useState("");
   const [upgradedSentence, setUpgradedSentence] = useState("");
-  const [isLoadingChallenge, setIsLoadingChallenge] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [aiState, setAiState] = useState<AIInteractionState>("generating");
   const [error, setError] = useState("");
+  const isLoadingChallenge = aiState === "generating";
+  const isSubmitting = aiState === "validating" || aiState === "fallback";
 
   useEffect(() => {
     let active = true;
     activeStudentId.current = studentId;
+    const requestVersion = interactionVersion.current + 1;
+    interactionVersion.current = requestVersion;
+    setAiState("generating");
 
     createSentenceChallenge(studentId)
       .then((response) => {
-        if (active && activeStudentId.current === studentId) {
+        if (
+          active &&
+          activeStudentId.current === studentId &&
+          interactionVersion.current === requestVersion
+        ) {
           setChallenge(response.challenge);
+          setAiState("idle");
         }
       })
       .catch((error) => {
-        if (active && activeStudentId.current === studentId) {
+        if (
+          active &&
+          activeStudentId.current === studentId &&
+          interactionVersion.current === requestVersion
+        ) {
           setError(
             error instanceof ApiRequestError && error.status === 429
               ? DAILY_LIMIT_MESSAGE
               : CHALLENGE_LOAD_ERROR_MESSAGE,
           );
-        }
-      })
-      .finally(() => {
-        if (active && activeStudentId.current === studentId) {
-          setIsLoadingChallenge(false);
+          setAiState("failed");
         }
       });
 
@@ -108,7 +125,9 @@ function SentencePageContent({ studentId }: { studentId: string }) {
       return;
     }
 
-    setIsSubmitting(true);
+    const requestVersion = interactionVersion.current + 1;
+    interactionVersion.current = requestVersion;
+    setAiState("validating");
     setError("");
     const requestStudentId = studentId;
     const requestTrainingId = challenge.id;
@@ -117,23 +136,29 @@ function SentencePageContent({ studentId }: { studentId: string }) {
       const response = await completeSentenceChallenge(studentId, requestTrainingId, {
         upgraded_sentence: upgradedSentence,
       });
-      if (activeStudentId.current === requestStudentId) {
+      if (
+        activeStudentId.current === requestStudentId &&
+        interactionVersion.current === requestVersion
+      ) {
         setChallengeResult(response);
+        setAiState("completed");
       }
     } catch {
-      if (activeStudentId.current === requestStudentId) {
+      if (
+        activeStudentId.current === requestStudentId &&
+        interactionVersion.current === requestVersion
+      ) {
         setError(SENTENCE_SUBMIT_ERROR_MESSAGE);
-      }
-    } finally {
-      if (activeStudentId.current === requestStudentId) {
-        setIsSubmitting(false);
+        setAiState("failed");
       }
     }
   }
 
   async function handleFreeInputSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setIsSubmitting(true);
+    const requestVersion = interactionVersion.current + 1;
+    interactionVersion.current = requestVersion;
+    setAiState("validating");
     setError("");
     setFreeInputResult(null);
     const requestStudentId = studentId;
@@ -145,23 +170,33 @@ function SentencePageContent({ studentId }: { studentId: string }) {
         focus: DEFAULT_SENTENCE_FOCUS,
       });
 
-      if (activeStudentId.current !== requestStudentId) {
+      if (
+        activeStudentId.current !== requestStudentId ||
+        interactionVersion.current !== requestVersion
+      ) {
         return;
       }
       setFreeInputResult(result);
+      setAiState("completed");
     } catch {
-      if (activeStudentId.current !== requestStudentId) {
+      if (
+        activeStudentId.current !== requestStudentId ||
+        interactionVersion.current !== requestVersion
+      ) {
         return;
       }
       setError(SENTENCE_SUBMIT_ERROR_MESSAGE);
-    } finally {
-      if (activeStudentId.current === requestStudentId) {
-        setIsSubmitting(false);
-      }
+      setAiState("failed");
     }
   }
 
   async function handleRefreshChallenge() {
+    if (isSubmitting) {
+      return;
+    }
+
+    const requestVersion = interactionVersion.current + 1;
+    interactionVersion.current = requestVersion;
     setMode("challenge");
     setChallenge(null);
     setChallengeResult(null);
@@ -169,36 +204,46 @@ function SentencePageContent({ studentId }: { studentId: string }) {
     setSourceSentence("");
     setUpgradedSentence("");
     setError("");
-    setIsLoadingChallenge(true);
+    setAiState("generating");
     const requestStudentId = studentId;
 
     try {
       const response = await createSentenceChallenge(studentId);
-      if (activeStudentId.current === requestStudentId) {
+      if (
+        activeStudentId.current === requestStudentId &&
+        interactionVersion.current === requestVersion
+      ) {
         setChallenge(response.challenge);
+        setAiState("idle");
       }
     } catch (error) {
-      if (activeStudentId.current === requestStudentId) {
+      if (
+        activeStudentId.current === requestStudentId &&
+        interactionVersion.current === requestVersion
+      ) {
         setError(
           error instanceof ApiRequestError && error.status === 429
             ? DAILY_LIMIT_MESSAGE
             : CHALLENGE_LOAD_ERROR_MESSAGE,
         );
-      }
-    } finally {
-      if (activeStudentId.current === requestStudentId) {
-        setIsLoadingChallenge(false);
+        setAiState("failed");
       }
     }
   }
 
   function handleSwitchToFreeInput() {
+    if (isSubmitting) {
+      return;
+    }
+
+    interactionVersion.current += 1;
     setMode("free_input");
     setChallengeResult(null);
     setFreeInputResult(null);
     setSourceSentence("");
     setUpgradedSentence("");
     setError("");
+    setAiState("idle");
   }
 
   const result = mode === "challenge" ? challengeResult : freeInputResult;
@@ -281,6 +326,7 @@ function SentencePageContent({ studentId }: { studentId: string }) {
                       className="rounded-lg border border-[var(--wen-border)] px-5 py-3 text-sm font-bold"
                       type="button"
                       onClick={handleSwitchToFreeInput}
+                      disabled={isSubmitting}
                     >
                       自己带句子来练
                     </button>
@@ -404,6 +450,7 @@ function SentencePageContent({ studentId }: { studentId: string }) {
                     className="rounded-lg bg-[var(--wen-orange)] px-4 py-2 text-sm font-bold text-white"
                     type="button"
                     onClick={handleRefreshChallenge}
+                    disabled={isSubmitting}
                   >
                     再挑战一题
                   </button>
@@ -411,6 +458,7 @@ function SentencePageContent({ studentId }: { studentId: string }) {
                     className="rounded-lg border border-[var(--wen-border)] px-4 py-2 text-sm font-bold"
                     type="button"
                     onClick={handleSwitchToFreeInput}
+                    disabled={isSubmitting}
                   >
                     自己带句子来练
                   </button>
@@ -431,6 +479,12 @@ function SentencePageContent({ studentId }: { studentId: string }) {
                   href={`/parent/${studentId}/report`}
                 >
                   给家长看报告
+                </Link>
+                <Link
+                  className="rounded-lg border border-[var(--wen-border)] px-4 py-2"
+                  href="/parent/children"
+                >
+                  返回孩子列表
                 </Link>
               </nav>
             </div>
