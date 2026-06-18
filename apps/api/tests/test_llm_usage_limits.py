@@ -240,6 +240,24 @@ def test_stale_old_reservation_finalizer_does_not_release_newer_reservation(sess
     assert first.reservation_token not in counter.active_reservations
 
 
+def test_tokenless_finalizer_does_not_mutate_tokenized_reservation(session):
+    reservation = reserve_daily_task_limit_slot(
+        session=session,
+        student_id="s1",
+        task_name="sentence_challenge_generation",
+        limit=1,
+        timezone_name="Asia/Shanghai",
+        now=datetime(2026, 6, 8, 1, 0, tzinfo=timezone.utc),
+    )
+
+    release_daily_task_reservation(session=session, counter_id=reservation.counter_id)
+
+    counter = session.get(DailyTaskLimitCounter, reservation.counter_id)
+    assert counter.reserved_count == 1
+    assert counter.released_count == 0
+    assert reservation.reservation_token in counter.active_reservations
+
+
 def test_stale_reservation_is_released_before_limit_check(session):
     first = reserve_daily_task_limit_slot(
         session=session,

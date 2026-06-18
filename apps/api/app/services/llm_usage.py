@@ -267,6 +267,10 @@ def _finalize_daily_task_reservation(
             return
         del active_reservations[reservation_token]
         counter.active_reservations = active_reservations
+    elif counter.active_reservations:
+        session.add(counter)
+        session.flush()
+        return
     elif counter.reserved_count > 0:
         counter.reserved_count -= 1
     else:
