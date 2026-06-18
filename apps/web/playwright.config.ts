@@ -2,8 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 const apiPort = Number(process.env.PLAYWRIGHT_API_PORT ?? 8000);
 const webPort = Number(process.env.PLAYWRIGHT_WEB_PORT ?? 3000);
-const apiBaseURL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? `http://127.0.0.1:${apiPort}`;
+const apiBaseURL = `http://127.0.0.1:${apiPort}`;
+const browserApiBaseURL = process.env.NEXT_PUBLIC_API_BASE_URL;
 const webBaseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${webPort}`;
 const webOrigin = new URL(webBaseURL).origin;
 const reuseExistingServer = process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === "1";
@@ -45,7 +45,10 @@ export default defineConfig({
     {
       command: `corepack pnpm dev --hostname 127.0.0.1 --port ${webPort}`,
       env: {
-        NEXT_PUBLIC_API_BASE_URL: apiBaseURL,
+        API_PROXY_TARGET: apiBaseURL,
+        ...(browserApiBaseURL
+          ? { NEXT_PUBLIC_API_BASE_URL: browserApiBaseURL }
+          : {}),
       },
       url: webBaseURL,
       reuseExistingServer,

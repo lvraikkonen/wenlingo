@@ -45,7 +45,7 @@ describe("alpha api client", () => {
 
     expect(result.parent.id).toBe("parent-1");
     expect(fetch).toHaveBeenCalledWith(
-      "http://localhost:8000/api/alpha/parents",
+      "/api/alpha/parents",
       expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -85,7 +85,7 @@ describe("alpha api client", () => {
 
     expect(result.valid).toBe(true);
     expect(fetch).toHaveBeenCalledWith(
-      "http://localhost:8000/api/alpha/invites/validate",
+      "/api/alpha/invites/validate",
       expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -116,7 +116,7 @@ describe("alpha api client", () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://localhost:8000/api/alpha/events",
+      "/api/alpha/events",
       expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -182,7 +182,7 @@ describe("alpha api client", () => {
     expect(result.children[0].id).toBe("student-1");
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://localhost:8000/api/alpha/parents/parent-1/children",
+      "/api/alpha/parents/parent-1/children",
       expect.objectContaining({
         cache: "no-store",
         credentials: "include",
@@ -214,7 +214,7 @@ describe("alpha api client", () => {
     expect(result.child.id).toBe("student-1");
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://localhost:8000/api/alpha/parents/parent-1/children",
+      "/api/alpha/parents/parent-1/children",
       expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -259,7 +259,7 @@ describe("alpha api client", () => {
     expect(result.ability_changes[0].ability).toBe("reading_power");
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://localhost:8000/api/alpha/parents/parent-1/children/student-1/summary",
+      "/api/alpha/parents/parent-1/children/student-1/summary",
       expect.objectContaining({
         cache: "no-store",
         credentials: "include",

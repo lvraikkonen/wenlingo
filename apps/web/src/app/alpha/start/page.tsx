@@ -23,8 +23,9 @@ import {
 import type { AuthSession } from "../../../lib/types";
 
 const ALPHA_PARENT_STORAGE_EVENT = "wenlingo-alpha-parent-storage";
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const rawApiBaseUrl =
+  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ?? "";
+const API_BASE_URL = rawApiBaseUrl === "/api" ? "" : rawApiBaseUrl;
 const DISABLED_ACCOUNT_MESSAGE = "账号暂不可用，请联系邀请人。";
 const UNLINKED_ACCOUNT_MESSAGE = "这个邮箱还没有 Alpha 家庭，请使用邀请码创建。";
 type EntryMode = "create_family" | "existing_account";

@@ -146,7 +146,7 @@ test("children page logs out only the current browser and clears local alpha fam
 
   await waitFor(() => {
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/api/auth/logout",
+      "/api/auth/logout",
       expect.objectContaining({
         method: "POST",
         credentials: "include",

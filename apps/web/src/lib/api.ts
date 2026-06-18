@@ -23,8 +23,9 @@ import type {
   SentenceChallengeResponse,
 } from "./types";
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const rawApiBaseUrl =
+  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ?? "";
+const API_BASE_URL = rawApiBaseUrl === "/api" ? "" : rawApiBaseUrl;
 
 export class ApiRequestError extends Error {
   status: number;

@@ -74,6 +74,7 @@ describe("api client", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   test("demoLogin reads parent and students", async () => {
@@ -88,7 +89,7 @@ describe("api client", () => {
     expect(result.students[0].name).toBe("小宇");
   });
 
-  test("getDashboard calls student dashboard endpoint", async () => {
+  test("getDashboard defaults to same-origin API path", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => dashboardResponse,
@@ -97,7 +98,51 @@ describe("api client", () => {
     await getDashboard("s1");
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://localhost:8000/api/students/s1/dashboard",
+      "/api/students/s1/dashboard",
+      expect.objectContaining({
+        cache: "no-store",
+        credentials: "include",
+      }),
+    );
+  });
+
+  test("getDashboard respects NEXT_PUBLIC_API_BASE_URL override", async () => {
+    vi.resetModules();
+    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "https://api.example.test/");
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => dashboardResponse,
+    }) as unknown as typeof fetch;
+    const { getDashboard: getDashboardWithOverride } = await import(
+      "../src/lib/api"
+    );
+
+    await getDashboardWithOverride("s1");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.example.test/api/students/s1/dashboard",
+      expect.objectContaining({
+        cache: "no-store",
+        credentials: "include",
+      }),
+    );
+  });
+
+  test("getDashboard treats /api override as same-origin API path", async () => {
+    vi.resetModules();
+    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "/api");
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => dashboardResponse,
+    }) as unknown as typeof fetch;
+    const { getDashboard: getDashboardWithApiBase } = await import(
+      "../src/lib/api"
+    );
+
+    await getDashboardWithApiBase("s1");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/students/s1/dashboard",
       expect.objectContaining({
         cache: "no-store",
         credentials: "include",
@@ -136,7 +181,7 @@ describe("api client", () => {
     await createAssessment("s1", payload);
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://localhost:8000/api/students/s1/assessment",
+      "/api/students/s1/assessment",
       expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -167,7 +212,7 @@ describe("api client", () => {
     await createSentenceTraining("s1", payload);
 
     expect(fetch).toHaveBeenCalledWith(
-      "http://localhost:8000/api/students/s1/sentences",
+      "/api/students/s1/sentences",
       expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -186,7 +231,7 @@ describe("api client", () => {
     await createSentenceChallenge("student-1");
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/api/students/student-1/sentence-challenges",
+      "/api/students/student-1/sentence-challenges",
       expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -206,7 +251,7 @@ describe("api client", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/api/students/student-1/sentences/training-1/complete",
+      "/api/students/student-1/sentences/training-1/complete",
       expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -225,7 +270,7 @@ describe("api client", () => {
 
     expect(result).toEqual({ pricing_configured: false, usage: [] });
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/api/admin/alpha/ai-usage",
+      "/api/admin/alpha/ai-usage",
       expect.objectContaining({
         credentials: "include",
         cache: "no-store",
@@ -240,7 +285,7 @@ describe("api client", () => {
     await getAdminAlphaOverview("secret", true);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/api/admin/alpha/overview?include_revoked=true",
+      "/api/admin/alpha/overview?include_revoked=true",
       expect.objectContaining({
         headers: { "X-Alpha-Admin-Token": "secret" },
       }),
@@ -253,7 +298,7 @@ describe("api client", () => {
     await getAdminAlphaOverview("secret");
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/api/admin/alpha/overview",
+      "/api/admin/alpha/overview",
       expect.objectContaining({
         headers: { "X-Alpha-Admin-Token": "secret" },
       }),

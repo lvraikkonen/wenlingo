@@ -2,17 +2,33 @@ import { execFileSync } from "node:child_process";
 import { expect, test, type BrowserContext } from "@playwright/test";
 
 const ASSESSMENT_SESSION_TOKEN = "e2e-assessment-session";
+const webBaseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000";
 
 test.use({
-  baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000",
+  baseURL: webBaseURL,
 });
+
+function sessionCookieURL() {
+  const browserApiBaseURL =
+    process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ?? "";
+
+  if (
+    browserApiBaseURL &&
+    browserApiBaseURL !== "/api" &&
+    /^https?:\/\//.test(browserApiBaseURL)
+  ) {
+    return new URL(browserApiBaseURL).origin;
+  }
+
+  return new URL(webBaseURL).origin;
+}
 
 async function addApiSessionCookie(context: BrowserContext, token: string) {
   await context.addCookies([
     {
       name: "wenlingo_parent_session",
       value: token,
-      url: process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000",
+      url: sessionCookieURL(),
       httpOnly: true,
       sameSite: "Lax",
     },

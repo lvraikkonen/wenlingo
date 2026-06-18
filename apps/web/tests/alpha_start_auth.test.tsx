@@ -43,6 +43,10 @@ function jsonResponse(body: unknown) {
   });
 }
 
+function fetchPath(url: string) {
+  return new URL(url, "http://localhost").pathname;
+}
+
 beforeEach(() => {
   cleanup();
   window.localStorage.clear();
@@ -136,7 +140,7 @@ test("existing account login verifies email without requiring invite", async () 
   });
 
   expect(createAlphaParent).not.toHaveBeenCalled();
-  expect(fetchCalls.map((call) => new URL(call.url).pathname)).toEqual([
+  expect(fetchCalls.map((call) => fetchPath(call.url))).toEqual([
     "/api/auth/session",
     "/api/auth/magic-codes/request",
     "/api/auth/magic-codes/verify",
@@ -300,7 +304,7 @@ test("shows legacy binding UI for authenticated unlinked session with stored par
     expect(push).toHaveBeenCalledWith("/parent/children");
   });
 
-  expect(fetchCalls.map((call) => new URL(call.url).pathname)).toEqual([
+  expect(fetchCalls.map((call) => fetchPath(call.url))).toEqual([
     "/api/auth/session",
     "/api/alpha/legacy-parent-bind",
   ]);
@@ -368,7 +372,7 @@ test("requests code, verifies code, binds legacy parent, then routes to children
     expect(push).toHaveBeenCalledWith("/parent/children");
   });
 
-  const calledPaths = fetchCalls.map((call) => new URL(call.url).pathname);
+  const calledPaths = fetchCalls.map((call) => fetchPath(call.url));
   expect(calledPaths).toEqual([
     "/api/auth/session",
     "/api/auth/magic-codes/request",
@@ -453,7 +457,7 @@ test("retries legacy bind after verified login without verifying code again", as
     expect(push).toHaveBeenCalledWith("/parent/children");
   });
 
-  const calledPaths = fetchCalls.map((call) => new URL(call.url).pathname);
+  const calledPaths = fetchCalls.map((call) => fetchPath(call.url));
   expect(
     calledPaths.filter((path) => path === "/api/auth/magic-codes/verify"),
   ).toHaveLength(1);
