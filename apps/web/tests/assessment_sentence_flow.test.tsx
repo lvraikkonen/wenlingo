@@ -142,6 +142,14 @@ test("assessment page renders four steps and submits all fields once", async () 
     await screen.findByRole("heading", { name: "认识你的写作超能力" }),
   ).toBeInTheDocument();
   expect(screen.getByText("约 3-5 分钟")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "回到 Dashboard" })).toHaveAttribute(
+    "href",
+    "/children/s1",
+  );
+  expect(screen.getByRole("link", { name: "返回孩子列表" })).toHaveAttribute(
+    "href",
+    "/parent/children",
+  );
 
   await userEvent.click(screen.getByRole("button", { name: "开始小试炼" }));
 

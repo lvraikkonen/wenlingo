@@ -241,6 +241,23 @@ function AssessmentPageContent({ studentId }: { studentId: string }) {
     <main className="min-h-screen px-5 py-8 sm:px-8">
       <div className="mx-auto max-w-4xl space-y-6">
         <nav
+          aria-label="页面导航"
+          className="mb-4 flex flex-wrap gap-3 text-sm font-bold"
+        >
+          <Link
+            className="rounded-lg border border-[var(--wen-border)] px-4 py-2"
+            href={`/children/${studentId}`}
+          >
+            回到 Dashboard
+          </Link>
+          <Link
+            className="rounded-lg border border-[var(--wen-border)] px-4 py-2"
+            href="/parent/children"
+          >
+            返回孩子列表
+          </Link>
+        </nav>
+        <nav
           aria-label="小试炼进度"
           className="flex flex-wrap gap-2 text-sm font-semibold"
         >
@@ -393,7 +410,7 @@ function AssessmentPageContent({ studentId }: { studentId: string }) {
                 href={`/children/${studentId}`}
                 className="inline-flex items-center gap-2 rounded-lg bg-[var(--wen-orange)] px-5 py-3 font-semibold text-white"
               >
-                回到 Dashboard
+                完成并回到 Dashboard
                 <ArrowRight size={18} aria-hidden="true" />
               </Link>
             </div>

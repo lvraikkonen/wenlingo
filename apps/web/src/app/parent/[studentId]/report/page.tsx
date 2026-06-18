@@ -82,12 +82,18 @@ export function ReportPageContent({ studentId }: { studentId: string }) {
               阶段报告暂时无法生成，请稍后再试。
             </p>
           )}
-          <div className="mt-6">
+          <div className="mt-6 flex flex-wrap gap-3">
             <Link
               className="inline-flex rounded-lg bg-[var(--wen-orange)] px-4 py-2 font-semibold text-white"
               href={`/children/${studentId}`}
             >
               回到当前孩子 Dashboard
+            </Link>
+            <Link
+              className="inline-flex rounded-lg border border-[var(--wen-border)] px-4 py-2 font-semibold"
+              href="/parent/children"
+            >
+              返回孩子列表
             </Link>
           </div>
         </section>

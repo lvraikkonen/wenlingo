@@ -168,6 +168,14 @@ test("essay page supports draft feedback and revision settlement", async () => {
   expect(screen.getByRole("button", { name: "提交二稿" })).toBeDisabled();
   await userEvent.click(screen.getByRole("button", { name: "提交二稿" }));
   expect(apiMocks.submitEssayRevision).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("link", { name: "回到 Dashboard" })).toHaveAttribute(
+    "href",
+    "/children/s1",
+  );
+  expect(screen.getByRole("link", { name: "返回孩子列表" })).toHaveAttribute(
+    "href",
+    "/parent/children",
+  );
 
   await userEvent.click(screen.getByRole("button", { name: "获得点评" }));
   await waitFor(() => {
@@ -201,6 +209,14 @@ test("reading page shows friendly construction state", async () => {
     "href",
     "/children/s1/sentence",
   );
+  expect(screen.getByRole("link", { name: "回到 Dashboard" })).toHaveAttribute(
+    "href",
+    "/children/s1",
+  );
+  expect(screen.getByRole("link", { name: "返回孩子列表" })).toHaveAttribute(
+    "href",
+    "/parent/children",
+  );
   expect(apiMocks.createReadingSession).not.toHaveBeenCalled();
 });
 
@@ -214,5 +230,9 @@ test("report page renders parent-safe stage report", async () => {
   expect(
     screen.getByRole("link", { name: "回到当前孩子 Dashboard" }),
   ).toHaveAttribute("href", "/children/s1");
+  expect(screen.getByRole("link", { name: "返回孩子列表" })).toHaveAttribute(
+    "href",
+    "/parent/children",
+  );
   expect(apiMocks.createReport).toHaveBeenCalledWith("s1");
 });

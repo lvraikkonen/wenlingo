@@ -30,4 +30,8 @@ test("report page renders a controlled state when report creation fails", async 
     "href",
     "/children/student-1",
   );
+  expect(screen.getByRole("link", { name: "返回孩子列表" })).toHaveAttribute(
+    "href",
+    "/parent/children",
+  );
 });

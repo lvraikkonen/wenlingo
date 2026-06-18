@@ -107,6 +107,14 @@ test("renders simplified alpha navigation without demo children", async () => {
     "href",
     "/parent/children",
   );
+  expect(screen.getByRole("link", { name: "家长摘要" })).toHaveAttribute(
+    "href",
+    "/parent/children/s1/summary",
+  );
+  expect(screen.getByRole("link", { name: "家长报告" })).toHaveAttribute(
+    "href",
+    "/parent/s1/report",
+  );
   expect(screen.getByRole("link", { name: "小文星球" })).toHaveAttribute(
     "href",
     "/children/s1",

@@ -123,9 +123,14 @@ test("summary page renders populated practice counts, ability changes, and actio
   expect(screen.getByText("观察力 +4")).toBeInTheDocument();
   expect(screen.getByText("孩子完成了第一次能力草图。")).toBeInTheDocument();
   expect(screen.getByText("继续练习把句子写具体。")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "进入孩子空间" })).toHaveAttribute(
+  expect(screen.getByText(/本周.*完成了.*次练习/)).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "回到孩子空间" })).toHaveAttribute(
     "href",
     "/children/student-1",
+  );
+  expect(screen.getByRole("link", { name: "返回孩子列表" })).toHaveAttribute(
+    "href",
+    "/parent/children",
   );
 });
 
@@ -159,6 +164,29 @@ test("summary page renders lightweight sentence training summary", async () => {
   expect(
     screen.getByText("本周完成 3 次句子挑战，主要练习了“动作描写”和“扩句”。"),
   ).toBeInTheDocument();
+});
+
+test("summary page omits sentence practice copy when there is no sentence practice", async () => {
+  vi.mocked(getMyAlphaChildSummary).mockResolvedValueOnce({
+    parent_id: "parent-1",
+    child,
+    assessment_completed: true,
+    practice_counts: {
+      assessments: 1,
+      sentence_trainings: 0,
+      essays: 1,
+    },
+    ability_changes: [{ ability: "expression", label: "表达力", delta: 5 }],
+    recent_highlight: "孩子完成了一次小写作。",
+    sentence_training_summary: null,
+    next_suggestion: "下一步可以尝试一次句子练习。",
+    empty_state: null,
+  });
+
+  await renderSummaryPage();
+
+  expect(await screen.findByText("句子训练 0 次")).toBeInTheDocument();
+  expect(screen.queryByText(/本周.*完成了.*次练习/)).not.toBeInTheDocument();
 });
 
 test("summary page renders an error state when summary loading fails", async () => {

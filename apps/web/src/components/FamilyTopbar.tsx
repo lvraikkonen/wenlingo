@@ -154,6 +154,18 @@ export function FamilyTopbar({
               句子工坊
             </Link>
             <Link
+              className="rounded-lg px-3 py-2"
+              href={`/parent/children/${currentStudentId}/summary`}
+            >
+              家长摘要
+            </Link>
+            <Link
+              className="rounded-lg px-3 py-2"
+              href={`/parent/${currentStudentId}/report`}
+            >
+              家长报告
+            </Link>
+            <Link
               className="rounded-lg border border-[var(--wen-border)] px-3 py-2"
               href="/parent/children"
             >

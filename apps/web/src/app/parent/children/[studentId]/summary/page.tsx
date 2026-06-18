@@ -70,6 +70,9 @@ function ParentChildSummaryPageContent({ studentId }: { studentId: string }) {
   const emptyText =
     data?.empty_state ??
     "还没有训练记录。完成入门小试炼后，这里会出现第一份成长摘要。";
+  const hasSentencePractice =
+    (data?.practice_counts.sentence_trainings ?? 0) > 0 ||
+    Boolean(data?.sentence_training_summary);
 
   return (
     <main className="min-h-screen px-5 py-8 sm:px-8">
@@ -87,14 +90,25 @@ function ParentChildSummaryPageContent({ studentId }: { studentId: string }) {
               </p>
             ) : null}
           </div>
-          {data?.child.dashboard_url ? (
+          <nav
+            aria-label="成长摘要导航"
+            className="flex flex-wrap gap-3 text-sm font-bold"
+          >
+            {data?.child.dashboard_url ? (
+              <Link
+                href={data.child.dashboard_url}
+                className="inline-flex w-fit rounded-lg bg-[var(--wen-orange)] px-5 py-3 font-semibold text-white"
+              >
+                回到孩子空间
+              </Link>
+            ) : null}
             <Link
-              href={data.child.dashboard_url}
-              className="inline-flex w-fit rounded-lg bg-[var(--wen-orange)] px-5 py-3 font-semibold text-white"
+              href="/parent/children"
+              className="inline-flex w-fit rounded-lg border border-[var(--wen-border)] px-5 py-3 font-semibold"
             >
-              进入孩子空间
+              返回孩子列表
             </Link>
-          ) : null}
+          </nav>
         </div>
 
         {isLoading ? (
@@ -146,6 +160,13 @@ function ParentChildSummaryPageContent({ studentId }: { studentId: string }) {
                     {data.sentence_training_summary ? (
                       <p className="mt-2 text-sm text-[var(--wen-muted)]">
                         {data.sentence_training_summary}
+                      </p>
+                    ) : null}
+                    {hasSentencePractice ? (
+                      <p className="mt-2 text-sm font-semibold text-[var(--wen-orange)]">
+                        本周{childName}完成了{" "}
+                        {data.practice_counts.sentence_trainings}{" "}
+                        次练习，主要在练把句子写具体。
                       </p>
                     ) : null}
                   </div>
