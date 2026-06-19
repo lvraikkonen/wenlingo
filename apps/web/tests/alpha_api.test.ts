@@ -280,9 +280,9 @@ describe("alpha api client", () => {
   });
 
   test("alpha parent storage module no longer exports a writer", async () => {
-    const module = await import("../src/lib/alphaParent");
+    const alphaParentModule = await import("../src/lib/alphaParent");
 
-    expect("setStoredAlphaParentId" in module).toBe(false);
+    expect("setStoredAlphaParentId" in alphaParentModule).toBe(false);
   });
 
   test("alpha parent storage helper degrades when localStorage throws", () => {

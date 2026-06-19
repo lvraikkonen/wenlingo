@@ -85,7 +85,6 @@ function SentencePageContent({ studentId }: { studentId: string }) {
     activeStudentId.current = studentId;
     const requestVersion = interactionVersion.current + 1;
     interactionVersion.current = requestVersion;
-    setAiState("generating");
 
     createSentenceChallenge(studentId)
       .then((response) => {

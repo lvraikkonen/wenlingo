@@ -11,6 +11,7 @@ from app.domain.models import (
     AbilityHistory,
     AbilityProfile,
     GameEvent,
+    DailyTaskLimitCounter,
     LLMCallLog,
     ParentAccount,
     ParentSession,
@@ -25,6 +26,7 @@ from app.services.ai_runner import run_ai_task
 from app.services.auth_security import hash_secret
 from app.services.ai_routing import TASK_CONFIGS, TaskFinalStatus
 from app.services.llm_provider import LLMProviderResponse
+from app.services.llm_usage import local_product_day
 from app.services.sentence_challenges import fallback_challenge_feedback
 
 
@@ -489,23 +491,16 @@ def test_challenge_completion_rejects_short_answer(session):
 def test_daily_generation_limit_returns_rest_message_without_provider_call(session):
     parent = seed_demo_data(session)
     student = parent_students(session, parent.id)[0]
-    for index in range(TASK_CONFIGS["sentence_challenge_generation"].daily_limit):
-        session.add(
-            LLMCallLog(
-                student_id=student.id,
-                task_type=TaskType.sentence,
-                task_name="sentence_challenge_generation",
-                prompt_key="sentence_challenge_generation",
-                provider="http",
-                model="test-model",
-                prompt_version="test",
-                input_summary=f"句子挑战生成 {index}",
-                output_json={},
-                validation_ok=True,
-                final_status=TaskFinalStatus.PRIMARY_SUCCESS,
-                created_at=datetime.now(UTC),
-            )
+    daily_limit = TASK_CONFIGS["sentence_challenge_generation"].daily_limit
+    session.add(
+        DailyTaskLimitCounter(
+            student_id=student.id,
+            task_name="sentence_challenge_generation",
+            product_day=local_product_day(datetime.now(UTC), "Asia/Shanghai"),
+            limit_value=daily_limit,
+            consumed_count=daily_limit,
         )
+    )
     session.commit()
     runner = ChallengeRunner()
     app, client = challenge_client(
@@ -532,23 +527,15 @@ def test_daily_generation_limit_returns_rest_message_without_provider_call(sessi
 def test_daily_generation_limit_uses_sentence_env_override(session):
     parent = seed_demo_data(session)
     student = parent_students(session, parent.id)[0]
-    for index in range(2):
-        session.add(
-            LLMCallLog(
-                student_id=student.id,
-                task_type=TaskType.sentence,
-                task_name="sentence_challenge_generation",
-                prompt_key="sentence_challenge_generation",
-                provider="http",
-                model="test-model",
-                prompt_version="test",
-                input_summary=f"句子挑战生成 {index}",
-                output_json={},
-                validation_ok=True,
-                final_status=TaskFinalStatus.PRIMARY_SUCCESS,
-                created_at=datetime.now(UTC),
-            )
+    session.add(
+        DailyTaskLimitCounter(
+            student_id=student.id,
+            task_name="sentence_challenge_generation",
+            product_day=local_product_day(datetime.now(UTC), "Asia/Shanghai"),
+            limit_value=2,
+            consumed_count=2,
         )
+    )
     session.commit()
     runner = ChallengeRunner()
     app, client = challenge_client(

@@ -7,30 +7,34 @@ import { FamilyTopbar } from "../../../../components/FamilyTopbar";
 import { createReport } from "../../../../lib/api";
 
 type ReportResult = Awaited<ReturnType<typeof createReport>>;
+type ReportLoadState = {
+  studentId: string;
+  report: ReportResult | null;
+  isLoading: boolean;
+};
 
 export function ReportPageContent({ studentId }: { studentId: string }) {
-  const [report, setReport] = useState<ReportResult | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [reportState, setReportState] = useState<ReportLoadState>(() => ({
+    studentId,
+    report: null,
+    isLoading: true,
+  }));
+  const isCurrentReport = reportState.studentId === studentId;
+  const report = isCurrentReport ? reportState.report : null;
+  const isLoading = !isCurrentReport || reportState.isLoading;
 
   useEffect(() => {
     let active = true;
-    setIsLoading(true);
-    setReport(null);
 
     createReport(studentId)
       .then((result) => {
         if (active) {
-          setReport(result);
+          setReportState({ studentId, report: result, isLoading: false });
         }
       })
       .catch(() => {
         if (active) {
-          setReport(null);
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setIsLoading(false);
+          setReportState({ studentId, report: null, isLoading: false });
         }
       });
 

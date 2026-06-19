@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 from sqlmodel import select
@@ -13,6 +14,7 @@ from app.domain.models import (
     Essay,
     EssayVersion,
     GameEvent,
+    DailyTaskLimitCounter,
     LLMCallLog,
     ParentUser,
     ProductEvent,
@@ -24,6 +26,7 @@ from app.services.ai_runner import run_ai_task
 from app.services.essay_workflow import ASSESSMENT_ESSAY_STATUS
 from app.services.ai_routing import TASK_CONFIGS, TaskFinalStatus
 from app.services.llm_provider import LLMProviderResponse
+from app.services.llm_usage import local_product_day
 
 
 def create_default_child(session) -> StudentProfile:
@@ -251,19 +254,16 @@ def test_assessment_logs_configured_prompt_version(session):
 
 def test_daily_limit_assessment_uses_fallback_without_failure_event(session):
     student = create_default_child(session)
-    for index in range(TASK_CONFIGS["sentence_upgrade_feedback"].daily_limit):
-        session.add(
-            LLMCallLog(
-                student_id=student.id,
-                task_type=TaskType.sentence,
-                task_name="sentence_upgrade_feedback",
-                provider=QuotaLimitedAssessmentRunner.provider_name,
-                model=QuotaLimitedAssessmentRunner.model_name,
-                input_summary=f"previous assessment sentence request {index}",
-                validation_ok=True,
-                final_status=TaskFinalStatus.PRIMARY_SUCCESS,
-            )
+    daily_limit = TASK_CONFIGS["sentence_upgrade_feedback"].daily_limit
+    session.add(
+        DailyTaskLimitCounter(
+            student_id=student.id,
+            task_name="sentence_upgrade_feedback",
+            product_day=local_product_day(datetime.now(UTC), "Asia/Shanghai"),
+            limit_value=daily_limit,
+            consumed_count=daily_limit,
         )
+    )
     session.commit()
     settings = Settings(
         llm_daily_limit_enabled=True,

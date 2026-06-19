@@ -6,6 +6,7 @@ import { demoLogin, getMyAlphaChildren } from "../lib/api";
 import type { AlphaChild, Student } from "../lib/types";
 
 const DEMO_STUDENT_IDS = ["s1", "s2", "s3", "s4"];
+const EMPTY_STUDENTS: Student[] = [];
 
 function isCanonicalDemoChildren(children: AlphaChild[]) {
   return (
@@ -37,32 +38,52 @@ function shouldLoadDemoStudents(error: unknown): boolean {
   return status === 401 || status === 404;
 }
 
+type FamilyTopbarState = {
+  currentStudentId: string;
+  students: Student[];
+  alphaStudentName: {
+    studentId: string;
+    name: string;
+  } | null;
+};
+
 export function FamilyTopbar({
   currentStudentId,
 }: {
   currentStudentId: string;
 }) {
-  const [students, setStudents] = useState<Student[]>([]);
-  const [alphaStudentName, setAlphaStudentName] = useState<{
-    studentId: string;
-    name: string;
-  } | null>(null);
+  const [topbarState, setTopbarState] = useState<FamilyTopbarState>(() => ({
+    currentStudentId,
+    students: [],
+    alphaStudentName: null,
+  }));
+  const isCurrentTopbarState = topbarState.currentStudentId === currentStudentId;
+  const students = isCurrentTopbarState ? topbarState.students : EMPTY_STUDENTS;
+  const alphaStudentName = isCurrentTopbarState
+    ? topbarState.alphaStudentName
+    : null;
 
   useEffect(() => {
     let mounted = true;
-    setAlphaStudentName(null);
-    setStudents([]);
 
     const loadDemoStudents = () => {
       demoLogin()
         .then((result) => {
           if (mounted) {
-            setStudents(result.students);
+            setTopbarState({
+              currentStudentId,
+              students: result.students,
+              alphaStudentName: null,
+            });
           }
         })
         .catch(() => {
           if (mounted) {
-            setStudents([]);
+            setTopbarState({
+              currentStudentId,
+              students: [],
+              alphaStudentName: null,
+            });
           }
         });
     };
@@ -78,16 +99,24 @@ export function FamilyTopbar({
             return;
           }
           if (isCanonicalDemoChildren(result.children)) {
-            setStudents(alphaChildrenToDemoStudents(result.children));
+            setTopbarState({
+              currentStudentId,
+              students: alphaChildrenToDemoStudents(result.children),
+              alphaStudentName: null,
+            });
             return;
           }
 
           const currentChild = result.children.find(
             (child) => child.id === currentStudentId,
           );
-          setAlphaStudentName({
-            studentId: currentStudentId,
-            name: currentChild?.name ?? currentStudentId,
+          setTopbarState({
+            currentStudentId,
+            students: [],
+            alphaStudentName: {
+              studentId: currentStudentId,
+              name: currentChild?.name ?? currentStudentId,
+            },
           });
         })
         .catch((error: unknown) => {
@@ -96,7 +125,7 @@ export function FamilyTopbar({
           }
         });
     } catch {
-      setStudents([]);
+      // Derived empty state covers synchronous API-client failures.
     }
 
     return () => {
