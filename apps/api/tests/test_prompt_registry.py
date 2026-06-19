@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 import app.prompts.registry as registry
@@ -26,6 +28,37 @@ def test_registered_prompt_keys_load_successfully():
             "wenlingo_primary_coach",
             "wenlingo_sentence_challenge",
         }
+
+
+def test_prompt_key_naming_convention_for_registered_prompts():
+    for prompt_key in registered_prompts():
+        assert prompt_key == prompt_key.lower()
+        assert "-" not in prompt_key
+        assert " " not in prompt_key
+
+
+def test_all_v05c_production_prompt_keys_are_registered():
+    assert set(registered_prompts()) >= {
+        "sentence_upgrade_feedback",
+        "sentence_challenge_generation",
+        "sentence_challenge_feedback",
+        "essay_feedback",
+        "essay_revision_comparison",
+    }
+
+
+def test_ai_tasks_no_longer_defines_legacy_default_prompt_version():
+    text = Path("app/services/ai_tasks.py").read_text(encoding="utf-8")
+
+    assert "LEGACY_DEFAULT_PROMPT_VERSION" not in text
+
+
+def test_llm_provider_does_not_keep_v06_legacy_prompt_content():
+    text = Path("app/services/llm_provider.py").read_text(encoding="utf-8")
+
+    assert "LEGACY_RESPONSE_CONTRACTS" not in text
+    assert "material_questions" not in text
+    assert "outline_generation" not in text
 
 
 def test_unknown_prompt_key_raises_key_error():

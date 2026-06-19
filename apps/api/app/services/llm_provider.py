@@ -6,21 +6,7 @@ from typing import Any, Protocol
 import httpx
 
 from app.prompts.registry import get_prompt
-from app.prompts.system import PRIMARY_COACH_SYSTEM_PROMPT
 from app.services.sentence_challenges import fallback_challenge, fallback_challenge_feedback
-
-LEGACY_RESPONSE_CONTRACTS = {
-    "material_questions": (
-        "Return a JSON object with exactly these fields: "
-        "questions: array of 3 to 5 objects, each with non-empty question and hint strings; "
-        "encouragement: non-empty string."
-    ),
-    "outline_generation": (
-        "Return a JSON object with exactly these fields: "
-        "sections: array of 3 to 5 non-empty strings; "
-        "tip: non-empty string."
-    ),
-}
 
 
 @dataclass(frozen=True)
@@ -45,11 +31,7 @@ def response_contract_for_task(task_name: str) -> str:
     try:
         return get_prompt(task_name).response_contract
     except KeyError:
-        pass
-    return LEGACY_RESPONSE_CONTRACTS.get(
-        task_name,
-        "Return a JSON object only. Do not include markdown or explanatory text.",
-    )
+        return "Return a JSON object only. Do not include markdown or explanatory text."
 
 
 class LLMProvider(Protocol):
@@ -127,32 +109,6 @@ class MockLLMProvider:
                 provider=self.provider_name,
                 model=self.model_name,
             )
-        if task_name == "material_questions":
-            payload = {
-                "questions": [
-                    {"question": "这件事发生在哪里？", "hint": "写出一个具体地点。"},
-                    {"question": "当时谁和你一起？", "hint": "选一个最重要的人。"},
-                    {"question": "最值得写的动作是什么？", "hint": "找一个看得见的动作。"},
-                ],
-                "encouragement": "先把素材想清楚，写的时候会更轻松。",
-            }
-            return LLMProviderResponse(
-                parsed_json=payload,
-                raw_response=json.dumps(payload, ensure_ascii=False),
-                provider=self.provider_name,
-                model=self.model_name,
-            )
-        if task_name == "outline_generation":
-            payload = {
-                "sections": ["开头交代时间地点", "中间写最重要的动作", "结尾写自己的感受"],
-                "tip": "每一段只抓一个重点。",
-            }
-            return LLMProviderResponse(
-                parsed_json=payload,
-                raw_response=json.dumps(payload, ensure_ascii=False),
-                provider=self.provider_name,
-                model=self.model_name,
-            )
         raise ValueError(f"Unknown LLM task: {task_name}")
 
 
@@ -177,10 +133,7 @@ class HttpJsonLLMProvider:
             system_prompt = prompt.system_prompt
             response_contract = prompt.response_contract
         except KeyError:
-            if task_name not in LEGACY_RESPONSE_CONTRACTS:
-                raise ValueError(f"Unknown LLM task: {task_name}") from None
-            system_prompt = PRIMARY_COACH_SYSTEM_PROMPT
-            response_contract = LEGACY_RESPONSE_CONTRACTS[task_name]
+            raise ValueError(f"Unknown LLM task: {task_name}") from None
 
         messages = [
             {"role": "system", "content": system_prompt},

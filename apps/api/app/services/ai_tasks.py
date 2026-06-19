@@ -9,7 +9,7 @@ from sqlmodel import Session
 
 from app.domain.enums import TaskType
 from app.domain.models import LLMCallLog
-from app.prompts.registry import PromptSpec, get_prompt
+from app.prompts.registry import get_prompt
 from app.services.llm_contracts import (
     EssayFeedback,
     EssayRevisionComparison,
@@ -30,7 +30,6 @@ from app.services.sentence_challenges import (
 
 T = TypeVar("T", bound=BaseModel)
 MAX_LLM_ATTEMPTS = 2
-LEGACY_DEFAULT_PROMPT_VERSION = "v0.2-quality-spine-2026-05-14"
 
 
 @dataclass(frozen=True)
@@ -174,12 +173,6 @@ def fallback_sentence_feedback() -> SentenceFeedback:
         ability_delta={"expression": 2, "observation": 2},
         problem_monsters=["空泛表达"],
     )
-
-
-def _effective_prompt_version(prompt: PromptSpec, requested_version: str) -> str:
-    if requested_version == LEGACY_DEFAULT_PROMPT_VERSION:
-        return prompt.version
-    return requested_version
 
 
 def _token_count(usage: dict[str, int] | None, key: str) -> int:
@@ -363,10 +356,11 @@ async def sentence_upgrade_feedback(
     upgraded_sentence: str,
     focus: str,
     session: Session | None = None,
-    prompt_version: str = LEGACY_DEFAULT_PROMPT_VERSION,
+    prompt_version: str = "",
     student_id: str | None = None,
 ) -> LLMTaskResult[SentenceFeedback]:
     prompt = get_prompt("sentence_upgrade_feedback")
+    effective_prompt_version = prompt_version or prompt.version
     return await runner.run(
         session=session,
         student_id=student_id,
@@ -384,7 +378,7 @@ async def sentence_upgrade_feedback(
             f"句子快练；原句长度：{len(source_sentence)}；"
             f"升级句长度：{len(upgraded_sentence)}；目标：{focus}"
         ),
-        prompt_version=_effective_prompt_version(prompt, prompt_version),
+        prompt_version=effective_prompt_version,
     )
 
 
@@ -462,13 +456,14 @@ async def essay_feedback(
     title: str,
     draft: str,
     session: Session | None = None,
-    prompt_version: str = LEGACY_DEFAULT_PROMPT_VERSION,
+    prompt_version: str = "",
     student_id: str | None = None,
 ) -> LLMTaskResult[EssayFeedback]:
     ghostwriting = convert_ghostwriting_request(draft)
     if ghostwriting.blocked:
         raise ValueError(ghostwriting.message)
     prompt = get_prompt("essay_feedback")
+    effective_prompt_version = prompt_version or prompt.version
     return await runner.run(
         session=session,
         student_id=student_id,
@@ -482,7 +477,7 @@ async def essay_feedback(
         output_schema=EssayFeedback,
         deterministic_fallback_factory=lambda _context: fallback_essay_feedback(),
         input_summary=f"作文题目：{title}；初稿长度：{len(draft)}",
-        prompt_version=_effective_prompt_version(prompt, prompt_version),
+        prompt_version=effective_prompt_version,
     )
 
 
@@ -491,10 +486,11 @@ async def essay_revision_comparison(
     first_draft: str,
     revision: str,
     session: Session | None = None,
-    prompt_version: str = LEGACY_DEFAULT_PROMPT_VERSION,
+    prompt_version: str = "",
     student_id: str | None = None,
 ) -> LLMTaskResult[EssayRevisionComparison]:
     prompt = get_prompt("essay_revision_comparison")
+    effective_prompt_version = prompt_version or prompt.version
     return await runner.run(
         session=session,
         student_id=student_id,
@@ -508,5 +504,5 @@ async def essay_revision_comparison(
         output_schema=EssayRevisionComparison,
         deterministic_fallback_factory=lambda _context: fallback_revision_comparison(),
         input_summary=f"二稿对比；初稿长度：{len(first_draft)}；二稿长度：{len(revision)}",
-        prompt_version=_effective_prompt_version(prompt, prompt_version),
+        prompt_version=effective_prompt_version,
     )
