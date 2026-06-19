@@ -7,6 +7,10 @@ Web URL:
 API URL:
 Commit:
 
+Do not record raw Admin tokens, Magic Codes, full emails, full phone numbers,
+raw invite codes, child writing text, raw prompts, raw LLM responses, or full AI
+feedback bodies in this file.
+
 ## Environment
 
 - [ ] Web and API deploys point at the intended commit.

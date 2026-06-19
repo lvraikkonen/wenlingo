@@ -106,9 +106,10 @@ Do not use global `LLM_MODEL` as a production AI routing bypass after V0.5c. All
 
 ## Web Service
 
-Set this on `wenlingo-web` before build. Next.js embeds `NEXT_PUBLIC_*` values
-into the browser bundle, so changes require rebuilding/redeploying the web
-service.
+Set these on `wenlingo-web`. Server-side web runtime variables such as
+`API_PROXY_TARGET` are read by Next.js rewrites on the web service and require a
+restart/redeploy when changed. Next.js embeds `NEXT_PUBLIC_*` values into the
+browser bundle, so those changes require rebuilding/redeploying the web service.
 
 | Variable | Default | Required | Secret | Redeploy needed | Notes |
 | --- | --- | --- | --- | --- | --- |

@@ -55,7 +55,7 @@ Required backend env:
 | `AUTH_SECRET_PEPPER` | Strong production secret used for auth token/code hashing. Keep stable across deploys. |
 | `AUTH_SESSION_COOKIE_NAME` | `wenlingo_parent_session` unless a production rename is required. |
 | `AUTH_SESSION_COOKIE_SECURE` | `true` for Railway HTTPS production and staging. |
-| `AUTH_SESSION_COOKIE_SAMESITE` | `lax` when web and API are same-site. Use `none` for Railway Dev smoke when web/API run on separate `*.up.railway.app` hosts, with `AUTH_SESSION_COOKIE_SECURE=true`. |
+| `AUTH_SESSION_COOKIE_SAMESITE` | `lax` when web and API are same-origin or same-site. Historical Railway Dev direct web-to-API smoke on separate `*.up.railway.app` hosts used `none` with `AUTH_SESSION_COOKIE_SECURE=true`; keep that only as a controlled direct cross-site API fallback test, not the external Alpha recommendation. |
 | `AUTH_SESSION_DAYS` | `30` unless product explicitly changes session length. |
 | `AUTH_SESSION_LAST_SEEN_THROTTLE_MINUTES` | `15` unless ops needs a different session write throttle. |
 | `AUTH_ALLOWED_ORIGINS` | Staging/production web HTTPS origins allowed for authenticated non-GET requests, comma-separated with no trailing slash. |
