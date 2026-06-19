@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Response
@@ -99,3 +100,123 @@ def auth_session_payload(*, account: ParentAccount, parent_id: str | None = None
     if parent_id:
         payload["parent_id"] = parent_id
     return payload
+
+
+@dataclass(frozen=True)
+class RevokeParentSessionResult:
+    revoked: bool
+    session_id: str
+
+
+@dataclass(frozen=True)
+class RevokeAllParentSessionsResult:
+    revoked_session_count: int
+
+
+@dataclass(frozen=True)
+class ParentSessionCleanupResult:
+    scanned_count: int
+    eligible_count: int
+    deleted_count: int
+    reason_counts: dict[str, int]
+    revoked_cutoff: datetime
+    expired_cutoff: datetime
+
+
+def active_parent_session_statement(account_id: str):
+    return select(ParentSession).where(
+        ParentSession.account_id == account_id,
+        ParentSession.revoked_at.is_(None),
+        ParentSession.expires_at > utcnow(),
+    )
+
+
+def active_parent_sessions_for_account(db: Session, account_id: str) -> list[ParentSession]:
+    sessions = db.exec(active_parent_session_statement(account_id)).all()
+    return sorted(
+        sessions,
+        key=lambda parent_session: (
+            _as_utc(parent_session.last_seen_at),
+            _as_utc(parent_session.created_at),
+            parent_session.id,
+        ),
+        reverse=True,
+    )
+
+
+def revoke_parent_session_for_account(
+    db: Session,
+    account_id: str,
+    session_id: str,
+) -> RevokeParentSessionResult:
+    parent_session = db.get(ParentSession, session_id)
+    if parent_session is None or parent_session.account_id != account_id:
+        raise LookupError("parent session not found")
+
+    if parent_session.revoked_at is not None or _as_utc(parent_session.expires_at) <= utcnow():
+        return RevokeParentSessionResult(revoked=False, session_id=session_id)
+
+    parent_session.revoked_at = utcnow()
+    db.add(parent_session)
+    db.flush()
+    return RevokeParentSessionResult(revoked=True, session_id=session_id)
+
+
+def revoke_active_parent_sessions_for_account(
+    db: Session,
+    account_id: str,
+) -> RevokeAllParentSessionsResult:
+    sessions = active_parent_sessions_for_account(db, account_id)
+    now = utcnow()
+    for parent_session in sessions:
+        parent_session.revoked_at = now
+        db.add(parent_session)
+    db.flush()
+    return RevokeAllParentSessionsResult(revoked_session_count=len(sessions))
+
+
+def cleanup_parent_sessions(
+    *,
+    db: Session,
+    revoked_retention_days: int,
+    expired_retention_days: int,
+    execute: bool,
+) -> ParentSessionCleanupResult:
+    if revoked_retention_days < 0 or expired_retention_days < 0:
+        raise ValueError("retention days must be zero or positive")
+
+    now = utcnow()
+    revoked_cutoff = now - timedelta(days=revoked_retention_days)
+    expired_cutoff = now - timedelta(days=expired_retention_days)
+    sessions = db.exec(select(ParentSession)).all()
+    eligible: list[ParentSession] = []
+    reason_counts: dict[str, int] = {}
+
+    for parent_session in sessions:
+        reason = None
+        if (
+            parent_session.revoked_at is not None
+            and _as_utc(parent_session.revoked_at) <= revoked_cutoff
+        ):
+            reason = "revoked"
+        elif _as_utc(parent_session.expires_at) <= expired_cutoff:
+            reason = "expired"
+
+        if reason is None:
+            continue
+        eligible.append(parent_session)
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+
+    if execute:
+        for parent_session in eligible:
+            db.delete(parent_session)
+        db.commit()
+
+    return ParentSessionCleanupResult(
+        scanned_count=len(sessions),
+        eligible_count=len(eligible),
+        deleted_count=len(eligible) if execute else 0,
+        reason_counts=reason_counts,
+        revoked_cutoff=revoked_cutoff,
+        expired_cutoff=expired_cutoff,
+    )

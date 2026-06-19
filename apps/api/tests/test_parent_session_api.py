@@ -6,7 +6,13 @@ from sqlmodel import select
 from app.core.config import Settings
 from app.domain.models import ParentAccount, ParentSession, ParentUser, utcnow
 from app.services.auth_security import hash_secret
-from app.services.parent_sessions import create_parent_session as issue_parent_session
+from app.services.parent_sessions import (
+    active_parent_sessions_for_account,
+    cleanup_parent_sessions,
+    create_parent_session as issue_parent_session,
+    revoke_active_parent_sessions_for_account,
+    revoke_parent_session_for_account,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -203,3 +209,84 @@ def test_patch_account_phone_without_cookie_returns_401(client):
     response = client.patch("/api/auth/account/phone", json={"phone": "138 0000 1234"})
 
     assert response.status_code == 401
+
+
+def test_active_parent_sessions_for_account_filters_revoked_and_expired(session):
+    account = create_account(session)
+    active = create_parent_session(session, account, token="active")
+    create_parent_session(session, account, token="revoked", revoked=True)
+    create_parent_session(session, account, token="expired", expires_delta=timedelta(minutes=-1))
+
+    rows = active_parent_sessions_for_account(session, account.id)
+
+    assert [row.id for row in rows] == [active.id]
+
+
+def test_revoke_parent_session_for_account_is_idempotent(session):
+    account = create_account(session)
+    parent_session = create_parent_session(session, account)
+
+    first = revoke_parent_session_for_account(session, account.id, parent_session.id)
+    second = revoke_parent_session_for_account(session, account.id, parent_session.id)
+
+    assert first.revoked is True
+    assert second.revoked is False
+    session.refresh(parent_session)
+    assert parent_session.revoked_at is not None
+
+
+def test_revoke_active_parent_sessions_for_account_counts_only_active(session):
+    account = create_account(session)
+    create_parent_session(session, account, token="active-one")
+    create_parent_session(session, account, token="active-two")
+    create_parent_session(session, account, token="revoked", revoked=True)
+
+    result = revoke_active_parent_sessions_for_account(session, account.id)
+
+    assert result.revoked_session_count == 2
+    assert active_parent_sessions_for_account(session, account.id) == []
+
+
+def test_cleanup_parent_sessions_dry_run_and_execute(session):
+    account = create_account(session)
+    active = create_parent_session(session, account, token="active")
+    old_revoked = create_parent_session(session, account, token="old-revoked", revoked=True)
+    old_revoked.revoked_at = utcnow() - timedelta(days=45)
+    old_expired = create_parent_session(
+        session,
+        account,
+        token="old-expired",
+        expires_delta=timedelta(days=-45),
+    )
+    recent_expired = create_parent_session(
+        session,
+        account,
+        token="recent-expired",
+        expires_delta=timedelta(days=-5),
+    )
+    session.add(old_revoked)
+    session.commit()
+
+    dry_run = cleanup_parent_sessions(
+        db=session,
+        revoked_retention_days=30,
+        expired_retention_days=30,
+        execute=False,
+    )
+    assert dry_run.deleted_count == 0
+    assert dry_run.eligible_count == 2
+    assert session.get(ParentSession, old_revoked.id) is not None
+
+    executed = cleanup_parent_sessions(
+        db=session,
+        revoked_retention_days=30,
+        expired_retention_days=30,
+        execute=True,
+    )
+
+    assert executed.deleted_count == 2
+    assert executed.reason_counts == {"expired": 1, "revoked": 1}
+    assert session.get(ParentSession, active.id) is not None
+    assert session.get(ParentSession, recent_expired.id) is not None
+    assert session.get(ParentSession, old_revoked.id) is None
+    assert session.get(ParentSession, old_expired.id) is None
