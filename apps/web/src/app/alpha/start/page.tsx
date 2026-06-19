@@ -334,6 +334,7 @@ export default function AlphaStartPage() {
         }
         setAuthSession(currentSession);
         setAuthState("authenticated_redirecting");
+        clearStoredAlphaParentId();
         router.push("/parent/children");
         return;
       }

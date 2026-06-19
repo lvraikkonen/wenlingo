@@ -267,6 +267,76 @@ test("shows session unavailable for legacy login when linked verify does not per
   expect(fetchCalls).not.toContain("/api/alpha/legacy-parent-bind");
 });
 
+test("legacy login clears stale marker when linked verify session persists", async () => {
+  window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "legacy-parent-1");
+  const fetchCalls: string[] = [];
+  let sessionChecks = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      fetchCalls.push(new URL(url, "https://wenlingo.test").pathname);
+
+      if (url.endsWith("/api/auth/session")) {
+        sessionChecks += 1;
+        return jsonResponse(
+          sessionChecks === 1
+            ? { authenticated: false }
+            : {
+                authenticated: true,
+                account: {
+                  email_masked: "p***@example.com",
+                  phone_bound: false,
+                  last_login_at: null,
+                },
+                parent: { id: "legacy-parent-1", display_name: "旧 Alpha 家庭" },
+              },
+        );
+      }
+      if (url.endsWith("/api/auth/magic-codes/request")) {
+        return jsonResponse({ message: "sent" });
+      }
+      if (url.endsWith("/api/auth/magic-codes/verify")) {
+        return jsonResponse({
+          authenticated: true,
+          account: {
+            email_masked: "p***@example.com",
+            phone_bound: false,
+            last_login_at: null,
+          },
+          parent: { id: "legacy-parent-1", display_name: "旧 Alpha 家庭" },
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    }),
+  );
+
+  render(<AlphaStartPage />);
+
+  fireEvent.change(await screen.findByLabelText("邮箱"), {
+    target: { value: "parent@example.com" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "获取验证码" }));
+  fireEvent.change(await screen.findByLabelText("6 位验证码"), {
+    target: { value: "123456" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "绑定并继续" }));
+
+  await waitFor(() => {
+    expect(push).toHaveBeenCalledWith("/parent/children");
+  });
+
+  expect(fetchCalls).toEqual([
+    "/api/auth/session",
+    "/api/auth/magic-codes/request",
+    "/api/auth/magic-codes/verify",
+    "/api/auth/session",
+  ]);
+  expect(fetchCalls).not.toContain("/api/alpha/legacy-parent-bind");
+  expect(window.localStorage.getItem(ALPHA_PARENT_STORAGE_KEY)).toBeNull();
+});
+
 test("new family creation routes without writing legacy parent id", async () => {
   const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
   vi.stubGlobal(
