@@ -8,10 +8,13 @@ import type {
   AdminAlphaAIUsageResponse,
   AdminAlphaAccountActionResponse,
   AdminAlphaAccountRow,
+  AdminAlphaAccountSessionsResponse,
   AdminAlphaFamilyDetail,
   AdminAlphaInviteActionResponse,
   AdminAlphaInviteCreateResponse,
   AdminAlphaOverviewRow,
+  AdminAlphaSessionRevokeResponse,
+  AdminAlphaSessionsRevokeAllResponse,
   AdminAlphaTestAccountDeleteResponse,
   DashboardResponse,
   DemoLoginResponse,
@@ -556,6 +559,53 @@ export function enableAdminAlphaAccount(
         "X-Alpha-Admin-Token": token,
       },
       body: JSON.stringify({}),
+    },
+  );
+}
+
+export function getAdminAlphaAccountSessions(
+  token: string,
+  accountId: string,
+): Promise<AdminAlphaAccountSessionsResponse> {
+  return requestJson<AdminAlphaAccountSessionsResponse>(
+    `/api/admin/alpha/accounts/${accountId}/sessions`,
+    {
+      headers: { "X-Alpha-Admin-Token": token },
+    },
+  );
+}
+
+export function revokeAdminAlphaAccountSession(
+  token: string,
+  accountId: string,
+  sessionId: string,
+): Promise<AdminAlphaSessionRevokeResponse> {
+  return requestJson<AdminAlphaSessionRevokeResponse>(
+    `/api/admin/alpha/accounts/${accountId}/sessions/${sessionId}/revoke`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Alpha-Admin-Token": token,
+      },
+      body: "{}",
+    },
+  );
+}
+
+export function revokeAllAdminAlphaAccountSessions(
+  token: string,
+  accountId: string,
+): Promise<AdminAlphaSessionsRevokeAllResponse> {
+  return requestJson<AdminAlphaSessionsRevokeAllResponse>(
+    `/api/admin/alpha/accounts/${accountId}/sessions/revoke-all`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Alpha-Admin-Token": token,
+      },
+      body: "{}",
     },
   );
 }

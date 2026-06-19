@@ -284,6 +284,37 @@ export type AdminAlphaAccountActionResponse = {
   };
 };
 
+export type AdminAlphaAccountSession = {
+  session_id: string;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  revoked_at: string | null;
+};
+
+export type AdminAlphaAccountSessionsResponse = {
+  account: {
+    account_id: string;
+    email_masked: string;
+    status: string;
+  };
+  sessions: AdminAlphaAccountSession[];
+};
+
+export type AdminAlphaSessionRevokeResponse = {
+  session: {
+    session_id: string;
+    revoked: boolean;
+  };
+};
+
+export type AdminAlphaSessionsRevokeAllResponse = {
+  account: {
+    account_id: string;
+    revoked_session_count: number;
+  };
+};
+
 export type AdminAlphaTestAccountDeleteResponse = {
   deleted_count: number;
   accounts: Array<{

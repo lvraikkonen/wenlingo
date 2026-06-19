@@ -13,6 +13,9 @@ const apiMocks = vi.hoisted(() => ({
   revokeAdminAlphaInvite: vi.fn(),
   disableAdminAlphaAccount: vi.fn(),
   enableAdminAlphaAccount: vi.fn(),
+  getAdminAlphaAccountSessions: vi.fn(),
+  revokeAdminAlphaAccountSession: vi.fn(),
+  revokeAllAdminAlphaAccountSessions: vi.fn(),
   deleteAdminAlphaTestAccounts: vi.fn(),
 }));
 
@@ -25,6 +28,10 @@ vi.mock("../src/lib/api", () => ({
   revokeAdminAlphaInvite: apiMocks.revokeAdminAlphaInvite,
   disableAdminAlphaAccount: apiMocks.disableAdminAlphaAccount,
   enableAdminAlphaAccount: apiMocks.enableAdminAlphaAccount,
+  getAdminAlphaAccountSessions: apiMocks.getAdminAlphaAccountSessions,
+  revokeAdminAlphaAccountSession: apiMocks.revokeAdminAlphaAccountSession,
+  revokeAllAdminAlphaAccountSessions:
+    apiMocks.revokeAllAdminAlphaAccountSessions,
   deleteAdminAlphaTestAccounts: apiMocks.deleteAdminAlphaTestAccounts,
 }));
 
@@ -159,6 +166,28 @@ beforeEach(() => {
       account_id: "account-1",
       status: "active",
     },
+  });
+  apiMocks.getAdminAlphaAccountSessions.mockResolvedValue({
+    account: {
+      account_id: "account-1",
+      email_masked: "pa***@example.com",
+      status: "active",
+    },
+    sessions: [
+      {
+        session_id: "session-1",
+        created_at: "2026-06-19T10:00:00+00:00",
+        last_seen_at: "2026-06-19T10:30:00+00:00",
+        expires_at: "2026-07-19T10:00:00+00:00",
+        revoked_at: null,
+      },
+    ],
+  });
+  apiMocks.revokeAdminAlphaAccountSession.mockResolvedValue({
+    session: { session_id: "session-1", revoked: true },
+  });
+  apiMocks.revokeAllAdminAlphaAccountSessions.mockResolvedValue({
+    account: { account_id: "account-1", revoked_session_count: 1 },
   });
   apiMocks.deleteAdminAlphaTestAccounts.mockResolvedValue({
     deleted_count: 1,
@@ -581,6 +610,33 @@ test("admin renders account list and disables then enables account", async () =>
   });
   await userEvent.click(await screen.findByRole("button", { name: "Enable account" }));
   expect(apiMocks.enableAdminAlphaAccount).toHaveBeenCalledWith(
+    "secret",
+    "account-1",
+  );
+});
+
+test("admin can inspect sessions and confirms revoke all", async () => {
+  window.sessionStorage.setItem("wenlingo_alpha_admin_token", "secret");
+
+  render(<AdminAlphaPage />);
+
+  expect(await screen.findByRole("heading", { name: "账号管理" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "查看 sessions" }));
+
+  expect(apiMocks.getAdminAlphaAccountSessions).toHaveBeenCalledWith(
+    "secret",
+    "account-1",
+  );
+  expect(await screen.findByText("session-1")).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "撤销全部 sessions" }));
+  expect(
+    await screen.findByText("这会让该家长账号的所有设备重新登录。"),
+  ).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "确认撤销全部 sessions" }));
+
+  expect(apiMocks.revokeAllAdminAlphaAccountSessions).toHaveBeenCalledWith(
     "secret",
     "account-1",
   );

@@ -7,14 +7,18 @@ import {
   disableAdminAlphaAccount,
   enableAdminAlphaAccount,
   getAdminAlphaAccounts,
+  getAdminAlphaAccountSessions,
   getAdminAlphaAIUsage,
   getAdminAlphaFamily,
   getAdminAlphaOverview,
+  revokeAdminAlphaAccountSession,
+  revokeAllAdminAlphaAccountSessions,
   revokeAdminAlphaInvite,
 } from "../../../lib/api";
 import type {
   AdminAlphaAIUsageRow,
   AdminAlphaAccountRow,
+  AdminAlphaAccountSessionsResponse,
   AdminAlphaFamilyDetail,
   AdminAlphaInviteCreateResponse,
   AdminAlphaOverviewRow,
@@ -66,6 +70,14 @@ export default function AdminAlphaPage() {
     string[]
   >([]);
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
+  const [selectedSessionAccountId, setSelectedSessionAccountId] = useState<
+    string | null
+  >(null);
+  const [accountSessions, setAccountSessions] =
+    useState<AdminAlphaAccountSessionsResponse | null>(null);
+  const [confirmRevokeAllAccountId, setConfirmRevokeAllAccountId] = useState<
+    string | null
+  >(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [isDeletingTestAccounts, setIsDeletingTestAccounts] = useState(false);
   const [notice, setNotice] = useState("");
@@ -86,6 +98,9 @@ export default function AdminAlphaPage() {
     setFamilyDetail(null);
     setPendingAccountActionIds([]);
     setSelectedAccountIds([]);
+    setSelectedSessionAccountId(null);
+    setAccountSessions(null);
+    setConfirmRevokeAllAccountId(null);
     setDeleteConfirmation("");
     setNotice("");
     setIsDeletingTestAccounts(false);
@@ -183,6 +198,49 @@ export default function AdminAlphaPage() {
     }
     const response = await getAdminAlphaAccounts(token);
     setAccounts(response.accounts);
+  }
+
+  async function handleLoadAccountSessions(accountId: string) {
+    if (!token) {
+      return;
+    }
+    setError("");
+    setSelectedSessionAccountId(accountId);
+    try {
+      const response = await getAdminAlphaAccountSessions(token, accountId);
+      setAccountSessions(response);
+    } catch {
+      setError("Account sessions unavailable.");
+    }
+  }
+
+  async function handleRevokeAccountSession(accountId: string, sessionId: string) {
+    if (!token) {
+      return;
+    }
+    setError("");
+    try {
+      await revokeAdminAlphaAccountSession(token, accountId, sessionId);
+      await handleLoadAccountSessions(accountId);
+      await refreshAccounts();
+    } catch {
+      setError("Session revoke failed.");
+    }
+  }
+
+  async function handleRevokeAllAccountSessions(accountId: string) {
+    if (!token) {
+      return;
+    }
+    setError("");
+    try {
+      await revokeAllAdminAlphaAccountSessions(token, accountId);
+      setConfirmRevokeAllAccountId(null);
+      await handleLoadAccountSessions(accountId);
+      await refreshAccounts();
+    } catch {
+      setError("Session revoke failed.");
+    }
   }
 
   async function handleGenerateInvites(event: FormEvent<HTMLFormElement>) {
@@ -521,24 +579,138 @@ export default function AdminAlphaPage() {
                           </span>
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => void handleAccountAction(account)}
-                        disabled={isPending}
-                        className="rounded-lg border border-[var(--wen-border)] px-3 py-2 font-semibold disabled:cursor-not-allowed disabled:text-[var(--wen-muted)]"
-                      >
-                        {isPending
-                          ? isDisabledAccount
-                            ? "Enabling..."
-                            : "Disabling..."
-                          : isDisabledAccount
-                            ? "Enable account"
-                            : "Disable account"}
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleLoadAccountSessions(account.account_id)
+                          }
+                          className="rounded-lg border border-[var(--wen-border)] px-3 py-2 font-semibold"
+                        >
+                          查看 sessions
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleAccountAction(account)}
+                          disabled={isPending}
+                          className="rounded-lg border border-[var(--wen-border)] px-3 py-2 font-semibold disabled:cursor-not-allowed disabled:text-[var(--wen-muted)]"
+                        >
+                          {isPending
+                            ? isDisabledAccount
+                              ? "Enabling..."
+                              : "Disabling..."
+                            : isDisabledAccount
+                              ? "Enable account"
+                              : "Disable account"}
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
               </div>
+
+              {accountSessions && selectedSessionAccountId ? (
+                <section aria-label="账号 sessions" className="mt-4">
+                  <h3 className="font-bold">Active sessions</h3>
+                  {accountSessions.sessions.length === 0 ? (
+                    <p className="mt-3 text-sm text-[var(--wen-muted)]">
+                      没有 active sessions。
+                    </p>
+                  ) : (
+                    <div className="mt-3 overflow-x-auto">
+                      <table
+                        aria-label="Account sessions"
+                        className="min-w-full text-sm"
+                      >
+                        <thead>
+                          <tr className="border-b border-[var(--wen-border)] bg-[var(--wen-bg)] text-left text-xs font-bold uppercase text-[var(--wen-muted)]">
+                            <th className="px-3 py-2">Session</th>
+                            <th className="px-3 py-2">Created</th>
+                            <th className="px-3 py-2">Last seen</th>
+                            <th className="px-3 py-2">Expires</th>
+                            <th className="px-3 py-2">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {accountSessions.sessions.map((parentSession) => (
+                            <tr
+                              key={parentSession.session_id}
+                              className="border-b border-[var(--wen-border)] last:border-b-0"
+                            >
+                              <td className="px-3 py-2">
+                                {parentSession.session_id}
+                              </td>
+                              <td className="px-3 py-2">
+                                {parentSession.created_at}
+                              </td>
+                              <td className="px-3 py-2">
+                                {parentSession.last_seen_at}
+                              </td>
+                              <td className="px-3 py-2">
+                                {parentSession.expires_at}
+                              </td>
+                              <td className="px-3 py-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void handleRevokeAccountSession(
+                                      selectedSessionAccountId,
+                                      parentSession.session_id,
+                                    )
+                                  }
+                                  className="rounded-lg border border-[var(--wen-border)] px-3 py-2 font-semibold"
+                                >
+                                  撤销 session
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  {confirmRevokeAllAccountId === selectedSessionAccountId ? (
+                    <div
+                      role="alert"
+                      className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4"
+                    >
+                      <p className="font-semibold text-amber-900">
+                        这会让该家长账号的所有设备重新登录。
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleRevokeAllAccountSessions(
+                              selectedSessionAccountId,
+                            )
+                          }
+                          className="rounded-lg border border-red-200 px-3 py-2 font-semibold text-red-700"
+                        >
+                          确认撤销全部 sessions
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmRevokeAllAccountId(null)}
+                          className="rounded-lg border border-[var(--wen-border)] px-3 py-2 font-semibold"
+                        >
+                          取消
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setConfirmRevokeAllAccountId(selectedSessionAccountId)
+                      }
+                      className="mt-4 rounded-lg border border-red-200 px-3 py-2 font-semibold text-red-700"
+                    >
+                      撤销全部 sessions
+                    </button>
+                  )}
+                </section>
+              ) : null}
 
               <div className="mt-5 grid gap-3 border-t border-[var(--wen-border)] pt-4">
                 <p className="text-sm text-[var(--wen-muted)]">
