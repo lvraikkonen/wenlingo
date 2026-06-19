@@ -90,6 +90,15 @@ Before completing a task:
   `app.db.init_db`, which creates missing tables but does not migrate existing
   SQLite tables. A stale database can retain an old schema and cause errors
   such as missing columns on `llmcalllog`.
+- If Playwright E2E reports that `127.0.0.1:8000/health` or another localhost
+  port is already used, first consider shell proxy environment pollution before
+  treating it as a real port conflict. Check `HTTP_PROXY`, `HTTPS_PROXY`,
+  `ALL_PROXY`, and lowercase variants. For localhost E2E verification, prefer a
+  proxy-clean rerun such as:
+
+  ```bash
+  env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy NO_PROXY=127.0.0.1,localhost,::1 corepack pnpm e2e -- <specs>
+  ```
 
 ## Documentation Rules
 
