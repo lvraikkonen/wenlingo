@@ -83,9 +83,11 @@ export default function AdminAlphaPage() {
   const [notice, setNotice] = useState("");
   const hasSkippedRevokedReloadRef = useRef(false);
   const revokedRefreshRequestIdRef = useRef(0);
+  const accountSessionRequestIdRef = useRef(0);
 
   const clearAdminSession = useCallback((message: string) => {
     revokedRefreshRequestIdRef.current += 1;
+    accountSessionRequestIdRef.current += 1;
     setError(message);
     setToken("");
     window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
@@ -204,12 +206,22 @@ export default function AdminAlphaPage() {
     if (!token) {
       return;
     }
+    const requestId = accountSessionRequestIdRef.current + 1;
+    accountSessionRequestIdRef.current = requestId;
     setError("");
     setSelectedSessionAccountId(accountId);
+    setAccountSessions(null);
+    setConfirmRevokeAllAccountId(null);
     try {
       const response = await getAdminAlphaAccountSessions(token, accountId);
+      if (accountSessionRequestIdRef.current !== requestId) {
+        return;
+      }
       setAccountSessions(response);
     } catch {
+      if (accountSessionRequestIdRef.current !== requestId) {
+        return;
+      }
       setError("Account sessions unavailable.");
     }
   }
@@ -398,6 +410,8 @@ export default function AdminAlphaPage() {
       </>
     );
   }
+
+  const loadedSessionAccountId = accountSessions?.account.account_id ?? null;
 
   return (
     <main className="min-h-screen bg-[var(--wen-bg)] px-5 py-8 sm:px-8">
@@ -609,7 +623,7 @@ export default function AdminAlphaPage() {
                 })}
               </div>
 
-              {accountSessions && selectedSessionAccountId ? (
+              {accountSessions && loadedSessionAccountId ? (
                 <section aria-label="账号 sessions" className="mt-4">
                   <h3 className="font-bold">Active sessions</h3>
                   {accountSessions.sessions.length === 0 ? (
@@ -654,7 +668,7 @@ export default function AdminAlphaPage() {
                                   type="button"
                                   onClick={() =>
                                     void handleRevokeAccountSession(
-                                      selectedSessionAccountId,
+                                      loadedSessionAccountId,
                                       parentSession.session_id,
                                     )
                                   }
@@ -669,7 +683,7 @@ export default function AdminAlphaPage() {
                       </table>
                     </div>
                   )}
-                  {confirmRevokeAllAccountId === selectedSessionAccountId ? (
+                  {confirmRevokeAllAccountId === loadedSessionAccountId ? (
                     <div
                       role="alert"
                       className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4"
@@ -682,7 +696,7 @@ export default function AdminAlphaPage() {
                           type="button"
                           onClick={() =>
                             void handleRevokeAllAccountSessions(
-                              selectedSessionAccountId,
+                              loadedSessionAccountId,
                             )
                           }
                           className="rounded-lg border border-red-200 px-3 py-2 font-semibold text-red-700"
@@ -702,7 +716,7 @@ export default function AdminAlphaPage() {
                     <button
                       type="button"
                       onClick={() =>
-                        setConfirmRevokeAllAccountId(selectedSessionAccountId)
+                        setConfirmRevokeAllAccountId(loadedSessionAccountId)
                       }
                       className="mt-4 rounded-lg border border-red-200 px-3 py-2 font-semibold text-red-700"
                     >

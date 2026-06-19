@@ -642,6 +642,182 @@ test("admin can inspect sessions and confirms revoke all", async () => {
   );
 });
 
+test("admin clears stale sessions and revoke-all confirmation while loading another account", async () => {
+  const accountOneSessions =
+    createDeferred<Awaited<ReturnType<typeof apiMocks.getAdminAlphaAccountSessions>>>();
+  const accountTwoSessions =
+    createDeferred<Awaited<ReturnType<typeof apiMocks.getAdminAlphaAccountSessions>>>();
+  apiMocks.getAdminAlphaAccounts.mockResolvedValue({
+    accounts: [
+      {
+        account_id: "account-1",
+        email_masked: "pa***@example.com",
+        status: "active",
+        parent_id: "parent-1",
+        parent_display_name: "小星家长",
+        children_count: 1,
+        last_login_at: "2026-05-29T09:30:00+08:00",
+        active_session_count: 1,
+        created_at: "2026-05-28T09:30:00+08:00",
+      },
+      {
+        account_id: "account-2",
+        email_masked: "qa***@example.com",
+        status: "active",
+        parent_id: "parent-2",
+        parent_display_name: "QA 家长",
+        children_count: 1,
+        last_login_at: "2026-05-30T09:30:00+08:00",
+        active_session_count: 1,
+        created_at: "2026-05-28T09:30:00+08:00",
+      },
+    ],
+  });
+  apiMocks.getAdminAlphaAccountSessions.mockImplementation(
+    (_token: string, accountId: string) =>
+      accountId === "account-1"
+        ? accountOneSessions.promise
+        : accountTwoSessions.promise,
+  );
+  window.sessionStorage.setItem("wenlingo_alpha_admin_token", "secret");
+
+  render(<AdminAlphaPage />);
+
+  const sessionButtons = await screen.findAllByRole("button", {
+    name: "查看 sessions",
+  });
+  await userEvent.click(sessionButtons[0]);
+  accountOneSessions.resolve({
+    account: {
+      account_id: "account-1",
+      email_masked: "pa***@example.com",
+      status: "active",
+    },
+    sessions: [
+      {
+        session_id: "session-1",
+        created_at: "2026-06-19T10:00:00+00:00",
+        last_seen_at: "2026-06-19T10:30:00+00:00",
+        expires_at: "2026-07-19T10:00:00+00:00",
+        revoked_at: null,
+      },
+    ],
+  });
+  expect(await screen.findByText("session-1")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "撤销全部 sessions" }));
+  expect(
+    await screen.findByText("这会让该家长账号的所有设备重新登录。"),
+  ).toBeInTheDocument();
+
+  await userEvent.click(sessionButtons[1]);
+
+  expect(screen.queryByText("session-1")).not.toBeInTheDocument();
+  expect(
+    screen.queryByText("这会让该家长账号的所有设备重新登录。"),
+  ).not.toBeInTheDocument();
+
+  accountTwoSessions.reject(new Error("Request failed: 500"));
+
+  expect(
+    await screen.findByRole("alert", { name: "Admin alpha error" }),
+  ).toHaveTextContent("Account sessions unavailable.");
+  expect(screen.queryByText("session-1")).not.toBeInTheDocument();
+});
+
+test("admin ignores out-of-order session loads and revokes sessions for displayed account", async () => {
+  const accountOneSessions =
+    createDeferred<Awaited<ReturnType<typeof apiMocks.getAdminAlphaAccountSessions>>>();
+  const accountTwoSessions =
+    createDeferred<Awaited<ReturnType<typeof apiMocks.getAdminAlphaAccountSessions>>>();
+  apiMocks.getAdminAlphaAccounts.mockResolvedValue({
+    accounts: [
+      {
+        account_id: "account-1",
+        email_masked: "pa***@example.com",
+        status: "active",
+        parent_id: "parent-1",
+        parent_display_name: "小星家长",
+        children_count: 1,
+        last_login_at: "2026-05-29T09:30:00+08:00",
+        active_session_count: 1,
+        created_at: "2026-05-28T09:30:00+08:00",
+      },
+      {
+        account_id: "account-2",
+        email_masked: "qa***@example.com",
+        status: "active",
+        parent_id: "parent-2",
+        parent_display_name: "QA 家长",
+        children_count: 1,
+        last_login_at: "2026-05-30T09:30:00+08:00",
+        active_session_count: 1,
+        created_at: "2026-05-28T09:30:00+08:00",
+      },
+    ],
+  });
+  apiMocks.getAdminAlphaAccountSessions.mockImplementation(
+    (_token: string, accountId: string) =>
+      accountId === "account-1"
+        ? accountOneSessions.promise
+        : accountTwoSessions.promise,
+  );
+  window.sessionStorage.setItem("wenlingo_alpha_admin_token", "secret");
+
+  render(<AdminAlphaPage />);
+
+  const sessionButtons = await screen.findAllByRole("button", {
+    name: "查看 sessions",
+  });
+  await userEvent.click(sessionButtons[0]);
+  await userEvent.click(sessionButtons[1]);
+
+  accountTwoSessions.resolve({
+    account: {
+      account_id: "account-2",
+      email_masked: "qa***@example.com",
+      status: "active",
+    },
+    sessions: [
+      {
+        session_id: "session-2",
+        created_at: "2026-06-20T10:00:00+00:00",
+        last_seen_at: "2026-06-20T10:30:00+00:00",
+        expires_at: "2026-07-20T10:00:00+00:00",
+        revoked_at: null,
+      },
+    ],
+  });
+  expect(await screen.findByText("session-2")).toBeInTheDocument();
+
+  accountOneSessions.resolve({
+    account: {
+      account_id: "account-1",
+      email_masked: "pa***@example.com",
+      status: "active",
+    },
+    sessions: [
+      {
+        session_id: "session-1",
+        created_at: "2026-06-19T10:00:00+00:00",
+        last_seen_at: "2026-06-19T10:30:00+00:00",
+        expires_at: "2026-07-19T10:00:00+00:00",
+        revoked_at: null,
+      },
+    ],
+  });
+
+  await waitFor(() =>
+    expect(screen.queryByText("session-1")).not.toBeInTheDocument(),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "撤销 session" }));
+
+  expect(apiMocks.revokeAdminAlphaAccountSession).toHaveBeenCalledWith(
+    "secret",
+    "account-2",
+    "session-2",
+  );
+});
+
 test("admin revokes an issued invite and refreshes overview", async () => {
   apiMocks.getAdminAlphaOverview.mockResolvedValueOnce({
     families: [
