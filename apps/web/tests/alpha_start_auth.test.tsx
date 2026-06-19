@@ -59,6 +59,7 @@ beforeEach(() => {
 });
 
 test("redirects authenticated session with linked parent to children page", async () => {
+  window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "legacy-parent-1");
   vi.stubGlobal(
     "fetch",
     vi.fn(async () =>
@@ -79,6 +80,7 @@ test("redirects authenticated session with linked parent to children page", asyn
   await waitFor(() => {
     expect(push).toHaveBeenCalledWith("/parent/children");
   });
+  expect(window.localStorage.getItem(ALPHA_PARENT_STORAGE_KEY)).toBeNull();
 });
 
 test("existing account login verifies email without requiring invite", async () => {

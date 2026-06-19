@@ -124,6 +124,7 @@ export default function AlphaStartPage() {
           return;
         }
         if (linkedParentId(session)) {
+          clearStoredAlphaParentId();
           router.push("/parent/children");
           return;
         }
