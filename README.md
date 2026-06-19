@@ -105,8 +105,10 @@ LLM_PROVIDER=http
 LLM_API_KEY=your-local-test-key
 LLM_MODEL=your-test-model
 LLM_BASE_URL=https://your-provider.example/v1
-LLM_PROMPT_VERSION=v0.2-quality-spine-2026-05-14
 ```
+
+Leave `LLM_PROMPT_VERSION` unset so task wrappers use Prompt Registry versions;
+only set it for explicit prompt-version logging/testing overrides.
 
 Do not commit `.env`. After running the 小宇 essay revision path, create a QA
 record under `qa/` with provider/model, prompt version, whether retry/fallback
