@@ -16,7 +16,6 @@ from app.domain.models import (
 )
 from app.domain.seed import seed_demo_data
 from app.main import create_app
-from app.services.auth_security import hash_secret
 
 
 def create_admin_client(session, monkeypatch, token: str = "secret"):
@@ -33,6 +32,25 @@ def admin_headers(token="secret", origin="https://wenlingo.example"):
         "Origin": origin,
         "Content-Type": "application/json",
     }
+
+
+def test_admin_alpha_split_preserves_route_paths(session, monkeypatch):
+    app = create_admin_client(session, monkeypatch)
+
+    with TestClient(app) as client:
+        overview = client.get(
+            "/api/admin/alpha/overview",
+            headers={"X-Alpha-Admin-Token": "secret"},
+        )
+        accounts = client.get(
+            "/api/admin/alpha/accounts",
+            headers={"X-Alpha-Admin-Token": "secret"},
+        )
+
+    assert overview.status_code == 200
+    assert "families" in overview.json()
+    assert accounts.status_code == 200
+    assert "accounts" in accounts.json()
 
 
 def test_admin_invite_generation_returns_raw_codes_once_and_stores_hashes(session, monkeypatch):

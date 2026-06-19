@@ -212,8 +212,12 @@ test("admin renders grouped sections and ai usage aggregates", async () => {
   expect(screen.getByRole("heading", { name: "AI 使用量" })).toBeInTheDocument();
   expect(await screen.findByText("test-provider")).toBeInTheDocument();
   const usageTable = screen.getByRole("table", { name: "AI usage" });
+  expect(within(usageTable).getByRole("columnheader", { name: "Task" })).toBeInTheDocument();
   expect(within(usageTable).getByRole("columnheader", { name: "Provider" })).toBeInTheDocument();
+  expect(within(usageTable).getByRole("columnheader", { name: "Model" })).toBeInTheDocument();
   expect(within(usageTable).getByRole("columnheader", { name: "Status" })).toBeInTheDocument();
+  expect(within(usageTable).getByRole("columnheader", { name: "Fallback" })).toBeInTheDocument();
+  expect(within(usageTable).getByRole("columnheader", { name: "Cost" })).toBeInTheDocument();
   expect(within(usageTable).getByRole("columnheader", { name: "Avg latency" })).toBeInTheDocument();
   expect(within(usageTable).getByText("test-provider")).toBeInTheDocument();
   expect(within(usageTable).getByText("fallback_success")).toBeInTheDocument();
