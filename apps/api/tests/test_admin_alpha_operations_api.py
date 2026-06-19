@@ -325,31 +325,97 @@ def test_admin_revoke_one_session_is_idempotent(session, monkeypatch):
     assert second.json()["session"]["revoked"] is False
 
 
+def test_admin_revoke_wrong_account_session_returns_404_without_revoking(
+    session,
+    monkeypatch,
+):
+    account = ParentAccount(email_normalized="parent@example.com", email_verified_at=utcnow())
+    other_account = ParentAccount(
+        email_normalized="other@example.com",
+        email_verified_at=utcnow(),
+    )
+    session.add(account)
+    session.add(other_account)
+    session.flush()
+    other_session = ParentSession(
+        account_id=other_account.id,
+        token_hash="other-account-token-hash",
+        expires_at=utcnow() + timedelta(days=1),
+    )
+    session.add(other_session)
+    session.commit()
+    app = create_admin_client(session, monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/admin/alpha/accounts/{account.id}/sessions/{other_session.id}/revoke",
+            headers=admin_headers(),
+            json={},
+        )
+
+    assert response.status_code == 404
+    session.refresh(other_session)
+    assert other_session.revoked_at is None
+
+
+def test_admin_session_endpoints_return_404_for_missing_account_or_session(
+    session,
+    monkeypatch,
+):
+    account = ParentAccount(email_normalized="parent@example.com", email_verified_at=utcnow())
+    session.add(account)
+    session.commit()
+    app = create_admin_client(session, monkeypatch)
+
+    with TestClient(app) as client:
+        missing_account_list = client.get(
+            "/api/admin/alpha/accounts/missing-account/sessions",
+            headers={"X-Alpha-Admin-Token": "secret"},
+        )
+        missing_account_revoke_one = client.post(
+            "/api/admin/alpha/accounts/missing-account/sessions/missing-session/revoke",
+            headers=admin_headers(),
+            json={},
+        )
+        missing_account_revoke_all = client.post(
+            "/api/admin/alpha/accounts/missing-account/sessions/revoke-all",
+            headers=admin_headers(),
+            json={},
+        )
+        missing_session = client.post(
+            f"/api/admin/alpha/accounts/{account.id}/sessions/missing-session/revoke",
+            headers=admin_headers(),
+            json={},
+        )
+
+    assert missing_account_list.status_code == 404
+    assert missing_account_revoke_one.status_code == 404
+    assert missing_account_revoke_all.status_code == 404
+    assert missing_session.status_code == 404
+
+
 def test_admin_revoke_all_sessions_revokes_only_active_sessions(session, monkeypatch):
     account = ParentAccount(email_normalized="parent@example.com", email_verified_at=utcnow())
     session.add(account)
     session.flush()
-    session.add(
-        ParentSession(
-            account_id=account.id,
-            token_hash="active-one",
-            expires_at=utcnow() + timedelta(days=1),
-        )
+    active_one = ParentSession(
+        account_id=account.id,
+        token_hash="active-one",
+        expires_at=utcnow() + timedelta(days=1),
     )
-    session.add(
-        ParentSession(
-            account_id=account.id,
-            token_hash="active-two",
-            expires_at=utcnow() + timedelta(days=1),
-        )
+    active_two = ParentSession(
+        account_id=account.id,
+        token_hash="active-two",
+        expires_at=utcnow() + timedelta(days=1),
     )
-    session.add(
-        ParentSession(
-            account_id=account.id,
-            token_hash="expired",
-            expires_at=utcnow() - timedelta(minutes=1),
-        )
+    expired = ParentSession(
+        account_id=account.id,
+        token_hash="expired",
+        expires_at=utcnow() - timedelta(minutes=1),
     )
+    session.add(active_one)
+    session.add(active_two)
+    session.add(expired)
     session.commit()
     app = create_admin_client(session, monkeypatch)
 
@@ -362,6 +428,58 @@ def test_admin_revoke_all_sessions_revokes_only_active_sessions(session, monkeyp
 
     assert response.status_code == 200
     assert response.json()["account"]["revoked_session_count"] == 2
+    session.refresh(active_one)
+    session.refresh(active_two)
+    session.refresh(expired)
+    assert active_one.revoked_at is not None
+    assert active_two.revoked_at is not None
+    assert expired.revoked_at is None
+
+
+def test_admin_session_revoke_requires_token_allowed_origin_and_json(
+    session,
+    monkeypatch,
+):
+    account = ParentAccount(email_normalized="parent@example.com", email_verified_at=utcnow())
+    session.add(account)
+    session.flush()
+    parent_session = ParentSession(
+        account_id=account.id,
+        token_hash="active-token-hash",
+        expires_at=utcnow() + timedelta(days=1),
+    )
+    session.add(parent_session)
+    session.commit()
+    app = create_admin_client(session, monkeypatch)
+    route = f"/api/admin/alpha/accounts/{account.id}/sessions/{parent_session.id}/revoke"
+
+    with TestClient(app) as client:
+        missing_token = client.post(
+            route,
+            headers={
+                "Origin": "https://wenlingo.example",
+                "Content-Type": "application/json",
+            },
+            json={},
+        )
+        bad_origin = client.post(
+            route,
+            headers=admin_headers(origin="https://evil.example"),
+            json={},
+        )
+        non_json = client.post(
+            route,
+            headers={
+                "X-Alpha-Admin-Token": "secret",
+                "Origin": "https://wenlingo.example",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            content="",
+        )
+
+    assert missing_token.status_code == 403
+    assert bad_origin.status_code == 403
+    assert non_json.status_code == 415
 
 
 def test_admin_disable_revokes_sessions_and_enable_restores_status(session, monkeypatch):
