@@ -36,6 +36,13 @@ Use `AUTH_SESSION_COOKIE_SAMESITE=lax`, `AUTH_SESSION_COOKIE_SECURE=true`,
 `Path=/`, and no cookie domain for same-origin Alpha proxy. Use
 `SameSite=none` only for controlled direct cross-site API testing.
 
+### Demo Runtime
+
+V0.5c.2 removed the production/runtime MVP demo login route. There is no
+`DEMO_MODE_ENABLED` production escape hatch. Demo-like seed data may exist only in
+dev/test/archive contexts and must not be imported by production API route
+modules.
+
 ### Magic Code
 
 | Variable | Default | Required | Secret | Redeploy needed | Notes |

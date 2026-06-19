@@ -248,6 +248,22 @@ Railway API env:
 
 Do not send external Alpha families a direct API origin. Direct cross-site API testing is an internal fallback only.
 
+### V0.5c.2 Session Cleanup
+
+V0.5c.2 removes `/api/auth/demo-login` from production/runtime. External Alpha
+must use Magic Code login and `ParentSession`.
+
+Recommended Alpha cleanup command:
+
+```bash
+uv run python -m app.ops.cleanup_parent_sessions --dry-run --revoked-retention-days 30 --expired-retention-days 30
+uv run python -m app.ops.cleanup_parent_sessions --execute --revoked-retention-days 30 --expired-retention-days 30
+```
+
+Run dry-run first and confirm the summary. The command does not print raw session
+tokens or token hashes. Do not use 0-day retention for Alpha; keep 30 days so
+recent support investigations can still reason about expired or revoked sessions.
+
 ### V0.5b AI Sentence Challenge Smoke
 
 1. Dev Echo login with code `123456` in `ENVIRONMENT=development`.
