@@ -24,9 +24,9 @@ def auth_settings(monkeypatch):
     monkeypatch.setenv("AUTH_SESSION_COOKIE_SECURE", "false")
 
 
-def create_account(session):
+def create_account(session, email="parent@example.com"):
     account = ParentAccount(
-        email_normalized="parent@example.com",
+        email_normalized=email,
         email_verified_at=utcnow(),
         last_login_at=utcnow(),
     )
@@ -40,18 +40,29 @@ def create_parent_session(
     session,
     account,
     token="session-token",
+    session_id=None,
     expires_delta=timedelta(days=30),
     revoked=False,
     last_seen_delta=None,
+    created_at=None,
+    last_seen_at=None,
 ):
+    parent_session_kwargs = {}
+    if session_id is not None:
+        parent_session_kwargs["id"] = session_id
     parent_session = ParentSession(
+        **parent_session_kwargs,
         account_id=account.id,
         token_hash=hash_secret(token, purpose="session-token", pepper="test-pepper"),
         expires_at=utcnow() + expires_delta,
         revoked_at=utcnow() if revoked else None,
     )
+    if created_at is not None:
+        parent_session.created_at = created_at
     if last_seen_delta is not None:
         parent_session.last_seen_at = utcnow() + last_seen_delta
+    if last_seen_at is not None:
+        parent_session.last_seen_at = last_seen_at
     session.add(parent_session)
     session.commit()
     session.refresh(parent_session)
@@ -222,6 +233,63 @@ def test_active_parent_sessions_for_account_filters_revoked_and_expired(session)
     assert [row.id for row in rows] == [active.id]
 
 
+def test_active_parent_sessions_for_account_sorts_descending_and_excludes_other_accounts(session):
+    account = create_account(session)
+    other_account = create_account(session, email="other-parent@example.com")
+    base = utcnow()
+    last_seen_tie = base - timedelta(minutes=5)
+    created_tie = base - timedelta(minutes=10)
+    highest_last_seen = create_parent_session(
+        session,
+        account,
+        token="highest-last-seen",
+        session_id="session-a",
+        created_at=base - timedelta(hours=1),
+        last_seen_at=base - timedelta(minutes=1),
+    )
+    id_tie_winner = create_parent_session(
+        session,
+        account,
+        token="id-tie-winner",
+        session_id="session-c",
+        created_at=created_tie,
+        last_seen_at=last_seen_tie,
+    )
+    id_tie_loser = create_parent_session(
+        session,
+        account,
+        token="id-tie-loser",
+        session_id="session-b",
+        created_at=created_tie,
+        last_seen_at=last_seen_tie,
+    )
+    older_created = create_parent_session(
+        session,
+        account,
+        token="older-created",
+        session_id="session-z",
+        created_at=base - timedelta(minutes=11),
+        last_seen_at=last_seen_tie,
+    )
+    create_parent_session(
+        session,
+        other_account,
+        token="other-account-active",
+        session_id="session-other",
+        created_at=base,
+        last_seen_at=base,
+    )
+
+    rows = active_parent_sessions_for_account(session, account.id)
+
+    assert [row.id for row in rows] == [
+        highest_last_seen.id,
+        id_tie_winner.id,
+        id_tie_loser.id,
+        older_created.id,
+    ]
+
+
 def test_revoke_parent_session_for_account_is_idempotent(session):
     account = create_account(session)
     parent_session = create_parent_session(session, account)
@@ -235,6 +303,18 @@ def test_revoke_parent_session_for_account_is_idempotent(session):
     assert parent_session.revoked_at is not None
 
 
+def test_revoke_parent_session_for_account_rejects_wrong_account_without_revoking(session):
+    account = create_account(session)
+    other_account = create_account(session, email="other-parent@example.com")
+    parent_session = create_parent_session(session, account)
+
+    with pytest.raises(LookupError):
+        revoke_parent_session_for_account(session, other_account.id, parent_session.id)
+
+    session.refresh(parent_session)
+    assert parent_session.revoked_at is None
+
+
 def test_revoke_active_parent_sessions_for_account_counts_only_active(session):
     account = create_account(session)
     create_parent_session(session, account, token="active-one")
@@ -245,6 +325,34 @@ def test_revoke_active_parent_sessions_for_account_counts_only_active(session):
 
     assert result.revoked_session_count == 2
     assert active_parent_sessions_for_account(session, account.id) == []
+
+
+def test_revoke_parent_session_helpers_do_not_commit_implicitly(session):
+    account = create_account(session)
+    single_session = create_parent_session(session, account, token="single")
+
+    revoke_parent_session_for_account(session, account.id, single_session.id)
+    session.refresh(single_session)
+    assert single_session.revoked_at is not None
+
+    session.rollback()
+    session.refresh(single_session)
+    assert single_session.revoked_at is None
+
+    active_one = create_parent_session(session, account, token="active-one")
+    active_two = create_parent_session(session, account, token="active-two")
+
+    revoke_active_parent_sessions_for_account(session, account.id)
+    session.refresh(active_one)
+    session.refresh(active_two)
+    assert active_one.revoked_at is not None
+    assert active_two.revoked_at is not None
+
+    session.rollback()
+    session.refresh(active_one)
+    session.refresh(active_two)
+    assert active_one.revoked_at is None
+    assert active_two.revoked_at is None
 
 
 def test_cleanup_parent_sessions_dry_run_and_execute(session):
@@ -290,3 +398,48 @@ def test_cleanup_parent_sessions_dry_run_and_execute(session):
     assert session.get(ParentSession, recent_expired.id) is not None
     assert session.get(ParentSession, old_revoked.id) is None
     assert session.get(ParentSession, old_expired.id) is None
+
+
+def test_cleanup_parent_sessions_counts_revoked_before_expired_when_both_apply(session):
+    account = create_account(session)
+    both_revoked_and_expired = create_parent_session(
+        session,
+        account,
+        token="both-revoked-and-expired",
+        revoked=True,
+        expires_delta=timedelta(days=-45),
+    )
+    both_revoked_and_expired.revoked_at = utcnow() - timedelta(days=45)
+    session.add(both_revoked_and_expired)
+    session.commit()
+
+    result = cleanup_parent_sessions(
+        db=session,
+        revoked_retention_days=30,
+        expired_retention_days=30,
+        execute=False,
+    )
+
+    assert result.eligible_count == 1
+    assert result.reason_counts == {"revoked": 1}
+
+
+@pytest.mark.parametrize(
+    ("revoked_retention_days", "expired_retention_days"),
+    [
+        (-1, 30),
+        (30, -1),
+    ],
+)
+def test_cleanup_parent_sessions_rejects_negative_retention_days(
+    session,
+    revoked_retention_days,
+    expired_retention_days,
+):
+    with pytest.raises(ValueError):
+        cleanup_parent_sessions(
+            db=session,
+            revoked_retention_days=revoked_retention_days,
+            expired_retention_days=expired_retention_days,
+            execute=False,
+        )
