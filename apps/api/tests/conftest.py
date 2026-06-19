@@ -38,7 +38,10 @@ def force_mock_llm_provider(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def force_test_auth_settings(monkeypatch):
+def force_test_auth_settings(monkeypatch, request):
+    if request.node.get_closest_marker("no_test_auth_settings"):
+        return
+
     monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
     monkeypatch.setenv("AUTH_SESSION_COOKIE_NAME", "wenlingo_parent_session")
     monkeypatch.setenv("AUTH_SESSION_COOKIE_SECURE", "false")

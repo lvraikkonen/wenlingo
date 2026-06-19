@@ -1,3 +1,5 @@
+import pytest
+
 from app.core.config import Settings
 from app.db.session import create_engine_from_settings
 
@@ -61,6 +63,7 @@ def test_settings_default_prompt_version_uses_registry_version():
     assert settings.llm_prompt_version == ""
 
 
+@pytest.mark.no_test_auth_settings
 def test_settings_load_v05a_auth_defaults():
     settings = Settings(_env_file=None)
 
