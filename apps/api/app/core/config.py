@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     alpha_admin_token: str = ""
     cors_allow_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     llm_provider: str = "mock"
-    llm_prompt_version: str = "v0.2-quality-spine-2026-05-14"
+    llm_prompt_version: str = ""
     llm_api_key: str = ""
     llm_model: str = ""
     llm_base_url: str = ""

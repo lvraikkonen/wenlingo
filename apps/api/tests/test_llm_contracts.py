@@ -217,16 +217,12 @@ def test_material_card_rejects_extra_fields_inside_questions():
 
 
 @pytest.mark.asyncio
-async def test_mock_provider_returns_pre_writing_contract_outputs():
+@pytest.mark.parametrize("task_name", ["material_questions", "outline_generation"])
+async def test_mock_provider_rejects_legacy_pre_writing_tasks(task_name):
     provider = MockLLMProvider()
 
-    material_response = await provider.complete_json("material_questions", {})
-    outline_response = await provider.complete_json("outline_generation", {})
-
-    assert MaterialCard.model_validate(material_response.parsed_json).questions
-    assert OutlineResult.model_validate(outline_response.parsed_json).sections
-    assert "questions" in response_contract_for_task("material_questions")
-    assert "sections" in response_contract_for_task("outline_generation")
+    with pytest.raises(ValueError, match=f"Unknown LLM task: {task_name}"):
+        await provider.complete_json(task_name, {})
 
 
 def test_convert_ghostwriting_request_returns_coaching_message():

@@ -55,6 +55,12 @@ def test_settings_load_ai_routing_provider_profile_defaults():
     assert settings.llm_fallback_http_model == ""
 
 
+def test_settings_default_prompt_version_uses_registry_version():
+    settings = Settings(_env_file=None)
+
+    assert settings.llm_prompt_version == ""
+
+
 def test_settings_load_v05a_auth_defaults():
     settings = Settings(_env_file=None)
 
