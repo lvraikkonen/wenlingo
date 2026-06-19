@@ -16,6 +16,11 @@ from app.api.deps import get_db_session
 from app.domain.models import ParentAccount, ParentSession, ParentUser, utcnow
 from app.services.admin_test_account_cleanup import delete_test_accounts
 from app.services.auth_security import mask_email
+from app.services.parent_sessions import (
+    active_parent_sessions_for_account,
+    revoke_active_parent_sessions_for_account,
+    revoke_parent_session_for_account,
+)
 
 router = APIRouter()
 
@@ -57,6 +62,85 @@ def list_admin_alpha_accounts(session: Session = Depends(get_db_session)):
     return {"accounts": rows}
 
 
+def _session_payload(parent_session: ParentSession) -> dict[str, Any]:
+    return {
+        "session_id": parent_session.id,
+        "created_at": _serialize_dt(parent_session.created_at),
+        "last_seen_at": _serialize_dt(parent_session.last_seen_at),
+        "expires_at": _serialize_dt(parent_session.expires_at),
+        "revoked_at": _serialize_dt(parent_session.revoked_at),
+    }
+
+
+@router.get("/accounts/{account_id}/sessions", dependencies=[Depends(require_alpha_admin_token)])
+def list_admin_alpha_account_sessions(
+    account_id: str,
+    session: Session = Depends(get_db_session),
+):
+    account = session.get(ParentAccount, account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="account not found")
+    return {
+        "account": {
+            "account_id": account.id,
+            "email_masked": mask_email(account.email_normalized),
+            "status": account.status,
+        },
+        "sessions": [
+            _session_payload(parent_session)
+            for parent_session in active_parent_sessions_for_account(session, account.id)
+        ],
+    }
+
+
+@router.post(
+    "/accounts/{account_id}/sessions/{session_id}/revoke",
+    dependencies=[Depends(require_alpha_admin_state_change)],
+)
+def revoke_admin_alpha_account_session(
+    account_id: str,
+    session_id: str,
+    request: EmptyAdminAction,
+    session: Session = Depends(get_db_session),
+):
+    account = session.get(ParentAccount, account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="account not found")
+    try:
+        result = revoke_parent_session_for_account(session, account.id, session_id)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="session not found") from None
+    session.commit()
+    return {
+        "session": {
+            "session_id": result.session_id,
+            "revoked": result.revoked,
+        }
+    }
+
+
+@router.post(
+    "/accounts/{account_id}/sessions/revoke-all",
+    dependencies=[Depends(require_alpha_admin_state_change)],
+)
+def revoke_all_admin_alpha_account_sessions(
+    account_id: str,
+    request: EmptyAdminAction,
+    session: Session = Depends(get_db_session),
+):
+    account = session.get(ParentAccount, account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="account not found")
+    result = revoke_active_parent_sessions_for_account(session, account.id)
+    session.commit()
+    return {
+        "account": {
+            "account_id": account.id,
+            "revoked_session_count": result.revoked_session_count,
+        }
+    }
+
+
 @router.post(
     "/accounts/{account_id}/disable",
     dependencies=[Depends(require_alpha_admin_state_change)],
@@ -75,16 +159,7 @@ def disable_admin_alpha_account(
     now = utcnow()
     account.status = "disabled"
     account.updated_at = now
-    active_sessions = session.exec(
-        select(ParentSession).where(
-            ParentSession.account_id == account.id,
-            ParentSession.revoked_at.is_(None),
-            ParentSession.expires_at > now,
-        )
-    ).all()
-    for parent_session in active_sessions:
-        parent_session.revoked_at = now
-        session.add(parent_session)
+    result = revoke_active_parent_sessions_for_account(session, account.id)
     session.add(account)
     session.commit()
     session.refresh(account)
@@ -92,7 +167,7 @@ def disable_admin_alpha_account(
         "account": {
             "account_id": account.id,
             "status": account.status,
-            "revoked_session_count": len(active_sessions),
+            "revoked_session_count": result.revoked_session_count,
         }
     }
 

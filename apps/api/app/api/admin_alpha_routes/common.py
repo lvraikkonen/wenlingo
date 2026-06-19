@@ -74,17 +74,19 @@ def _children_for_parent(session: Session, parent_id: str) -> list[StudentProfil
     return sorted(children, key=lambda child: (child.created_at, child.id))
 
 
-def _active_session_count(session: Session, account_id: str) -> int:
+def _active_sessions(session: Session, account_id: str) -> list[ParentSession]:
     now = utcnow()
-    return len(
-        session.exec(
-            select(ParentSession).where(
-                ParentSession.account_id == account_id,
-                ParentSession.revoked_at.is_(None),
-                ParentSession.expires_at > now,
-            )
-        ).all()
-    )
+    return session.exec(
+        select(ParentSession).where(
+            ParentSession.account_id == account_id,
+            ParentSession.revoked_at.is_(None),
+            ParentSession.expires_at > now,
+        )
+    ).all()
+
+
+def _active_session_count(session: Session, account_id: str) -> int:
+    return len(_active_sessions(session, account_id))
 
 
 def _reaction_counts(reactions: list[FeedbackReaction]) -> dict[str, int]:

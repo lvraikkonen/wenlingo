@@ -258,6 +258,112 @@ def test_admin_accounts_list_masks_email_and_counts_active_sessions(session, mon
     assert "parent@example.com" not in str(response.json())
 
 
+def test_admin_lists_active_sessions_without_token_hash(session, monkeypatch):
+    account = ParentAccount(email_normalized="parent@example.com", email_verified_at=utcnow())
+    session.add(account)
+    session.flush()
+    active = ParentSession(
+        account_id=account.id,
+        token_hash="secret-token-hash",
+        expires_at=utcnow() + timedelta(days=1),
+    )
+    revoked = ParentSession(
+        account_id=account.id,
+        token_hash="revoked-token-hash",
+        expires_at=utcnow() + timedelta(days=1),
+        revoked_at=utcnow(),
+    )
+    session.add(active)
+    session.add(revoked)
+    session.commit()
+    app = create_admin_client(session, monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.get(
+            f"/api/admin/alpha/accounts/{account.id}/sessions",
+            headers={"X-Alpha-Admin-Token": "secret"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["account"]["account_id"] == account.id
+    assert body["sessions"][0]["session_id"] == active.id
+    assert body["sessions"][0]["revoked_at"] is None
+    assert "token_hash" not in body["sessions"][0]
+    assert "secret-token-hash" not in response.text
+    assert revoked.id not in response.text
+
+
+def test_admin_revoke_one_session_is_idempotent(session, monkeypatch):
+    account = ParentAccount(email_normalized="parent@example.com", email_verified_at=utcnow())
+    session.add(account)
+    session.flush()
+    parent_session = ParentSession(
+        account_id=account.id,
+        token_hash="active-token-hash",
+        expires_at=utcnow() + timedelta(days=1),
+    )
+    session.add(parent_session)
+    session.commit()
+    app = create_admin_client(session, monkeypatch)
+
+    with TestClient(app) as client:
+        first = client.post(
+            f"/api/admin/alpha/accounts/{account.id}/sessions/{parent_session.id}/revoke",
+            headers=admin_headers(),
+            json={},
+        )
+        second = client.post(
+            f"/api/admin/alpha/accounts/{account.id}/sessions/{parent_session.id}/revoke",
+            headers=admin_headers(),
+            json={},
+        )
+
+    assert first.status_code == 200
+    assert first.json()["session"]["revoked"] is True
+    assert second.status_code == 200
+    assert second.json()["session"]["revoked"] is False
+
+
+def test_admin_revoke_all_sessions_revokes_only_active_sessions(session, monkeypatch):
+    account = ParentAccount(email_normalized="parent@example.com", email_verified_at=utcnow())
+    session.add(account)
+    session.flush()
+    session.add(
+        ParentSession(
+            account_id=account.id,
+            token_hash="active-one",
+            expires_at=utcnow() + timedelta(days=1),
+        )
+    )
+    session.add(
+        ParentSession(
+            account_id=account.id,
+            token_hash="active-two",
+            expires_at=utcnow() + timedelta(days=1),
+        )
+    )
+    session.add(
+        ParentSession(
+            account_id=account.id,
+            token_hash="expired",
+            expires_at=utcnow() - timedelta(minutes=1),
+        )
+    )
+    session.commit()
+    app = create_admin_client(session, monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/admin/alpha/accounts/{account.id}/sessions/revoke-all",
+            headers=admin_headers(),
+            json={},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["account"]["revoked_session_count"] == 2
+
+
 def test_admin_disable_revokes_sessions_and_enable_restores_status(session, monkeypatch):
     account = ParentAccount(email_normalized="parent@example.com", email_verified_at=utcnow())
     session.add(account)
