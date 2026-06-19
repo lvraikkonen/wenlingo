@@ -256,6 +256,7 @@ must use Magic Code login and `ParentSession`.
 Recommended Alpha cleanup command:
 
 ```bash
+cd apps/api
 uv run python -m app.ops.cleanup_parent_sessions --dry-run --revoked-retention-days 30 --expired-retention-days 30
 uv run python -m app.ops.cleanup_parent_sessions --execute --revoked-retention-days 30 --expired-retention-days 30
 ```
