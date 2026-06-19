@@ -67,7 +67,7 @@ Set these on `wenlingo-api` unless noted otherwise.
 | `LLM_API_KEY` | empty | Yes when `LLM_PROVIDER=http` | Yes | API restart | Server-side only. |
 | `LLM_MODEL` | empty | Yes when `LLM_PROVIDER=http` | No | API restart | Provider model name. |
 | `LLM_BASE_URL` | empty | Yes when `LLM_PROVIDER=http` | No | API restart | Chat completions-compatible base URL, no trailing slash preferred. |
-| `LLM_PROMPT_VERSION` | `v0.2-quality-spine-2026-05-14` | Optional | No | API restart | Legacy prompt version override. |
+| `LLM_PROMPT_VERSION` | empty | Optional | No | API restart | Optional explicit override for prompt-version logging/testing only; leave unset so task wrappers use Prompt Registry versions. |
 | `LLM_DAILY_LIMIT_ENABLED` | `false` | Yes for limit QA | No | API restart | Must be `true` for Daily limit checks to trigger. |
 | `LLM_DAILY_LIMIT_PER_STUDENT_TASK` | `5` | Optional | No | API restart | Generic per-student task limit for older tasks. |
 | `SENTENCE_CHALLENGE_DAILY_LIMIT_PER_STUDENT` | `10` | V0.5b sentence QA | No | API restart | Generation limit for sentence challenges. |

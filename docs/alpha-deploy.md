@@ -336,7 +336,7 @@ Backend variables:
 | `LLM_API_KEY` | Legacy non-routed compatibility key; not sufficient for V0.5c routed tasks. |
 | `LLM_MODEL` | Legacy non-routed compatibility model; do not use as a ModelRouter bypass. |
 | `LLM_BASE_URL` | Legacy non-routed compatibility base URL. |
-| `LLM_PROMPT_VERSION` | `v0.2-quality-spine-2026-05-14` |
+| `LLM_PROMPT_VERSION` | empty/unset; optional explicit override for prompt-version logging/testing only. Leave unset so task wrappers use Prompt Registry versions. |
 
 Use a full HTTPS origin for `CORS_ALLOW_ORIGINS`, for example:
 
