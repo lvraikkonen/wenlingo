@@ -27,10 +27,14 @@ Set these on `wenlingo-api` unless noted otherwise.
 | `AUTH_SECRET_PEPPER` | empty | Yes when auth is enabled | Yes | API restart | Stable secret for session and Magic Code hashing. Rotating invalidates old codes/sessions. |
 | `AUTH_SESSION_COOKIE_NAME` | `wenlingo_parent_session` | Optional | No | API restart | Keep stable unless intentionally renaming cookies. |
 | `AUTH_SESSION_COOKIE_SECURE` | `true` | Deployed HTTPS | No | API restart | Use `true` on Railway HTTPS. |
-| `AUTH_SESSION_COOKIE_SAMESITE` | `lax` | Yes | No | API restart | Use `lax` for same-site web/API. Use `none` only when cross-site cookies are required, with secure cookies. |
+| `AUTH_SESSION_COOKIE_SAMESITE` | `lax` | Yes | No | API restart | Use `lax` for same-origin Alpha proxy. Use `none` only for controlled direct cross-site API testing, with secure cookies. |
 | `AUTH_SESSION_DAYS` | `30` | Optional | No | API restart | Parent login session duration. |
 | `AUTH_SESSION_LAST_SEEN_THROTTLE_MINUTES` | `15` | Optional | No | API restart | Reduces session write frequency. |
 | `AUTH_ALLOWED_ORIGINS` | empty | Required for auth state changes | No | API restart | Comma-separated allowed web origins for authenticated non-GET requests. |
+
+Use `AUTH_SESSION_COOKIE_SAMESITE=lax`, `AUTH_SESSION_COOKIE_SECURE=true`,
+`Path=/`, and no cookie domain for same-origin Alpha proxy. Use
+`SameSite=none` only for controlled direct cross-site API testing.
 
 ### Magic Code
 
@@ -108,7 +112,8 @@ service.
 
 | Variable | Default | Required | Secret | Redeploy needed | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8000` | Yes | No | Web rebuild/redeploy | Public API origin, no trailing slash. Must match API CORS/auth allowed origins. |
+| `API_PROXY_TARGET` | unset locally | Railway Web service | No | Web restart/redeploy | Server-side API origin used by Next.js rewrites for same-origin `/api/*` browser traffic. External Alpha should set this to the API service origin and leave `NEXT_PUBLIC_API_BASE_URL` empty or `/api`. |
+| `NEXT_PUBLIC_API_BASE_URL` | empty | Optional | No | Web rebuild/redeploy | Browser API base override. External Alpha should leave this empty or set `/api` so calls remain same-origin. Use an absolute API URL only for controlled direct-API testing. |
 
 ## Verification And E2E
 
@@ -148,12 +153,14 @@ LLM_DAILY_LIMIT_ENABLED=true
 SENTENCE_CHALLENGE_DAILY_LIMIT_PER_STUDENT=10
 SENTENCE_FEEDBACK_DAILY_LIMIT_PER_STUDENT=10
 LLM_DAILY_LIMIT_TIMEZONE=Asia/Shanghai
-NEXT_PUBLIC_API_BASE_URL=<API public HTTPS origin, no trailing slash>
+API_PROXY_TARGET=<API public HTTPS origin, no trailing slash>
+NEXT_PUBLIC_API_BASE_URL=
 ```
 
 After changing `CORS_ALLOW_ORIGINS`, `AUTH_ALLOWED_ORIGINS`, email, auth, LLM,
 or limit variables, redeploy/restart `wenlingo-api`. After changing
-`NEXT_PUBLIC_API_BASE_URL`, rebuild/redeploy `wenlingo-web`.
+`API_PROXY_TARGET` or `NEXT_PUBLIC_API_BASE_URL`, restart/redeploy or
+rebuild/redeploy `wenlingo-web` as applicable.
 
 ### Daily Limit Smoke Trigger
 

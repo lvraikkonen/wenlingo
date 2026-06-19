@@ -226,6 +226,28 @@ Before inviting or expanding Alpha families on a V0.5c deploy:
 
 Rollback rule: roll back the deployment or pin the previous known-good commit. Do not route around ModelRouter with global `LLM_MODEL`.
 
+### Same-Origin API Proxy For External Alpha
+
+External Alpha browser traffic should call the Web origin only:
+
+```text
+Browser -> wenlingo-web /api/* -> API service /api/*
+```
+
+Railway Web env:
+
+- `API_PROXY_TARGET=https://<wenlingo-api-service-origin>`
+- `NEXT_PUBLIC_API_BASE_URL=` or `NEXT_PUBLIC_API_BASE_URL=/api`
+
+Railway API env:
+
+- `AUTH_SESSION_COOKIE_SECURE=true`
+- `AUTH_SESSION_COOKIE_SAMESITE=lax`
+- `CORS_ALLOW_ORIGINS=https://<wenlingo-web-origin>`
+- `AUTH_ALLOWED_ORIGINS=https://<wenlingo-web-origin>`
+
+Do not send external Alpha families a direct API origin. Direct cross-site API testing is an internal fallback only.
+
 ### V0.5b AI Sentence Challenge Smoke
 
 1. Dev Echo login with code `123456` in `ENVIRONMENT=development`.
@@ -369,19 +391,28 @@ Frontend variables:
 
 | Variable | Railway value |
 | --- | --- |
-| `NEXT_PUBLIC_API_BASE_URL` | The generated public HTTPS origin for `wenlingo-api` after Public Networking is enabled, with no trailing slash. |
+| `API_PROXY_TARGET` | The generated public HTTPS origin for `wenlingo-api` after Public Networking is enabled, with no trailing slash. |
+| `NEXT_PUBLIC_API_BASE_URL` | Empty or `/api` for external Alpha. Use an absolute API URL only for controlled direct-API testing. |
 
-Set `NEXT_PUBLIC_API_BASE_URL` before building the frontend service because Next.js bakes `NEXT_PUBLIC_*` variables into the browser bundle at build time.
+Set `API_PROXY_TARGET` on `wenlingo-web` so Next.js rewrites same-origin
+browser calls from `/api/*` to the API service. Keep `NEXT_PUBLIC_API_BASE_URL`
+empty or `/api` for external Alpha so the browser stays on the Web origin.
 
-On first deployment, set `CORS_ALLOW_ORIGINS` after the web public domain exists, then redeploy `wenlingo-api`. Set `NEXT_PUBLIC_API_BASE_URL` before building `wenlingo-web`. If either `NEXT_PUBLIC_API_BASE_URL` or `CORS_ALLOW_ORIGINS` changes later, manually redeploy the affected service so the runtime CORS allowlist and browser bundle use the new values.
+On first deployment, set `CORS_ALLOW_ORIGINS` and `AUTH_ALLOWED_ORIGINS` after
+the web public domain exists, then redeploy `wenlingo-api`. Set
+`API_PROXY_TARGET` before starting `wenlingo-web`. If `API_PROXY_TARGET`,
+`NEXT_PUBLIC_API_BASE_URL`, `CORS_ALLOW_ORIGINS`, or `AUTH_ALLOWED_ORIGINS`
+changes later, manually redeploy the affected service so runtime rewrites, the
+browser bundle, CORS, and auth origin checks use the new values.
 
-Use a full HTTPS origin for `NEXT_PUBLIC_API_BASE_URL`, for example:
+Use a full HTTPS origin for `API_PROXY_TARGET`, for example:
 
 ```text
 https://wenlingo-api-production.up.railway.app
 ```
 
-Do not include a trailing slash or path.
+Do not include a trailing slash or path. Do not send this direct API origin to
+external Alpha families.
 
 LLM keys must remain server-side on `wenlingo-api`. Do not expose LLM keys through `NEXT_PUBLIC_*` variables.
 
