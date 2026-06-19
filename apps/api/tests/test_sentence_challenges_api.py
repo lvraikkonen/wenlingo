@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,21 +13,18 @@ from app.domain.models import (
     GameEvent,
     DailyTaskLimitCounter,
     LLMCallLog,
-    ParentAccount,
-    ParentSession,
     ParentUser,
     ProductEvent,
     SentenceTraining,
     StudentProfile,
 )
-from app.domain.seed import seed_demo_data
 from app.main import create_app
 from app.services.ai_runner import run_ai_task
-from app.services.auth_security import hash_secret
 from app.services.ai_routing import TASK_CONFIGS, TaskFinalStatus
 from app.services.llm_provider import LLMProviderResponse
 from app.services.llm_usage import local_product_day
 from app.services.sentence_challenges import fallback_challenge_feedback
+from tests.conftest import create_authenticated_family
 
 
 CHALLENGE_RESPONSES = {
@@ -101,10 +98,6 @@ class ChallengeRunner:
         )
 
 
-def parent_students(session, parent_id):
-    return session.exec(select(StudentProfile).where(StudentProfile.parent_id == parent_id)).all()
-
-
 def challenge_client(session, runner, settings=None):
     app = create_app()
     app.dependency_overrides[get_db_session] = lambda: session
@@ -114,32 +107,6 @@ def challenge_client(session, runner, settings=None):
     if settings is not None:
         app.dependency_overrides[get_settings] = lambda: settings
     return app, TestClient(app)
-
-
-def link_parent_session(session, parent, token="session-token"):
-    account = ParentAccount(
-        email_normalized=f"{parent.id}@example.com",
-        email_verified_at=datetime.now(UTC),
-        last_login_at=datetime.now(UTC),
-    )
-    session.add(account)
-    session.flush()
-    parent.account_id = account.id
-    parent.account_linked_at = datetime.now(UTC)
-    session.add(parent)
-    session.add(
-        ParentSession(
-            account_id=account.id,
-            token_hash=hash_secret(
-                token,
-                purpose="session-token",
-                pepper="test-pepper",
-            ),
-            expires_at=datetime.now(UTC) + timedelta(days=30),
-        )
-    )
-    session.commit()
-    return token
 
 
 def test_challenge_generation_declares_empty_request_body_contract():
@@ -153,8 +120,8 @@ def test_challenge_generation_declares_empty_request_body_contract():
 
 
 def test_challenge_generation_persists_generated_training(session):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     runner = ChallengeRunner()
     app, client = challenge_client(session, runner)
 
@@ -192,8 +159,8 @@ def test_challenge_generation_cycles_target_skill_by_completed_count(
     completed_count,
     expected_target_skill,
 ):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     for index in range(completed_count):
         target_skill = tuple(CHALLENGE_RESPONSES)[index]
         session.add(
@@ -227,8 +194,8 @@ def test_challenge_generation_cycles_target_skill_by_completed_count(
 
 
 def test_challenge_generation_uses_student_grade_label(session):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     student.grade_label = "五年级"
     session.add(student)
     session.commit()
@@ -249,8 +216,8 @@ def test_challenge_generation_uses_student_grade_label(session):
 
 
 def test_challenge_completion_updates_same_row_and_settles_once(session):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     session.add(
         SentenceTraining(
             student_id=student.id,
@@ -299,8 +266,8 @@ def test_challenge_completion_updates_same_row_and_settles_once(session):
 
 
 def test_auth_required_challenge_generation_rejects_unauthenticated_request(session):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     runner = ChallengeRunner()
     app, client = challenge_client(
         session,
@@ -321,9 +288,8 @@ def test_auth_required_challenge_generation_rejects_unauthenticated_request(sess
 
 
 def test_auth_required_challenge_generation_accepts_empty_json_body(session):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
-    token = link_parent_session(session, parent)
+    family = create_authenticated_family(session)
+    student = family["student"]
     runner = ChallengeRunner()
     app, client = challenge_client(
         session,
@@ -335,7 +301,7 @@ def test_auth_required_challenge_generation_accepts_empty_json_body(session):
         response = client.post(
             f"/api/students/{student.id}/sentence-challenges",
             json={},
-            cookies={"wenlingo_parent_session": token},
+            cookies=family["cookie"],
         )
     app.dependency_overrides.clear()
 
@@ -345,8 +311,8 @@ def test_auth_required_challenge_generation_accepts_empty_json_body(session):
 
 
 def test_repeated_challenge_completion_returns_409(session):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     training = SentenceTraining(
         student_id=student.id,
         source_sentence="小猫跑了。",
@@ -376,8 +342,8 @@ def test_repeated_challenge_completion_returns_409(session):
 
 
 def test_challenge_completion_rejects_cross_family_training_with_404(session):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     other_parent = ParentUser(
         email="other-parent@example.com",
         display_name="Other Parent",
@@ -420,8 +386,8 @@ def test_challenge_completion_rejects_cross_family_training_with_404(session):
 
 
 def test_challenge_completion_rejects_malformed_generated_row_without_award(session):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     ability = session.exec(
         select(AbilityProfile).where(AbilityProfile.student_id == student.id)
     ).one()
@@ -462,8 +428,8 @@ def test_challenge_completion_rejects_malformed_generated_row_without_award(sess
 
 
 def test_challenge_completion_rejects_short_answer(session):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     training = SentenceTraining(
         student_id=student.id,
         source_sentence="小猫跑了。",
@@ -489,8 +455,8 @@ def test_challenge_completion_rejects_short_answer(session):
 
 
 def test_daily_generation_limit_returns_rest_message_without_provider_call(session):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     daily_limit = TASK_CONFIGS["sentence_challenge_generation"].daily_limit
     session.add(
         DailyTaskLimitCounter(
@@ -525,8 +491,8 @@ def test_daily_generation_limit_returns_rest_message_without_provider_call(sessi
 
 
 def test_daily_generation_limit_uses_sentence_env_override(session):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     session.add(
         DailyTaskLimitCounter(
             student_id=student.id,
@@ -568,8 +534,8 @@ def test_feedback_provider_failure_still_completes_with_fallback_feedback(sessio
                 raise RuntimeError("feedback unavailable")
             return await super().complete_json(task_name, payload)
 
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     session.add(
         SentenceTraining(
             student_id=student.id,

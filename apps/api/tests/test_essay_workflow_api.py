@@ -6,13 +6,9 @@ from app.api.deps import AITaskRunner
 from app.api.routes.essays import EssayRevisionCreate, submit_revision
 from app.core.config import get_settings
 from app.domain.enums import TaskType
-from app.domain.models import AbilityHistory, Essay, EssayVersion, GameEvent, LLMCallLog, StudentProfile
-from app.domain.seed import seed_demo_data
+from app.domain.models import AbilityHistory, Essay, EssayVersion, GameEvent, LLMCallLog
 from app.services.essay_workflow import draft_ability_deltas
-
-
-def parent_students(session, parent_id: str):
-    return session.exec(select(StudentProfile).where(StudentProfile.parent_id == parent_id)).all()
+from tests.conftest import create_authenticated_family
 
 
 class EmptyScalarResult:
@@ -36,8 +32,8 @@ class StaleRevisionReadSession:
 
 
 def test_essay_from_existing_draft_feedback_and_revision(session, client):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
 
     start = client.post(
         f"/api/students/{student.id}/essays",
@@ -102,8 +98,8 @@ def test_essay_from_existing_draft_feedback_and_revision(session, client):
 
 
 def test_essay_create_rejects_overlong_title_and_draft(session, client):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
 
     title_response = client.post(
         f"/api/students/{student.id}/essays",
@@ -125,8 +121,8 @@ def test_draft_ability_deltas_use_five_unless_exactly_three_improvements():
 
 
 def test_revision_without_first_draft_returns_conflict(session, client):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     essay = Essay(student_id=student.id, title="我学会了骑车", status="revision_requested")
     session.add(essay)
     session.commit()
@@ -166,8 +162,8 @@ def test_revision_missing_student_or_ability_returns_not_found(session, client):
 
 
 def test_revision_cannot_be_settled_twice(session, client):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
 
     start = client.post(
         f"/api/students/{student.id}/essays",
@@ -183,7 +179,8 @@ def test_revision_cannot_be_settled_twice(session, client):
     }
 
     first_revision = client.post(f"/api/essays/{essay_id}/revision", json=revision_payload)
-    xp_after_first_revision = parent_students(session, parent.id)[0].xp
+    session.refresh(student)
+    xp_after_first_revision = student.xp
     second_revision = client.post(f"/api/essays/{essay_id}/revision", json=revision_payload)
 
     assert first_revision.status_code == 201
@@ -192,13 +189,14 @@ def test_revision_cannot_be_settled_twice(session, client):
     assert len(session.exec(select(EssayVersion)).all()) == 2
     assert len(session.exec(select(GameEvent)).all()) == 1
     assert len(session.exec(select(AbilityHistory)).all()) == 3
-    assert parent_students(session, parent.id)[0].xp == xp_after_first_revision
+    session.refresh(student)
+    assert student.xp == xp_after_first_revision
 
 
 @pytest.mark.asyncio
 async def test_revision_integrity_conflict_returns_409_before_settlement(session):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     essay = Essay(student_id=student.id, title="我学会了骑车", status="revision_requested")
     session.add(essay)
     session.flush()
@@ -217,7 +215,7 @@ async def test_revision_integrity_conflict_returns_409_before_settlement(session
         )
     )
     session.commit()
-    xp_before = parent_students(session, parent.id)[0].xp
+    xp_before = student.xp
 
     with pytest.raises(HTTPException) as exc_info:
         await submit_revision(
@@ -234,4 +232,5 @@ async def test_revision_integrity_conflict_returns_409_before_settlement(session
     assert exc_info.value.detail == "essay already settled"
     assert len(session.exec(select(GameEvent)).all()) == 0
     assert len(session.exec(select(AbilityHistory)).all()) == 0
-    assert parent_students(session, parent.id)[0].xp == xp_before
+    session.refresh(student)
+    assert student.xp == xp_before

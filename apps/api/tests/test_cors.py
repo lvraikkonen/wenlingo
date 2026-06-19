@@ -11,7 +11,7 @@ def fixed_cors_origins(monkeypatch):
 
 def test_local_next_origin_is_allowed(client):
     response = client.options(
-        "/api/auth/demo-login",
+        "/api/auth/magic-codes/request",
         headers={
             "Origin": "http://127.0.0.1:3000",
             "Access-Control-Request-Method": "POST",
@@ -24,7 +24,7 @@ def test_local_next_origin_is_allowed(client):
 
 def test_unknown_origin_is_not_allowed(client):
     response = client.options(
-        "/api/auth/demo-login",
+        "/api/auth/magic-codes/request",
         headers={
             "Origin": "http://malicious.local",
             "Access-Control-Request-Method": "POST",
@@ -33,3 +33,7 @@ def test_unknown_origin_is_not_allowed(client):
 
     assert response.status_code == 400
     assert "access-control-allow-origin" not in response.headers
+
+
+def test_demo_login_route_removed(client):
+    assert client.post("/api/auth/demo-login").status_code == 404

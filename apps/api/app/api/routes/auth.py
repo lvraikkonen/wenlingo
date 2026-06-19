@@ -1,12 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.api.auth_deps import get_linked_parent_for_account
 from app.api.deps import get_db_session
 from app.core.config import Settings, get_settings
-from app.domain.models import ParentAccount, StudentProfile, utcnow
-from app.domain.seed import DEMO_PARENT_EMAIL, seed_demo_data
+from app.domain.models import utcnow
 from app.services.auth_codes import request_magic_code, verify_magic_code
 from app.services.auth_security import mask_phone, normalize_email, normalize_phone
 from app.services.parent_sessions import (
@@ -48,44 +47,6 @@ class PhoneBindRequest(BaseModel):
     @classmethod
     def validate_phone(cls, value: str) -> str:
         return normalize_phone(value)
-
-
-@router.post("/demo-login")
-def demo_login(
-    response: Response,
-    session: Session = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
-):
-    parent = seed_demo_data(session)
-    if settings.auth_required_for_alpha:
-        account = session.exec(
-            select(ParentAccount).where(
-                ParentAccount.email_normalized == DEMO_PARENT_EMAIL
-            )
-        ).first()
-        if account is None:
-            account = ParentAccount(
-                email_normalized=DEMO_PARENT_EMAIL,
-                email_verified_at=utcnow(),
-            )
-        account.status = "active"
-        account.email_verified_at = account.email_verified_at or utcnow()
-        account.last_login_at = utcnow()
-        session.add(account)
-        session.flush()
-        parent.account_id = account.id
-        parent.account_linked_at = parent.account_linked_at or utcnow()
-        session.add(parent)
-        create_parent_session(
-            db=session,
-            settings=settings,
-            account=account,
-            response=response,
-        )
-        session.commit()
-        session.refresh(parent)
-    students = session.exec(select(StudentProfile).where(StudentProfile.parent_id == parent.id)).all()
-    return {"parent": parent, "students": students}
 
 
 @router.post("/magic-codes/request")

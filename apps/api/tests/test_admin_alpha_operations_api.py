@@ -14,7 +14,6 @@ from app.domain.models import (
     StudentProfile,
     utcnow,
 )
-from app.domain.seed import seed_demo_data
 from app.main import create_app
 
 
@@ -517,14 +516,19 @@ def test_admin_disable_revokes_sessions_and_enable_restores_status(session, monk
 
 
 def test_admin_disable_refuses_demo_parent_account_shape(session, monkeypatch):
-    demo_parent = seed_demo_data(session)
     account = ParentAccount(
         email_normalized="demo@wenlingo.local",
         email_verified_at=utcnow(),
     )
     session.add(account)
     session.flush()
-    demo_parent.account_id = account.id
+    demo_parent = ParentUser(
+        id="demo-parent",
+        email="demo@wenlingo.local",
+        display_name="Demo Parent",
+        account_id=account.id,
+        account_linked_at=utcnow(),
+    )
     session.add(demo_parent)
     session.commit()
     app = create_admin_client(session, monkeypatch)
@@ -535,11 +539,9 @@ def test_admin_disable_refuses_demo_parent_account_shape(session, monkeypatch):
             headers=admin_headers(),
             json={},
         )
-        demo_login = client.post("/api/auth/demo-login")
 
     assert response.status_code == 409
     assert session.get(ParentAccount, account.id).status == "active"
-    assert demo_login.status_code == 200
 
 
 def test_admin_overview_hides_revoked_invites_by_default(session, monkeypatch):

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import select
 
 from app.api.deps import get_db_session
-from app.domain.enums import BadgeCode, TaskType
+from app.domain.enums import BadgeCode, StudentPersona, TaskType
 from app.domain.models import (
     AbilityHistory,
     AbilityProfile,
@@ -17,8 +17,8 @@ from app.domain.models import (
     Report,
     StudentProfile,
 )
-from app.domain.seed import seed_demo_data
 from app.main import create_app
+from tests.conftest import create_authenticated_family
 
 
 TASK9_TEXT_FILES = [
@@ -46,10 +46,45 @@ MOJIBAKE_MARKERS = [chr(codepoint) for codepoint in MOJIBAKE_MARKER_CODEPOINTS] 
 ]
 
 
-def parent_students(session, parent_id: str):
-    return session.exec(
-        select(StudentProfile).where(StudentProfile.parent_id == parent_id).order_by(StudentProfile.id)
-    ).all()
+def create_child(
+    session,
+    *,
+    parent_id: str,
+    student_id: str,
+    name: str,
+    ability_values: dict[str, int] | None = None,
+):
+    student = StudentProfile(
+        id=student_id,
+        parent_id=parent_id,
+        name=name,
+        grade_label="四年级",
+        persona=StudentPersona.real_child,
+        is_real_child=True,
+    )
+    session.add(student)
+    session.add(AbilityProfile(student_id=student.id, **(ability_values or {})))
+    session.commit()
+    return student
+
+
+def create_profiled_students(session, parent_id: str):
+    profile_data = [
+        ("s1", "小宇", dict(expression=44, observation=38, structure=42, revision=36)),
+        ("s2", "小晴", dict(expression=28, observation=26, structure=45, revision=34)),
+        ("s3", "小川", dict(expression=48, observation=46, structure=24, revision=32)),
+        ("s4", "小禾", dict(comprehension=30, summarization=24, expression=42)),
+    ]
+    return [
+        create_child(
+            session,
+            parent_id=parent_id,
+            student_id=student_id,
+            name=name,
+            ability_values=ability_values,
+        )
+        for student_id, name, ability_values in profile_data
+    ]
 
 
 @contextmanager
@@ -71,8 +106,8 @@ def test_task9_user_facing_chinese_does_not_contain_mojibake():
 
 
 def test_reading_session_updates_transfer_tip_and_report(session, client):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     ability_before = session.exec(
         select(AbilityProfile).where(AbilityProfile.student_id == student.id)
     ).one()
@@ -120,8 +155,14 @@ def test_reading_session_updates_transfer_tip_and_report(session, client):
 
 
 def test_report_uses_only_requested_students_revision(session, client):
-    parent = seed_demo_data(session)
-    requested_student, other_student = parent_students(session, parent.id)[:2]
+    family = create_authenticated_family(session)
+    requested_student = family["student"]
+    other_student = create_child(
+        session,
+        parent_id=family["parent"].id,
+        student_id="other-student",
+        name="小月",
+    )
 
     requested_essay = Essay(student_id=requested_student.id, title="Requested", status="settled")
     other_essay = Essay(student_id=other_student.id, title="Other", status="settled")
@@ -154,8 +195,8 @@ def test_report_uses_only_requested_students_revision(session, client):
 
 
 def test_stage_report_mentions_revision_task_evidence(session, client):
-    parent = seed_demo_data(session)
-    student = session.exec(select(StudentProfile).where(StudentProfile.parent_id == parent.id)).first()
+    family = create_authenticated_family(session)
+    student = family["student"]
     essay = Essay(student_id=student.id, title="我学会了骑车", status="settled")
     session.add(essay)
     session.flush()
@@ -187,8 +228,8 @@ def test_stage_report_mentions_revision_task_evidence(session, client):
 
 
 def test_stage_report_handles_legacy_revision_null_task_metadata(session):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     essay = Essay(student_id=student.id, title="旧数据作文", status="settled")
     session.add(essay)
     session.flush()
@@ -214,8 +255,8 @@ def test_stage_report_handles_legacy_revision_null_task_metadata(session):
 
 
 def test_stage_report_handles_completed_learning_with_incomplete_revision_feedback(session):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     essay = Essay(student_id=student.id, title="QA regression essay", status="settled")
     session.add(essay)
     session.flush()
@@ -244,8 +285,8 @@ def test_stage_report_handles_completed_learning_with_incomplete_revision_feedba
 
 
 def test_report_returns_404_when_student_ability_is_missing(session):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student.id)).one()
     session.delete(ability)
     session.commit()
@@ -258,8 +299,8 @@ def test_report_returns_404_when_student_ability_is_missing(session):
 
 
 def test_report_uses_latest_requested_students_revision(session, client):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     now = datetime.now(timezone.utc)
     newer_essay = Essay(student_id=student.id, title="Newer", status="settled")
     older_essay = Essay(student_id=student.id, title="Older", status="settled")
@@ -291,8 +332,8 @@ def test_report_uses_latest_requested_students_revision(session, client):
 
 
 def test_report_breaks_revision_created_at_ties_by_revision_id(session, client):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     same_created_at = datetime.now(timezone.utc)
     first_essay = Essay(student_id=student.id, title="First", status="settled")
     second_essay = Essay(student_id=student.id, title="Second", status="settled")
@@ -326,8 +367,8 @@ def test_report_breaks_revision_created_at_ties_by_revision_id(session, client):
 
 
 def test_report_rejects_weekly_report_type(session, client):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
 
     report = client.post(f"/api/students/{student.id}/reports", json={"report_type": "weekly"})
 
@@ -336,8 +377,8 @@ def test_report_rejects_weekly_report_type(session, client):
 
 
 def test_four_demo_profiles_report_weak_points_match_profile(session, client):
-    parent = seed_demo_data(session)
-    students = sorted(parent_students(session, parent.id), key=lambda student: student.id)
+    family = create_authenticated_family(session)
+    students = create_profiled_students(session, family["parent"].id)
 
     reports = {
         student.id: client.post(

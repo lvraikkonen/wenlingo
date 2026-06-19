@@ -1,8 +1,7 @@
 from sqlmodel import select
 
 from app.api.deps import get_ai_task_runner
-from app.domain.models import LLMCallLog, StudentProfile
-from app.domain.seed import seed_demo_data
+from app.domain.models import LLMCallLog
 from app.services.ai_runner import AITaskResult
 from app.services.ai_tasks import log_llm_result
 from app.services.llm_contracts import (
@@ -11,6 +10,7 @@ from app.services.llm_contracts import (
     RevisionTask,
     SentenceFeedback,
 )
+from tests.conftest import create_authenticated_family
 
 
 class RecordingEssayRunner:
@@ -98,10 +98,8 @@ class RecordingSentenceRunner:
 
 
 def test_essay_routes_use_runner_dependency_override(session, client):
-    parent = seed_demo_data(session)
-    student = session.exec(
-        select(StudentProfile).where(StudentProfile.parent_id == parent.id)
-    ).first()
+    family = create_authenticated_family(session)
+    student = family["student"]
     runner = RecordingEssayRunner()
     client.app.dependency_overrides[get_ai_task_runner] = lambda: runner
 
@@ -129,10 +127,8 @@ def test_essay_routes_use_runner_dependency_override(session, client):
 
 
 def test_sentence_route_uses_runner_dependency_override_and_logs_student_context(session, client):
-    parent = seed_demo_data(session)
-    student = session.exec(
-        select(StudentProfile).where(StudentProfile.parent_id == parent.id)
-    ).first()
+    family = create_authenticated_family(session)
+    student = family["student"]
     runner = RecordingSentenceRunner()
     client.app.dependency_overrides[get_ai_task_runner] = lambda: runner
 

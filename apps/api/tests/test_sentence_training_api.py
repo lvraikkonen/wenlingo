@@ -10,23 +10,18 @@ from app.domain.models import (
     AbilityProfile,
     GameEvent,
     SentenceTraining,
-    StudentProfile,
 )
-from app.domain.seed import seed_demo_data
 from app.main import create_app
 from app.services.ai_runner import run_ai_task
 from app.services.ai_tasks import LLMTaskResult
 from app.services.llm_contracts import SentenceFeedback
 from app.services.llm_provider import LLMProviderResponse
-
-
-def parent_students(session, parent_id: str):
-    return session.exec(select(StudentProfile).where(StudentProfile.parent_id == parent_id)).all()
+from tests.conftest import create_authenticated_family
 
 
 def test_sentence_training_persists_feedback_ability_and_game_event(session, client):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
 
     response = client.post(
         f"/api/students/{student.id}/sentences",
@@ -85,8 +80,8 @@ def test_sentence_training_uses_fallback_when_runner_returns_only_noncanonical_d
                 model=self.model_name,
             )
 
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     ability_before = session.exec(
         select(AbilityProfile).where(AbilityProfile.student_id == student.id)
     ).one()
@@ -124,8 +119,8 @@ def test_sentence_training_uses_fallback_when_runner_returns_only_noncanonical_d
 
 
 def test_sentence_training_rejects_invalid_focus(session, client):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
 
     response = client.post(
         f"/api/students/{student.id}/sentences",
@@ -140,8 +135,8 @@ def test_sentence_training_rejects_invalid_focus(session, client):
 
 
 def test_sentence_training_rejects_overlong_sentences(session, client):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     too_long = "细" * 501
 
     response = client.post(
@@ -157,8 +152,8 @@ def test_sentence_training_rejects_overlong_sentences(session, client):
 
 
 def test_sentence_training_passes_runner_to_feedback_wrapper(session, monkeypatch):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    student = family["student"]
     captured_kwargs = {}
     runner = object()
 

@@ -8,12 +8,11 @@ from app.domain.models import (
     AbilityHistory,
     AbilityProfile,
     AlphaInviteCode,
-    Assessment,
     ParentUser,
     SentenceTraining,
     StudentProfile,
 )
-from app.domain.seed import seed_demo_data
+from tests.conftest import create_authenticated_family
 
 
 ASSESSMENT_PAYLOAD = {
@@ -59,12 +58,6 @@ def create_alpha_child(client, parent_id: str, nickname: str = " 小文 ", grade
     )
     assert response.status_code == 201
     return response.json()["child"]
-
-
-def parent_students(session, parent_id: str):
-    return session.exec(
-        select(StudentProfile).where(StudentProfile.parent_id == parent_id)
-    ).all()
 
 
 def test_create_alpha_parent_persists_real_parent_and_returns_children_url(session, client):
@@ -253,8 +246,9 @@ def test_alpha_summary_with_sentence_training_but_no_assessment_is_not_empty(
 def test_alpha_summary_counts_only_completed_sentence_training_and_reports_focus(
     session, client
 ):
-    parent = seed_demo_data(session)
-    student = parent_students(session, parent.id)[0]
+    family = create_authenticated_family(session)
+    parent = family["parent"]
+    student = family["student"]
     session.add(
         SentenceTraining(
             student_id=student.id,
@@ -340,13 +334,15 @@ def test_alpha_summary_rejects_child_from_other_parent(session, client):
     assert response.json()["detail"] == "student not found"
 
 
-def test_alpha_routes_do_not_break_seeded_demo_login(session, client):
-    seed_demo_data(session)
+def test_alpha_me_children_uses_session_parent(client, session, monkeypatch):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    family = create_authenticated_family(session)
 
-    response = client.post("/api/auth/demo-login")
+    response = client.get(
+        "/api/alpha/parents/me/children",
+        cookies=family["cookie"],
+    )
 
     assert response.status_code == 200
-    payload = response.json()
-    assert payload["parent"]["email"] == "demo@wenlingo.local"
-    assert len(payload["students"]) == 4
-    assert session.exec(select(Assessment)).all() == []
+    assert response.json()["parent"]["id"] == family["parent"].id
+    assert response.json()["children"][0]["id"] == family["student"].id

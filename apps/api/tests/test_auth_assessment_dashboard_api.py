@@ -1,8 +1,6 @@
-from fastapi.testclient import TestClient
 from sqlmodel import select
 
-from app.api.deps import get_db_session
-from app.domain.enums import TaskType
+from app.domain.enums import StudentPersona, TaskType
 from app.domain.models import (
     AbilityHistory,
     AbilityProfile,
@@ -12,50 +10,94 @@ from app.domain.models import (
     SentenceTraining,
     StudentProfile,
 )
-from app.domain.seed import seed_demo_data
-from app.main import create_app
 from app.services.essay_workflow import ASSESSMENT_ESSAY_STATUS
+from tests.conftest import create_authenticated_family, create_second_authenticated_family
 
 
-def parent_students(session, parent_id: str):
-    return session.exec(select(StudentProfile).where(StudentProfile.parent_id == parent_id)).all()
+def create_profiled_students(session, parent_id: str):
+    profile_data = [
+        (
+            "s1",
+            "小宇",
+            StudentPersona.real_child,
+            True,
+            dict(expression=44, observation=38, structure=42, revision=36),
+        ),
+        (
+            "s2",
+            "小晴",
+            StudentPersona.vague_expression,
+            False,
+            dict(expression=28, observation=26, structure=45, revision=34),
+        ),
+        (
+            "s3",
+            "小川",
+            StudentPersona.weak_structure,
+            False,
+            dict(expression=48, observation=46, structure=24, revision=32),
+        ),
+        (
+            "s4",
+            "小禾",
+            StudentPersona.weak_reading_summary,
+            False,
+            dict(comprehension=30, summarization=24, expression=42),
+        ),
+    ]
+    students = []
+    for student_id, name, persona, is_real_child, ability_values in profile_data:
+        student = StudentProfile(
+            id=student_id,
+            parent_id=parent_id,
+            name=name,
+            persona=persona,
+            is_real_child=is_real_child,
+        )
+        session.add(student)
+        session.add(AbilityProfile(student_id=student_id, **ability_values))
+        students.append(student)
+    session.commit()
+    return students
 
 
-def test_demo_login_returns_four_students(session, client):
-    seed_demo_data(session)
-
+def test_demo_login_route_is_not_available(client):
     response = client.post("/api/auth/demo-login")
 
+    assert response.status_code == 404
+
+
+def test_authenticated_dashboard_returns_own_child(client, session, monkeypatch):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    family = create_authenticated_family(session)
+
+    response = client.get(
+        f"/api/students/{family['student'].id}/dashboard",
+        cookies=family["cookie"],
+    )
+
     assert response.status_code == 200
-    payload = response.json()
-    assert payload["parent"]["email"] == "demo@wenlingo.local"
-    assert len(payload["students"]) == 4
+    assert response.json()["student"]["id"] == family["student"].id
 
 
-def test_demo_login_sets_session_cookie_when_alpha_auth_is_required(
-    session,
-    monkeypatch,
+def test_authenticated_parent_cannot_access_another_family_dashboard(
+    client, session, monkeypatch
 ):
     monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
-    monkeypatch.setenv("AUTH_SECRET_PEPPER", "test-pepper")
-    monkeypatch.setenv("AUTH_SESSION_COOKIE_SECURE", "false")
-    app = create_app()
-    app.dependency_overrides[get_db_session] = lambda: session
+    family = create_authenticated_family(session)
+    other_family = create_second_authenticated_family(session)
 
-    with TestClient(app) as test_client:
-        response = test_client.post("/api/auth/demo-login")
-        dashboard = test_client.get("/api/students/s1/dashboard")
+    response = client.get(
+        f"/api/students/{other_family['student'].id}/dashboard",
+        cookies=family["cookie"],
+    )
 
-    app.dependency_overrides.clear()
-    assert response.status_code == 200
-    assert "wenlingo_parent_session" in response.cookies
-    assert dashboard.status_code == 200
-    assert dashboard.json()["student"]["id"] == "s1"
+    assert response.status_code == 404
 
 
 def test_assessment_creates_first_ability_sketch_and_dashboard(session, client):
-    parent = seed_demo_data(session)
-    student_id = parent_students(session, parent.id)[0].id
+    family = create_authenticated_family(session)
+    student_id = family["student"].id
 
     response = client.post(
         f"/api/students/{student_id}/assessment",
@@ -107,10 +149,10 @@ def test_assessment_creates_first_ability_sketch_and_dashboard(session, client):
 
 
 def test_new_student_dashboard_recommends_initial_assessment(session, client):
-    parent = seed_demo_data(session)
+    family = create_authenticated_family(session)
     student = StudentProfile(
         id="new-student",
-        parent_id=parent.id,
+        parent_id=family["parent"].id,
         name="小新",
         persona="real_child",
         is_real_child=True,
@@ -133,8 +175,8 @@ def test_new_student_dashboard_recommends_initial_assessment(session, client):
 
 
 def test_four_demo_profiles_have_distinct_dashboard_shapes_and_recommendations(session, client):
-    parent = seed_demo_data(session)
-    students = sorted(parent_students(session, parent.id), key=lambda student: student.id)
+    family = create_authenticated_family(session)
+    students = create_profiled_students(session, family["parent"].id)
 
     dashboards = {
         student.id: client.get(f"/api/students/{student.id}/dashboard").json()
