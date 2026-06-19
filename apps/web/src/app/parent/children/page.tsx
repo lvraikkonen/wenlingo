@@ -8,7 +8,6 @@ import {
   isUnauthorizedError,
   recordAlphaEvent,
 } from "../../../lib/api";
-import { clearStoredAlphaParentId } from "../../../lib/alphaParent";
 import { getStoredAlphaSessionId } from "../../../lib/alphaSession";
 import { bindPhone, logoutParentSession } from "../../../lib/authSession";
 import type { AlphaChildrenResponse } from "../../../lib/types";
@@ -106,7 +105,6 @@ export default function ParentChildrenPage() {
     setError("");
     try {
       await logoutParentSession();
-      clearStoredAlphaParentId();
       router.replace("/alpha/start");
     } catch {
       setError("退出登录失败，请稍后再试。");

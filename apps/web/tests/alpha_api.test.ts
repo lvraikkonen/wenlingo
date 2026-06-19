@@ -11,7 +11,6 @@ import {
   ALPHA_PARENT_STORAGE_KEY,
   clearStoredAlphaParentId,
   getStoredAlphaParentId,
-  setStoredAlphaParentId,
 } from "../src/lib/alphaParent";
 import {
   ALPHA_SESSION_STORAGE_KEY,
@@ -267,10 +266,10 @@ describe("alpha api client", () => {
     );
   });
 
-  test("alpha parent storage helper stores clears and reads the parent id", () => {
+  test("alpha parent storage helper reads and clears the legacy parent id", () => {
     expect(getStoredAlphaParentId()).toBeNull();
 
-    setStoredAlphaParentId("parent-1");
+    window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "parent-1");
 
     expect(window.localStorage.getItem(ALPHA_PARENT_STORAGE_KEY)).toBe("parent-1");
     expect(getStoredAlphaParentId()).toBe("parent-1");
@@ -280,6 +279,12 @@ describe("alpha api client", () => {
     expect(getStoredAlphaParentId()).toBeNull();
   });
 
+  test("alpha parent storage module no longer exports a writer", async () => {
+    const module = await import("../src/lib/alphaParent");
+
+    expect("setStoredAlphaParentId" in module).toBe(false);
+  });
+
   test("alpha parent storage helper degrades when localStorage throws", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("blocked");
@@ -287,14 +292,10 @@ describe("alpha api client", () => {
 
     expect(getStoredAlphaParentId()).toBeNull();
 
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("blocked");
-    });
     vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
       throw new Error("blocked");
     });
 
-    expect(() => setStoredAlphaParentId("parent-1")).not.toThrow();
     expect(() => clearStoredAlphaParentId()).not.toThrow();
   });
 });

@@ -25,19 +25,6 @@ export function getStoredAlphaParentId(): string | null {
   }
 }
 
-export function setStoredAlphaParentId(parentId: string) {
-  const storage = getStorage();
-  if (!storage) {
-    return;
-  }
-
-  try {
-    storage.setItem(ALPHA_PARENT_STORAGE_KEY, parentId);
-  } catch {
-    // Ignore storage failures so blocked/private storage does not break alpha entry.
-  }
-}
-
 export function clearStoredAlphaParentId() {
   const storage = getStorage();
   if (!storage) {

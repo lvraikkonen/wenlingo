@@ -126,7 +126,7 @@ test("children list records child handoff click with student id", async () => {
   });
 });
 
-test("children page logs out only the current browser and clears local alpha family marker", async () => {
+test("children page logs out only the current browser without mutating the legacy alpha marker", async () => {
   window.localStorage.setItem(ALPHA_PARENT_STORAGE_KEY, "parent-1");
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = input.toString();
@@ -153,7 +153,7 @@ test("children page logs out only the current browser and clears local alpha fam
       }),
     );
   });
-  expect(window.localStorage.getItem(ALPHA_PARENT_STORAGE_KEY)).toBeNull();
+  expect(window.localStorage.getItem(ALPHA_PARENT_STORAGE_KEY)).toBe("parent-1");
   expect(replace).toHaveBeenCalledWith("/alpha/start");
 });
 
