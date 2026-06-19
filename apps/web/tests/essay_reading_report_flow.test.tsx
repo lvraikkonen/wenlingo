@@ -12,7 +12,6 @@ const apiMocks = vi.hoisted(() => ({
   submitEssayRevision: vi.fn(),
   createReadingSession: vi.fn(),
   createReport: vi.fn(),
-  demoLogin: vi.fn(),
 }));
 
 const essayFeedbackResponse = {
@@ -30,47 +29,9 @@ vi.mock("../src/lib/api", () => ({
   submitEssayRevision: apiMocks.submitEssayRevision,
   createReadingSession: apiMocks.createReadingSession,
   createReport: apiMocks.createReport,
-  demoLogin: apiMocks.demoLogin,
 }));
 
 beforeEach(() => {
-  apiMocks.demoLogin.mockResolvedValue({
-    parent: { id: "p1", email: "demo@example.com", display_name: "演示家长" },
-    students: [
-      {
-        id: "s1",
-        name: "小宇",
-        grade_label: "四年级",
-        persona: "real_child",
-        level: 2,
-        xp: 115,
-      },
-      {
-        id: "s2",
-        name: "小晴",
-        grade_label: "三年级",
-        persona: "vague_expression",
-        level: 1,
-        xp: 40,
-      },
-      {
-        id: "s3",
-        name: "小川",
-        grade_label: "五年级",
-        persona: "weak_structure",
-        level: 1,
-        xp: 35,
-      },
-      {
-        id: "s4",
-        name: "小禾",
-        grade_label: "四年级",
-        persona: "weak_reading_summary",
-        level: 1,
-        xp: 30,
-      },
-    ],
-  });
   apiMocks.createEssay.mockResolvedValue(essayFeedbackResponse);
   apiMocks.submitEssayRevision.mockResolvedValue({
     comparison: {
@@ -102,6 +63,14 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
+
+function expectReturnToChildrenLink() {
+  expect(
+    screen
+      .getAllByRole("link", { name: "返回孩子列表" })
+      .some((link) => link.getAttribute("href") === "/parent/children"),
+  ).toBe(true);
+}
 
 test("essay page supports draft feedback and revision settlement", async () => {
   let resolveFeedback: (value: typeof essayFeedbackResponse) => void = () => {};
@@ -172,10 +141,7 @@ test("essay page supports draft feedback and revision settlement", async () => {
     "href",
     "/children/s1",
   );
-  expect(screen.getByRole("link", { name: "返回孩子列表" })).toHaveAttribute(
-    "href",
-    "/parent/children",
-  );
+  expectReturnToChildrenLink();
 
   await userEvent.click(screen.getByRole("button", { name: "获得点评" }));
   await waitFor(() => {
@@ -213,10 +179,7 @@ test("reading page shows friendly construction state", async () => {
     "href",
     "/children/s1",
   );
-  expect(screen.getByRole("link", { name: "返回孩子列表" })).toHaveAttribute(
-    "href",
-    "/parent/children",
-  );
+  expectReturnToChildrenLink();
   expect(apiMocks.createReadingSession).not.toHaveBeenCalled();
 });
 
@@ -230,9 +193,6 @@ test("report page renders parent-safe stage report", async () => {
   expect(
     screen.getByRole("link", { name: "回到当前孩子 Dashboard" }),
   ).toHaveAttribute("href", "/children/s1");
-  expect(screen.getByRole("link", { name: "返回孩子列表" })).toHaveAttribute(
-    "href",
-    "/parent/children",
-  );
+  expectReturnToChildrenLink();
   expect(apiMocks.createReport).toHaveBeenCalledWith("s1");
 });

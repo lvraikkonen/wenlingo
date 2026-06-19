@@ -11,11 +11,6 @@ export type Student = {
   xp: number;
 };
 
-export type DemoLoginResponse = {
-  parent: { id: string; email: string; display_name: string };
-  students: Student[];
-};
-
 export type RecommendedTask = {
   kind: "assessment" | "sentence" | "essay" | "reading";
   title: string;

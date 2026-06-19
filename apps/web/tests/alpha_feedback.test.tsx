@@ -52,6 +52,14 @@ function AssessmentRecommendationProbe({ studentId }: { studentId: string }) {
   );
 }
 
+function expectReturnToChildrenLink() {
+  expect(
+    screen
+      .getAllByRole("link", { name: "返回孩子列表" })
+      .some((link) => link.getAttribute("href") === "/parent/children"),
+  ).toBe(true);
+}
+
 const apiMocks = vi.hoisted(() => ({
   createAssessment: vi.fn(),
   createSentenceChallenge: vi.fn(),
@@ -59,7 +67,6 @@ const apiMocks = vi.hoisted(() => ({
   createSentenceTraining: vi.fn(),
   createEssay: vi.fn(),
   submitEssayRevision: vi.fn(),
-  demoLogin: vi.fn(),
   getAlphaChildren: vi.fn(),
   getDashboard: vi.fn(),
   getMyAlphaChildSummary: vi.fn(),
@@ -90,7 +97,6 @@ vi.mock("../src/lib/api", () => ({
   createSentenceTraining: apiMocks.createSentenceTraining,
   createEssay: apiMocks.createEssay,
   submitEssayRevision: apiMocks.submitEssayRevision,
-  demoLogin: apiMocks.demoLogin,
   getAlphaChildren: apiMocks.getAlphaChildren,
   getDashboard: apiMocks.getDashboard,
   getMyAlphaChildSummary: apiMocks.getMyAlphaChildSummary,
@@ -246,14 +252,6 @@ beforeEach(() => {
       badge_code: "first_revision",
       evidence: { completed_task_count: 1 },
     },
-  });
-  apiMocks.demoLogin.mockResolvedValue({
-    parent: {
-      id: "parent-1",
-      email: "demo@example.com",
-      display_name: "演示家长",
-    },
-    students: [summaryChild],
   });
   apiMocks.getMyAlphaChildSummary.mockResolvedValue({
     parent_id: "parent-1",
@@ -1018,10 +1016,7 @@ test("sentence page completes generated challenge and shows short feedback", asy
   expect(await screen.findByText("你写得很有画面感！")).toBeInTheDocument();
   expect(screen.getByText("这是一个参考写法，你的写法也很棒。")).toBeInTheDocument();
   expect(screen.getByText("小狗瞪大眼睛，飞快地冲过草地。")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "返回孩子列表" })).toHaveAttribute(
-    "href",
-    "/parent/children",
-  );
+  expectReturnToChildrenLink();
 });
 
 test("sentence page daily limit response shows rest message", async () => {

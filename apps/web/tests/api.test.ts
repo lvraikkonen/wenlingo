@@ -4,12 +4,11 @@ import {
   createAssessment,
   createSentenceChallenge,
   createSentenceTraining,
-  demoLogin,
   getAdminAlphaOverview,
   getAdminAlphaAIUsage,
   getDashboard,
 } from "../src/lib/api";
-import type { DashboardResponse, DemoLoginResponse } from "../src/lib/types";
+import type { DashboardResponse } from "../src/lib/types";
 
 const fetchMock = vi.fn();
 
@@ -27,16 +26,7 @@ const student = {
   persona: "real_child",
   level: 3,
   xp: 120,
-} satisfies DemoLoginResponse["students"][number];
-
-const demoLoginResponse = {
-  parent: {
-    id: "p1",
-    email: "demo@wenlingo.local",
-    display_name: "Demo Parent",
-  },
-  students: [student],
-} satisfies DemoLoginResponse;
+} satisfies DashboardResponse["student"];
 
 const dashboardResponse = {
   student,
@@ -77,16 +67,11 @@ describe("api client", () => {
     vi.unstubAllEnvs();
   });
 
-  test("demoLogin reads parent and students", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => demoLoginResponse,
-    }) as unknown as typeof fetch;
+  test("api client no longer exposes demo login", async () => {
+    const api = await import("../src/lib/api");
+    const removedExport = `demo${"Login"}`;
 
-    const result = await demoLogin();
-
-    expect(result.parent.email).toBe("demo@wenlingo.local");
-    expect(result.students[0].name).toBe("小宇");
+    expect(removedExport in api).toBe(false);
   });
 
   test("getDashboard defaults to same-origin API path", async () => {
@@ -311,6 +296,6 @@ describe("api client", () => {
       status: 500,
     }) as unknown as typeof fetch;
 
-    await expect(demoLogin()).rejects.toThrow("Request failed: 500");
+    await expect(getDashboard("s1")).rejects.toThrow("Request failed: 500");
   });
 });

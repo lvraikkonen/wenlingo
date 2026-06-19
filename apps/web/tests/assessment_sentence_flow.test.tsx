@@ -11,7 +11,6 @@ const apiMocks = vi.hoisted(() => ({
   createSentenceChallenge: vi.fn(),
   completeSentenceChallenge: vi.fn(),
   createSentenceTraining: vi.fn(),
-  demoLogin: vi.fn(),
 }));
 
 vi.mock("../src/lib/api", () => ({
@@ -28,7 +27,6 @@ vi.mock("../src/lib/api", () => ({
   createSentenceChallenge: apiMocks.createSentenceChallenge,
   completeSentenceChallenge: apiMocks.completeSentenceChallenge,
   createSentenceTraining: apiMocks.createSentenceTraining,
-  demoLogin: apiMocks.demoLogin,
 }));
 
 const challengeResponse = {
@@ -56,43 +54,6 @@ function deferred<T>() {
 }
 
 beforeEach(() => {
-  apiMocks.demoLogin.mockResolvedValue({
-    parent: { id: "p1", email: "demo@example.com", display_name: "演示家长" },
-    students: [
-      {
-        id: "s1",
-        name: "小宇",
-        grade_label: "四年级",
-        persona: "real_child",
-        level: 2,
-        xp: 115,
-      },
-      {
-        id: "s2",
-        name: "小晴",
-        grade_label: "三年级",
-        persona: "vague_expression",
-        level: 1,
-        xp: 40,
-      },
-      {
-        id: "s3",
-        name: "小川",
-        grade_label: "五年级",
-        persona: "weak_structure",
-        level: 1,
-        xp: 35,
-      },
-      {
-        id: "s4",
-        name: "小禾",
-        grade_label: "四年级",
-        persona: "weak_reading_summary",
-        level: 1,
-        xp: 30,
-      },
-    ],
-  });
   apiMocks.createAssessment.mockResolvedValue({
     assessment: {
       id: "assessment-1",
@@ -149,6 +110,14 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+function expectReturnToChildrenLink() {
+  expect(
+    screen
+      .getAllByRole("link", { name: "返回孩子列表" })
+      .some((link) => link.getAttribute("href") === "/parent/children"),
+  ).toBe(true);
+}
+
 test("assessment page renders four steps and submits all fields once", async () => {
   await act(async () => {
     render(
@@ -166,10 +135,7 @@ test("assessment page renders four steps and submits all fields once", async () 
     "href",
     "/children/s1",
   );
-  expect(screen.getByRole("link", { name: "返回孩子列表" })).toHaveAttribute(
-    "href",
-    "/parent/children",
-  );
+  expectReturnToChildrenLink();
 
   await userEvent.click(screen.getByRole("button", { name: "开始小试炼" }));
 
@@ -288,10 +254,7 @@ test("sentence page shows ai feedback and settlement", async () => {
     "href",
     "/parent/s1/report",
   );
-  expect(screen.getByRole("link", { name: "返回孩子列表" })).toHaveAttribute(
-    "href",
-    "/parent/children",
-  );
+  expectReturnToChildrenLink();
   expect(await screen.findByText("加入了可看见的细节")).toBeInTheDocument();
   expect(screen.getByText("+25 XP")).toBeInTheDocument();
   expect(apiMocks.createSentenceTraining).toHaveBeenCalledWith("s1", {

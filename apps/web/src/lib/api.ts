@@ -17,7 +17,6 @@ import type {
   AdminAlphaSessionsRevokeAllResponse,
   AdminAlphaTestAccountDeleteResponse,
   DashboardResponse,
-  DemoLoginResponse,
   FeedbackReactionTargetType,
   FeedbackReactionValue,
   ParentSummaryUsefulness,
@@ -56,12 +55,6 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
-}
-
-export function demoLogin(): Promise<DemoLoginResponse> {
-  return requestJson<DemoLoginResponse>("/api/auth/demo-login", {
-    method: "POST",
-  });
 }
 
 export function getDashboard(studentId: string): Promise<DashboardResponse> {
