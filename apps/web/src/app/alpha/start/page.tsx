@@ -181,6 +181,7 @@ export default function AlphaStartPage() {
     }
 
     await bindLegacyParent(storedParentId);
+    clearStoredAlphaParentId();
     router.push("/parent/children");
     return true;
   }
@@ -190,6 +191,7 @@ export default function AlphaStartPage() {
       const session = await getAuthSession();
       const parentId = linkedParentId(session);
       if (parentId) {
+        clearStoredAlphaParentId();
         router.push("/parent/children");
         return true;
       }
@@ -202,6 +204,7 @@ export default function AlphaStartPage() {
 
     try {
       await getMyAlphaChildren();
+      clearStoredAlphaParentId();
       router.push("/parent/children");
       return true;
     } catch {

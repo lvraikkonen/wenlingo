@@ -505,6 +505,7 @@ test("requests code, verifies code, binds legacy parent, then routes to children
       body: JSON.stringify({ legacy_parent_id: "legacy-parent-1" }),
     }),
   );
+  expect(window.localStorage.getItem(ALPHA_PARENT_STORAGE_KEY)).toBeNull();
 });
 
 test("retries legacy bind after verified login without verifying code again", async () => {
@@ -686,6 +687,7 @@ test("routes to children when legacy bind fails after verify but session is link
     expect(push).toHaveBeenCalledWith("/parent/children");
   });
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(window.localStorage.getItem(ALPHA_PARENT_STORAGE_KEY)).toBeNull();
 });
 
 test("routes to children when legacy bind fails but session parent children is reachable", async () => {
@@ -753,6 +755,7 @@ test("routes to children when legacy bind fails but session parent children is r
     expect(push).toHaveBeenCalledWith("/parent/children");
   });
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(window.localStorage.getItem(ALPHA_PARENT_STORAGE_KEY)).toBeNull();
 });
 
 test("legacy migration page can clear stale local family and switch to existing account login", async () => {
