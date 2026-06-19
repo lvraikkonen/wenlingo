@@ -161,6 +161,15 @@ def test_llm_call_log_tracks_provider_prompt_raw_response_and_retry_count():
     assert log.retry_count == 1
 
 
+def test_llm_call_log_default_prompt_version_uses_registry_version():
+    log = LLMCallLog(
+        task_type=TaskType.essay,
+        input_summary="manual construction without prompt version",
+    )
+
+    assert log.prompt_version == ""
+
+
 def test_llm_call_log_tracks_student_and_task_name():
     log = LLMCallLog(
         student_id="s1",

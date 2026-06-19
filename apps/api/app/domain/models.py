@@ -317,7 +317,7 @@ class LLMCallLog(SQLModel, table=True):
         default_factory=list,
         sa_column=Column(JSON, nullable=False),
     )
-    prompt_version: str = "v0.2-quality-spine-2026-05-14"
+    prompt_version: str = ""
     input_summary: str
     raw_response: str = ""
     output_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
