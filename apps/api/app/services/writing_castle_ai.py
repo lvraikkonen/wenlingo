@@ -14,6 +14,15 @@ def _clean_text(value: Any, max_length: int) -> str:
     return text[:max_length]
 
 
+def _source_id(value: Any) -> str | None:
+    if value is None:
+        return None
+    source_id = str(value)
+    if not source_id.strip():
+        return None
+    return source_id
+
+
 def fallback_topic_analysis(topic_text: str) -> WritingTopicAnalysis:
     topic = _clean_text(topic_text, 24) or "这件事"
     return WritingTopicAnalysis(
@@ -71,13 +80,17 @@ def fallback_material_questions() -> MaterialQuestionsResult:
 
 
 def fallback_material_cards(answers: list[dict]) -> MaterialCardsResult:
-    usable_answers = [
-        answer
-        for answer in answers
-        if not answer.get("skipped")
-        and _clean_text(answer.get("id"), 120)
-        and _clean_text(answer.get("text"), 120)
-    ]
+    usable_answers = []
+    for answer in answers:
+        source_id = _source_id(answer.get("id"))
+        if (
+            answer.get("skipped")
+            or source_id is None
+            or not _clean_text(answer.get("text"), 120)
+        ):
+            continue
+        usable_answers.append((answer, source_id))
+
     slots = [
         ("card-event", "event"),
         ("card-detail", "detail"),
@@ -86,13 +99,13 @@ def fallback_material_cards(answers: list[dict]) -> MaterialCardsResult:
     cards = []
     for index, (card_id, category) in enumerate(slots):
         if index < len(usable_answers):
-            answer = usable_answers[index]
+            answer, source_id = usable_answers[index]
             cards.append(
                 {
                     "id": card_id,
                     "category": category,
                     "text": _clean_text(answer.get("text"), 120),
-                    "source_answer_ids": [_clean_text(answer.get("id"), 120)],
+                    "source_answer_ids": [source_id],
                     "placeholder": False,
                 }
             )
@@ -113,15 +126,16 @@ def fallback_outline(cards: list[dict]) -> WritingOutlineResult:
     valid_cards_by_category = {}
     for card in cards:
         category = card.get("category")
+        source_id = _source_id(card.get("id"))
         if (
             category not in {"event", "detail", "feeling_takeaway"}
             or card.get("deleted")
             or card.get("placeholder")
-            or not _clean_text(card.get("id"), 120)
+            or source_id is None
             or not _clean_text(card.get("text"), 80)
         ):
             continue
-        valid_cards_by_category.setdefault(category, card)
+        valid_cards_by_category.setdefault(category, (card, source_id))
 
     def section(
         section_id: str,
@@ -129,8 +143,8 @@ def fallback_outline(cards: list[dict]) -> WritingOutlineResult:
         heading: str,
         category: str | None,
     ) -> dict:
-        card = valid_cards_by_category.get(category or "")
-        if card is None:
+        card_source = valid_cards_by_category.get(category or "")
+        if card_source is None:
             return {
                 "id": section_id,
                 "slot": slot,
@@ -139,12 +153,13 @@ def fallback_outline(cards: list[dict]) -> WritingOutlineResult:
                 "source_card_ids": [],
                 "placeholder": True,
             }
+        card, source_id = card_source
         return {
             "id": section_id,
             "slot": slot,
             "heading": heading,
             "note": _clean_text(card.get("text"), 80),
-            "source_card_ids": [_clean_text(card.get("id"), 120)],
+            "source_card_ids": [source_id],
             "placeholder": False,
         }
 

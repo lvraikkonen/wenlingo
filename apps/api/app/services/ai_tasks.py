@@ -217,6 +217,71 @@ def _validate_sentence_challenge_response_context(
         )
 
 
+def _payload_source_id(value) -> str | None:
+    if value is None:
+        return None
+    source_id = str(value)
+    if not source_id.strip():
+        return None
+    return source_id
+
+
+def _valid_answer_source_ids(answers: list[dict]) -> set[str]:
+    source_ids = set()
+    for answer in answers:
+        source_id = _payload_source_id(answer.get("id"))
+        if source_id is not None:
+            source_ids.add(source_id)
+    return source_ids
+
+
+def _valid_card_source_ids(cards: list[dict]) -> set[str]:
+    source_ids = set()
+    for card in cards:
+        if card.get("deleted") or card.get("placeholder"):
+            continue
+        source_id = _payload_source_id(card.get("id"))
+        if source_id is not None:
+            source_ids.add(source_id)
+    return source_ids
+
+
+def _validate_material_card_source_ids(
+    output: MaterialCardsResult,
+    valid_source_ids: set[str],
+) -> None:
+    unknown_source_ids = sorted(
+        {
+            source_id
+            for card in output.cards
+            for source_id in card.source_answer_ids
+            if source_id not in valid_source_ids
+        }
+    )
+    if unknown_source_ids:
+        raise LLMTaskValidationError(
+            "unknown source_answer_ids: " + ", ".join(unknown_source_ids)
+        )
+
+
+def _validate_outline_source_ids(
+    output: WritingOutlineResult,
+    valid_source_ids: set[str],
+) -> None:
+    unknown_source_ids = sorted(
+        {
+            source_id
+            for section in output.sections
+            for source_id in section.source_card_ids
+            if source_id not in valid_source_ids
+        }
+    )
+    if unknown_source_ids:
+        raise LLMTaskValidationError(
+            "unknown source_card_ids: " + ", ".join(unknown_source_ids)
+        )
+
+
 def estimate_llm_cost(
     prompt_tokens: int,
     completion_tokens: int,
@@ -517,6 +582,7 @@ async def material_card_generation(
     student_id: str | None = None,
 ) -> LLMTaskResult[MaterialCardsResult]:
     prompt = get_prompt("material_card_generation")
+    valid_source_ids = _valid_answer_source_ids(answers)
     return await runner.run(
         session=session,
         student_id=student_id,
@@ -528,6 +594,10 @@ async def material_card_generation(
         deterministic_fallback_factory=lambda _context: fallback_material_cards(answers),
         input_summary=f"写作城堡素材卡片；回答数：{len(answers)}",
         prompt_version=prompt.version,
+        validate_output=lambda output: _validate_material_card_source_ids(
+            output,
+            valid_source_ids,
+        ),
     )
 
 
@@ -538,6 +608,7 @@ async def outline_generation(
     student_id: str | None = None,
 ) -> LLMTaskResult[WritingOutlineResult]:
     prompt = get_prompt("outline_generation")
+    valid_source_ids = _valid_card_source_ids(cards)
     return await runner.run(
         session=session,
         student_id=student_id,
@@ -549,6 +620,10 @@ async def outline_generation(
         deterministic_fallback_factory=lambda _context: fallback_outline(cards),
         input_summary=f"写作城堡提纲生成；素材卡数：{len(cards)}",
         prompt_version=prompt.version,
+        validate_output=lambda output: _validate_outline_source_ids(
+            output,
+            valid_source_ids,
+        ),
     )
 
 

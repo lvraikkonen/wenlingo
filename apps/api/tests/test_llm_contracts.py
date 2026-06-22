@@ -2,21 +2,27 @@ import pytest
 from pydantic import ValidationError
 
 from app.services.ai_tasks import (
+    LLMTaskValidationError,
     convert_ghostwriting_request,
     essay_revision_comparison,
+    material_card_generation,
+    outline_generation,
     sentence_upgrade_feedback,
 )
 from app.services.llm_contracts import (
     EssayFeedback,
     EssayRevisionComparison,
     GhostwritingCheck,
+    MaterialCardsResult,
     ReportContent,
     RevisionTask,
     SentenceChallenge,
     SentenceChallengeFeedback,
     SentenceFeedback,
+    WritingOutlineResult,
 )
 from app.services.llm_provider import MockLLMProvider, response_contract_for_task
+from app.services.writing_castle_ai import fallback_material_cards, fallback_outline
 
 
 def test_essay_feedback_rejects_more_than_one_revision_task():
@@ -433,6 +439,75 @@ def revision_comparison_output() -> EssayRevisionComparison:
     )
 
 
+def material_cards_output() -> MaterialCardsResult:
+    return MaterialCardsResult(
+        cards=[
+            {
+                "id": "card-event",
+                "category": "event",
+                "text": "我学会了骑车。",
+                "source_answer_ids": ["answer-1"],
+                "placeholder": False,
+            },
+            {
+                "id": "card-detail",
+                "category": "detail",
+                "text": "",
+                "source_answer_ids": [],
+                "placeholder": True,
+            },
+            {
+                "id": "card-feeling",
+                "category": "feeling_takeaway",
+                "text": "",
+                "source_answer_ids": [],
+                "placeholder": True,
+            },
+        ],
+        encouragement="先把真实素材收好。",
+    )
+
+
+def outline_output() -> WritingOutlineResult:
+    return WritingOutlineResult(
+        sections=[
+            {
+                "id": "outline-cause",
+                "slot": "cause",
+                "heading": "起因",
+                "note": "我学会了骑车。",
+                "source_card_ids": ["card-event"],
+                "placeholder": False,
+            },
+            {
+                "id": "outline-process",
+                "slot": "process",
+                "heading": "经过",
+                "note": "",
+                "source_card_ids": [],
+                "placeholder": True,
+            },
+            {
+                "id": "outline-result",
+                "slot": "result",
+                "heading": "结果",
+                "note": "",
+                "source_card_ids": [],
+                "placeholder": True,
+            },
+            {
+                "id": "outline-reflection",
+                "slot": "reflection",
+                "heading": "感受",
+                "note": "",
+                "source_card_ids": [],
+                "placeholder": True,
+            },
+        ],
+        tip="每一段只抓一个真实重点。",
+    )
+
+
 @pytest.mark.asyncio
 async def test_sentence_upgrade_feedback_uses_runner_output():
     output = sentence_feedback_output()
@@ -537,6 +612,156 @@ async def test_essay_revision_comparison_exposes_deterministic_fallback_factory(
 
     fallback = runner.calls[0]["deterministic_fallback_factory"](None)
     assert fallback.encouragement == "你完成了二稿，这一步本身就很值得肯定。"
+
+
+@pytest.mark.asyncio
+async def test_material_card_generation_validates_source_answer_ids():
+    runner = RecordingRunner(material_cards_output())
+
+    await material_card_generation(
+        runner=runner,
+        answers=[
+            {"id": "answer-1", "question_id": "q1", "text": "我学会了骑车。", "skipped": False}
+        ],
+    )
+
+    validate_output = runner.calls[0]["validate_output"]
+    invalid_output = MaterialCardsResult(
+        cards=[
+            {
+                "id": "card-event",
+                "category": "event",
+                "text": "我学会了骑车。",
+                "source_answer_ids": ["missing"],
+                "placeholder": False,
+            },
+            {
+                "id": "card-detail",
+                "category": "detail",
+                "text": "",
+                "source_answer_ids": [],
+                "placeholder": True,
+            },
+            {
+                "id": "card-feeling",
+                "category": "feeling_takeaway",
+                "text": "",
+                "source_answer_ids": [],
+                "placeholder": True,
+            },
+        ],
+        encouragement="先把真实素材收好。",
+    )
+
+    with pytest.raises(LLMTaskValidationError, match="unknown source_answer_ids"):
+        validate_output(invalid_output)
+
+
+@pytest.mark.asyncio
+async def test_outline_generation_validates_source_card_ids():
+    runner = RecordingRunner(outline_output())
+
+    await outline_generation(
+        runner=runner,
+        cards=[
+            {
+                "id": "card-event",
+                "category": "event",
+                "text": "我学会了骑车。",
+                "source_answer_ids": ["answer-1"],
+                "deleted": False,
+                "placeholder": False,
+            },
+            {
+                "id": "card-deleted",
+                "category": "detail",
+                "text": "不能引用删除卡。",
+                "source_answer_ids": ["answer-2"],
+                "deleted": True,
+                "placeholder": False,
+            },
+            {
+                "id": "card-placeholder",
+                "category": "feeling_takeaway",
+                "text": "",
+                "source_answer_ids": [],
+                "deleted": False,
+                "placeholder": True,
+            },
+        ],
+    )
+
+    validate_output = runner.calls[0]["validate_output"]
+    invalid_output = WritingOutlineResult(
+        sections=[
+            {
+                "id": "outline-cause",
+                "slot": "cause",
+                "heading": "起因",
+                "note": "我学会了骑车。",
+                "source_card_ids": ["missing", "card-deleted", "card-placeholder"],
+                "placeholder": False,
+            },
+            {
+                "id": "outline-process",
+                "slot": "process",
+                "heading": "经过",
+                "note": "",
+                "source_card_ids": [],
+                "placeholder": True,
+            },
+            {
+                "id": "outline-result",
+                "slot": "result",
+                "heading": "结果",
+                "note": "",
+                "source_card_ids": [],
+                "placeholder": True,
+            },
+            {
+                "id": "outline-reflection",
+                "slot": "reflection",
+                "heading": "感受",
+                "note": "",
+                "source_card_ids": [],
+                "placeholder": True,
+            },
+        ],
+        tip="每一段只抓一个真实重点。",
+    )
+
+    with pytest.raises(LLMTaskValidationError, match="unknown source_card_ids"):
+        validate_output(invalid_output)
+
+
+def test_writing_castle_fallbacks_preserve_exact_source_ids():
+    opaque_answer_id = "answer-<opaque>-123-" + ("x" * 130)
+    opaque_card_id = "card-<opaque>-123-" + ("y" * 130)
+
+    cards = fallback_material_cards(
+        [
+            {
+                "id": opaque_answer_id,
+                "question_id": "q1",
+                "text": "我学会了骑车。",
+                "skipped": False,
+            }
+        ]
+    )
+    outline = fallback_outline(
+        [
+            {
+                "id": opaque_card_id,
+                "category": "event",
+                "text": "我学会了骑车。",
+                "deleted": False,
+                "placeholder": False,
+            }
+        ]
+    )
+
+    assert cards.cards[0].source_answer_ids == [opaque_answer_id]
+    assert outline.sections[0].source_card_ids == [opaque_card_id]
 
 
 @pytest.mark.asyncio
