@@ -116,6 +116,53 @@ def test_generation_endpoints_are_idempotent_and_do_not_overwrite_child_edits(se
     assert saved.material_card["cards"][0]["text"] == "孩子改过的素材"
 
 
+def test_topic_analysis_is_blocked_after_child_topic_focus(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+
+    focus = client.patch(
+        f"/api/essays/{essay_id}/topic-focus",
+        json={"text": "", "adopted_from_ai": False, "skipped": True},
+    )
+    blocked = client.post(f"/api/essays/{essay_id}/topic-analysis", json={})
+
+    assert focus.status_code == 200
+    assert blocked.status_code == 409
+
+
+def test_material_questions_are_blocked_after_child_answers(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+
+    answers = client.patch(
+        f"/api/essays/{essay_id}/material-answers",
+        json={
+            "answers": [
+                {
+                    "id": "answer-1",
+                    "question_id": "q-event",
+                    "text": "我学会了骑车。",
+                    "skipped": False,
+                }
+            ]
+        },
+    )
+    blocked = client.post(f"/api/essays/{essay_id}/material-questions", json={})
+
+    assert answers.status_code == 200
+    assert blocked.status_code == 409
+
+
 def test_skip_path_can_go_directly_to_first_draft(session, client):
     family = create_authenticated_family(session)
     student = family["student"]

@@ -237,7 +237,7 @@ async def generate_topic_analysis(
         essay.outline = outline
         return _save_step_response(session, essay, "topic_analysis", topic_analysis)
     focus = outline["child_topic_focus"]
-    if request.regenerate and (focus.get("skipped") or str(focus.get("text") or "").strip()):
+    if focus.get("skipped") or str(focus.get("text") or "").strip():
         raise HTTPException(status_code=409, detail="topic focus already saved")
 
     result = await writing_topic_analysis(
@@ -309,7 +309,7 @@ async def generate_material_questions(
     if material["step_state"].get("questions_status") == "generated" and not request.regenerate:
         essay.material_card = material
         return _save_step_response(session, essay, "material_card", essay.material_card)
-    if request.regenerate and material.get("answers"):
+    if material.get("answers"):
         raise HTTPException(status_code=409, detail="material answers already saved")
 
     outline = normalize_outline_state(essay.outline)
