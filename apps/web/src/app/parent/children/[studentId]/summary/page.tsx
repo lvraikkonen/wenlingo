@@ -180,6 +180,46 @@ function ParentChildSummaryPageContent({ studentId }: { studentId: string }) {
                   </div>
                 </section>
 
+                {data.writing_castle_summary ? (
+                  <section className="rounded-lg border border-[var(--wen-border)] bg-white p-6 shadow-sm">
+                    <h2 className="text-xl font-bold">作文构思过程</h2>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <p className="rounded-lg bg-[var(--wen-bg)] px-4 py-3 font-semibold">
+                        题目：{data.writing_castle_summary.topic}
+                      </p>
+                      <p className="rounded-lg bg-[var(--wen-bg)] px-4 py-3 font-semibold">
+                        审题：
+                        {data.writing_castle_summary.topic_analysis_used
+                          ? "已使用"
+                          : "已跳过"}
+                      </p>
+                      <p className="rounded-lg bg-[var(--wen-bg)] px-4 py-3 font-semibold">
+                        选材：回答{" "}
+                        {data.writing_castle_summary.material_questions_answered}{" "}
+                        个问题
+                      </p>
+                      <p className="rounded-lg bg-[var(--wen-bg)] px-4 py-3 font-semibold">
+                        素材卡：保留{" "}
+                        {data.writing_castle_summary.material_cards_retained} 张
+                      </p>
+                      <p className="rounded-lg bg-[var(--wen-bg)] px-4 py-3 font-semibold">
+                        提纲：
+                        {data.writing_castle_summary.outline_confirmed
+                          ? data.writing_castle_summary.outline_edited
+                            ? "已确认并修改"
+                            : "已确认"
+                          : "未确认"}
+                      </p>
+                      <p className="rounded-lg bg-[var(--wen-bg)] px-4 py-3 font-semibold">
+                        初稿：
+                        {data.writing_castle_summary.first_draft_completed
+                          ? "已完成"
+                          : "未完成"}
+                      </p>
+                    </div>
+                  </section>
+                ) : null}
+
                 <section className="rounded-lg border border-[var(--wen-border)] bg-white p-6 shadow-sm">
                   <h2 className="text-xl font-bold">能力变化</h2>
                   <div className="mt-4 flex flex-wrap gap-3">

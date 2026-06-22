@@ -134,6 +134,43 @@ test("summary page renders populated practice counts, ability changes, and actio
   );
 });
 
+test("summary page renders writing castle process summary", async () => {
+  vi.mocked(getMyAlphaChildSummary).mockResolvedValueOnce({
+    parent_id: "parent-1",
+    child,
+    assessment_completed: true,
+    practice_counts: { assessments: 1, sentence_trainings: 0, essays: 1 },
+    ability_changes: [{ ability: "structure", label: "结构力", delta: 4 }],
+    recent_highlight: "孩子完成了一次作文构思。",
+    sentence_training_summary: null,
+    next_suggestion: "下一次继续练习把经过写具体。",
+    empty_state: null,
+    writing_castle_summary: {
+      topic: "我学会了骑车",
+      topic_analysis_used: true,
+      topic_focus_confirmed: true,
+      topic_focus_edited: true,
+      material_questions_answered: 2,
+      material_cards_retained: 3,
+      outline_confirmed: true,
+      outline_edited: true,
+      first_draft_completed: true,
+      revision_completed: false,
+      settlement_completed: false,
+    },
+  });
+
+  await renderSummaryPage();
+
+  expect(await screen.findByText("作文构思过程")).toBeInTheDocument();
+  expect(screen.getByText("题目：我学会了骑车")).toBeInTheDocument();
+  expect(screen.getByText("审题：已使用")).toBeInTheDocument();
+  expect(screen.getByText("选材：回答 2 个问题")).toBeInTheDocument();
+  expect(screen.getByText("素材卡：保留 3 张")).toBeInTheDocument();
+  expect(screen.getByText("提纲：已确认并修改")).toBeInTheDocument();
+  expect(screen.getByText("初稿：已完成")).toBeInTheDocument();
+});
+
 test("summary page renders lightweight sentence training summary", async () => {
   vi.mocked(getMyAlphaChildSummary).mockResolvedValueOnce({
     parent_id: "parent-1",
