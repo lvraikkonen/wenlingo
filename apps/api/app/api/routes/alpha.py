@@ -84,6 +84,21 @@ P0_EVENT_TYPES = {
     "sentence_challenge_completed",
     "sentence_challenge_feedback_failed",
     "ai_daily_limit_reached",
+    "writing_castle_started",
+    "topic_analysis_completed",
+    "topic_focus_confirmed",
+    "topic_focus_skipped",
+    "material_question_answered",
+    "material_questions_completed",
+    "material_questions_skipped",
+    "material_cards_generated",
+    "material_cards_edited",
+    "material_cards_confirmed",
+    "outline_generated",
+    "outline_edited",
+    "outline_confirmed",
+    "outline_skipped",
+    "prewriting_first_draft_submitted",
 }
 
 P1_EVENT_TYPES = {
@@ -111,6 +126,12 @@ SAFE_PAYLOAD_KEYS = {
     "child_count",
     "target_skill",
     "limit_type",
+    "essay_id",
+    "step",
+    "answered_count",
+    "card_count",
+    "outline_section_count",
+    "skipped",
 }
 JSON_SAFE_SCALARS = (str, int, float, bool, type(None))
 INVITE_CODE_VALUE_PATTERN = re.compile(

@@ -12,6 +12,7 @@ from app.api.routes import (
     readings,
     reports,
     sentences,
+    writing_castle,
 )
 from app.core.config import get_settings
 from app.services.ai_routing import validate_ai_routing_startup
@@ -49,6 +50,7 @@ def create_app() -> FastAPI:
     app.include_router(assessment.router)
     app.include_router(dashboard.router)
     app.include_router(essays.router)
+    app.include_router(writing_castle.router)
     app.include_router(readings.router)
     app.include_router(reports.router)
     app.include_router(sentences.router)
