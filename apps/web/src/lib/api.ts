@@ -19,10 +19,15 @@ import type {
   DashboardResponse,
   FeedbackReactionTargetType,
   FeedbackReactionValue,
+  MaterialAnswer,
+  MaterialCardSlot,
   ParentSummaryUsefulness,
   SavedFeedbackReaction,
   SentenceChallengeCompletionResponse,
   SentenceChallengeResponse,
+  WritingCastleEssayResponse,
+  WritingCastleTopicAnalysisResponse,
+  WritingOutlineSection,
 } from "./types";
 
 const rawApiBaseUrl =
@@ -243,6 +248,139 @@ export function createEssay(
   payload: { title: string; draft: string; entry: "existing_draft" | "topic" },
 ): Promise<EssayResponse> {
   return requestJson<EssayResponse>(`/api/students/${studentId}/essays`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createClassroomWritingCastleEssay(
+  studentId: string,
+  payload: { topic_text: string },
+): Promise<WritingCastleEssayResponse> {
+  return requestJson<WritingCastleEssayResponse>(
+    `/api/students/${studentId}/writing-castle/classroom`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function generateTopicAnalysis(
+  essayId: string,
+): Promise<WritingCastleTopicAnalysisResponse> {
+  return requestJson<WritingCastleTopicAnalysisResponse>(
+    `/api/essays/${essayId}/topic-analysis`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+}
+
+export function saveTopicFocus(
+  essayId: string,
+  payload: { text: string; adopted_from_ai: boolean; skipped: boolean },
+): Promise<WritingCastleEssayResponse> {
+  return requestJson<WritingCastleEssayResponse>(
+    `/api/essays/${essayId}/topic-focus`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function generateMaterialQuestions(
+  essayId: string,
+): Promise<WritingCastleEssayResponse> {
+  return requestJson<WritingCastleEssayResponse>(
+    `/api/essays/${essayId}/material-questions`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+}
+
+export function saveMaterialAnswers(
+  essayId: string,
+  payload: { answers: MaterialAnswer[] },
+): Promise<WritingCastleEssayResponse> {
+  return requestJson<WritingCastleEssayResponse>(
+    `/api/essays/${essayId}/material-answers`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function generateMaterialCards(
+  essayId: string,
+): Promise<WritingCastleEssayResponse> {
+  return requestJson<WritingCastleEssayResponse>(
+    `/api/essays/${essayId}/material-cards`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+}
+
+export function saveMaterialCards(
+  essayId: string,
+  payload: { cards: MaterialCardSlot[] },
+): Promise<WritingCastleEssayResponse> {
+  return requestJson<WritingCastleEssayResponse>(
+    `/api/essays/${essayId}/material-cards`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function generateOutline(
+  essayId: string,
+): Promise<WritingCastleEssayResponse> {
+  return requestJson<WritingCastleEssayResponse>(
+    `/api/essays/${essayId}/outline`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+}
+
+export function saveOutline(
+  essayId: string,
+  payload: { sections: WritingOutlineSection[]; skipped: boolean },
+): Promise<WritingCastleEssayResponse> {
+  return requestJson<WritingCastleEssayResponse>(
+    `/api/essays/${essayId}/outline`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function submitPrewritingFirstDraft(
+  essayId: string,
+  payload: { draft: string },
+): Promise<EssayResponse> {
+  return requestJson<EssayResponse>(`/api/essays/${essayId}/first-draft`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

@@ -2,15 +2,38 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   completeSentenceChallenge,
   createAssessment,
+  createClassroomWritingCastleEssay,
   createSentenceChallenge,
   createSentenceTraining,
+  generateMaterialCards,
+  generateMaterialQuestions,
+  generateOutline,
+  generateTopicAnalysis,
   getAdminAlphaOverview,
   getAdminAlphaAIUsage,
   getDashboard,
+  saveMaterialAnswers,
+  saveMaterialCards,
+  saveOutline,
+  saveTopicFocus,
+  submitPrewritingFirstDraft,
 } from "../src/lib/api";
 import type { DashboardResponse } from "../src/lib/types";
 
 const fetchMock = vi.fn();
+
+function assertTopicAnalysisTypes(
+  response: Awaited<ReturnType<typeof generateTopicAnalysis>>,
+) {
+  const topLevelSuggestedFocus: string =
+    response.topic_analysis.suggested_focus;
+  const nestedSuggestedFocus: string =
+    response.essay.outline.topic_analysis.suggested_focus;
+
+  return { nestedSuggestedFocus, topLevelSuggestedFocus };
+}
+
+void assertTopicAnalysisTypes;
 
 function jsonResponse(body: unknown) {
   return {
@@ -297,5 +320,156 @@ describe("api client", () => {
     }) as unknown as typeof fetch;
 
     await expect(getDashboard("s1")).rejects.toThrow("Request failed: 500");
+  });
+
+  test("writing castle api functions call prewriting endpoints", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ essay: { id: "essay-1" } }));
+
+    const topicPayload = {
+      topic_text: "我学会了骑车",
+    };
+    const focusPayload = {
+      text: "写学会骑车",
+      adopted_from_ai: false,
+      skipped: false,
+    };
+    const answersPayload = {
+      answers: [
+        {
+          id: "answer-1",
+          question_id: "question-1",
+          text: "我先练习保持平衡。",
+          skipped: false,
+        },
+      ],
+    };
+    const cardsPayload = {
+      cards: [
+        {
+          id: "card-1",
+          category: "event",
+          text: "第一次骑车摇摇晃晃",
+          source_answer_ids: ["answer-1"],
+          order: 1,
+          deleted: false,
+          child_edited: true,
+          placeholder: false,
+        },
+      ],
+    } satisfies Parameters<typeof saveMaterialCards>[1];
+    const outlinePayload = {
+      sections: [
+        {
+          id: "section-1",
+          slot: "process",
+          heading: "练习过程",
+          note: "写从害怕到会骑的过程",
+          source_card_ids: ["card-1"],
+          child_edited: true,
+          placeholder: false,
+        },
+      ],
+      skipped: true,
+    } satisfies Parameters<typeof saveOutline>[1];
+    const firstDraftPayload = {
+      draft: "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+    };
+
+    await createClassroomWritingCastleEssay("student-1", topicPayload);
+    await generateTopicAnalysis("essay-1");
+    await saveTopicFocus("essay-1", focusPayload);
+    await generateMaterialQuestions("essay-1");
+    await saveMaterialAnswers("essay-1", answersPayload);
+    await generateMaterialCards("essay-1");
+    await saveMaterialCards("essay-1", cardsPayload);
+    await generateOutline("essay-1");
+    await saveOutline("essay-1", outlinePayload);
+    await submitPrewritingFirstDraft("essay-1", firstDraftPayload);
+
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/students/student-1/writing-castle/classroom",
+      "/api/essays/essay-1/topic-analysis",
+      "/api/essays/essay-1/topic-focus",
+      "/api/essays/essay-1/material-questions",
+      "/api/essays/essay-1/material-answers",
+      "/api/essays/essay-1/material-cards",
+      "/api/essays/essay-1/material-cards",
+      "/api/essays/essay-1/outline",
+      "/api/essays/essay-1/outline",
+      "/api/essays/essay-1/first-draft",
+    ]);
+
+    expect(fetchMock.mock.calls.map((call) => call[1])).toEqual([
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(topicPayload),
+        credentials: "include",
+        cache: "no-store",
+      }),
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+        credentials: "include",
+        cache: "no-store",
+      }),
+      expect.objectContaining({
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(focusPayload),
+        credentials: "include",
+        cache: "no-store",
+      }),
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+        credentials: "include",
+        cache: "no-store",
+      }),
+      expect.objectContaining({
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(answersPayload),
+        credentials: "include",
+        cache: "no-store",
+      }),
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+        credentials: "include",
+        cache: "no-store",
+      }),
+      expect.objectContaining({
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(cardsPayload),
+        credentials: "include",
+        cache: "no-store",
+      }),
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+        credentials: "include",
+        cache: "no-store",
+      }),
+      expect.objectContaining({
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(outlinePayload),
+        credentials: "include",
+        cache: "no-store",
+      }),
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(firstDraftPayload),
+        credentials: "include",
+        cache: "no-store",
+      }),
+    ]);
   });
 });

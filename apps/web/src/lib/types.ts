@@ -163,6 +163,105 @@ export type AlphaAbilityChange = {
   delta: number;
 };
 
+export type TopicAnalysisCard = {
+  id: string;
+  kind: "topic_question" | "must_include" | "shine_point";
+  title: string;
+  body: string;
+  required_points: string[];
+};
+
+export type MaterialAnswer = {
+  id: string;
+  question_id: string;
+  text: string;
+  skipped: boolean;
+};
+
+export type MaterialCardSlot = {
+  id: string;
+  category: "event" | "detail" | "feeling_takeaway";
+  text: string;
+  source_answer_ids: string[];
+  order: number;
+  deleted: boolean;
+  child_edited: boolean;
+  placeholder: boolean;
+};
+
+export type WritingOutlineSection = {
+  id: string;
+  slot: "cause" | "process" | "result" | "reflection";
+  heading: string;
+  note: string;
+  source_card_ids: string[];
+  child_edited: boolean;
+  placeholder: boolean;
+};
+
+export type WritingCastleTopicAnalysis = {
+  cards: TopicAnalysisCard[];
+  suggested_focus: string;
+  status: string;
+};
+
+export type WritingCastleEssay = {
+  id: string;
+  student_id: string;
+  title: string;
+  status:
+    | "prewriting_started"
+    | "topic_ready"
+    | "materials_ready"
+    | "outline_ready"
+    | "revision_requested"
+    | "settled";
+  material_card: {
+    schema_version: "v0.6a.1";
+    questions: Array<{ id: string; text: string; hint: string; order: number }>;
+    answers: MaterialAnswer[];
+    cards: MaterialCardSlot[];
+    step_state: {
+      questions_status: string;
+      cards_status: string;
+    };
+  };
+  outline: {
+    schema_version: "v0.6a.1";
+    topic_analysis: WritingCastleTopicAnalysis;
+    child_topic_focus: {
+      text: string;
+      adopted_from_ai: boolean;
+      skipped: boolean;
+      updated_at: string;
+    };
+    sections: WritingOutlineSection[];
+    step_state: { outline_status: string };
+  };
+};
+
+export type WritingCastleEssayResponse = {
+  essay: WritingCastleEssay;
+};
+
+export type WritingCastleTopicAnalysisResponse = WritingCastleEssayResponse & {
+  topic_analysis: WritingCastleTopicAnalysis;
+};
+
+export type WritingCastleProcessSummary = {
+  topic: string;
+  topic_analysis_used: boolean;
+  topic_focus_confirmed: boolean;
+  topic_focus_edited: boolean;
+  material_questions_answered: number;
+  material_cards_retained: number;
+  outline_confirmed: boolean;
+  outline_edited: boolean;
+  first_draft_completed: boolean;
+  revision_completed: boolean;
+  settlement_completed: boolean;
+};
+
 export type AlphaChildSummary = {
   parent_id: string;
   child: AlphaChild;
@@ -176,6 +275,7 @@ export type AlphaChildSummary = {
   ability_changes: AlphaAbilityChange[];
   recent_highlight: string | null;
   sentence_training_summary: string | null;
+  writing_castle_summary?: WritingCastleProcessSummary | null;
   next_suggestion: string;
   empty_state: string | null;
 };
