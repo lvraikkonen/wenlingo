@@ -10,9 +10,6 @@ from app.services.llm_contracts import (
     EssayFeedback,
     EssayRevisionComparison,
     GhostwritingCheck,
-    MaterialCard,
-    MaterialQuestion,
-    OutlineResult,
     ReportContent,
     RevisionTask,
     SentenceChallenge,
@@ -42,22 +39,77 @@ def test_essay_feedback_provider_contract_prefers_exactly_one_revision_task():
     assert "Do not write a full essay" in contract
 
 
-def test_pre_writing_contracts_validate_material_card_and_outline_result():
-    material = MaterialCard(
-        questions=[
-            {"question": "这件事发生在哪里？", "hint": "想一想地点和时间"},
-            {"question": "谁和你一起？", "hint": "写出一个人物"},
-            {"question": "最重要的动作是什么？", "hint": "选一个看得见的动作"},
+def test_writing_topic_analysis_contract_is_short_and_structured():
+    from app.services.llm_contracts import WritingTopicAnalysis
+
+    result = WritingTopicAnalysis(
+        cards=[
+            {
+                "id": "topic-ask",
+                "kind": "topic_question",
+                "title": "题目在问什么",
+                "body": "写一次让你有变化的经历。",
+                "required_points": [],
+            },
+            {
+                "id": "must-have",
+                "kind": "must_include",
+                "title": "一定要写到什么",
+                "body": "写清楚事情的起因、经过和结果。",
+                "required_points": ["事情经过", "自己的变化"],
+            },
+            {
+                "id": "shine",
+                "kind": "shine_point",
+                "title": "可以写精彩的地方",
+                "body": "挑一个动作或一句话写具体。",
+                "required_points": [],
+            },
         ],
-        encouragement="先把素材想清楚，再开始写。",
-    )
-    outline = OutlineResult(
-        sections=["开头交代时间地点", "中间写最重要的动作", "结尾写自己的感受"],
-        tip="每一段只抓一个重点。",
+        suggested_focus="我觉得这题最重要的是写清楚自己怎么学会的。",
     )
 
-    assert len(material.questions) == 3
-    assert outline.sections[0] == "开头交代时间地点"
+    assert len(result.cards) == 3
+    assert result.cards[0].kind == "topic_question"
+
+
+def test_material_cards_require_source_answer_ids_for_non_placeholder_cards():
+    from pydantic import ValidationError
+    from app.services.llm_contracts import MaterialCardsResult
+
+    with pytest.raises(ValidationError):
+        MaterialCardsResult(
+            cards=[
+                {
+                    "id": "card-event",
+                    "category": "event",
+                    "text": "我学会了骑车。",
+                    "source_answer_ids": [],
+                    "placeholder": False,
+                }
+            ],
+            encouragement="先保留真实素材。",
+        )
+
+
+def test_writing_outline_requires_source_card_ids_for_story_specific_sections():
+    from pydantic import ValidationError
+    from app.services.llm_contracts import WritingOutlineResult
+
+    with pytest.raises(ValidationError):
+        WritingOutlineResult(
+            sections=[
+                {
+                    "id": "outline-cause",
+                    "slot": "cause",
+                    "heading": "起因",
+                    "note": "我第一次骑车很害怕。",
+                    "source_card_ids": [],
+                    "placeholder": False,
+                }
+            ],
+            tip="每段只抓一个重点。",
+        )
 
 
 @pytest.mark.parametrize(
@@ -168,52 +220,6 @@ async def test_mock_provider_returns_sentence_challenge_contract_outputs():
 def test_sentence_challenge_contracts_reject_extra_fields(contract, payload):
     with pytest.raises(ValidationError):
         contract(**payload)
-
-
-@pytest.mark.parametrize(
-    ("contract", "payload"),
-    [
-        (
-            MaterialQuestion,
-            {"question": "这件事发生在哪里？", "hint": "想一想地点和时间", "extra": "ignored"},
-        ),
-        (
-            MaterialCard,
-            {
-                "questions": [
-                    {"question": "这件事发生在哪里？", "hint": "想一想地点和时间"},
-                    {"question": "谁和你一起？", "hint": "写出一个人物"},
-                    {"question": "最重要的动作是什么？", "hint": "选一个看得见的动作"},
-                ],
-                "encouragement": "先把素材想清楚，再开始写。",
-                "extra": "ignored",
-            },
-        ),
-        (
-            OutlineResult,
-            {
-                "sections": ["开头交代时间地点", "中间写最重要的动作", "结尾写自己的感受"],
-                "tip": "每一段只抓一个重点。",
-                "extra": "ignored",
-            },
-        ),
-    ],
-)
-def test_pre_writing_contracts_reject_extra_fields(contract, payload):
-    with pytest.raises(ValidationError):
-        contract(**payload)
-
-
-def test_material_card_rejects_extra_fields_inside_questions():
-    with pytest.raises(ValidationError):
-        MaterialCard(
-            questions=[
-                {"question": "这件事发生在哪里？", "hint": "想一想地点和时间", "extra": "ignored"},
-                {"question": "谁和你一起？", "hint": "写出一个人物"},
-                {"question": "最重要的动作是什么？", "hint": "选一个看得见的动作"},
-            ],
-            encouragement="先把素材想清楚，再开始写。",
-        )
 
 
 @pytest.mark.asyncio

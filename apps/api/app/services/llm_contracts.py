@@ -8,6 +8,9 @@ NonBlankStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length
 ChallengeSkill = Literal["expand_sentence", "action_expression", "feeling"]
 ChallengeFocus = Literal["扩句", "动作描写", "心理感受"]
 ChallengeGrade = Literal["三年级", "四年级", "五年级", "六年级"]
+TopicCardKind = Literal["topic_question", "must_include", "shine_point"]
+MaterialCardCategory = Literal["event", "detail", "feeling_takeaway"]
+OutlineSlot = Literal["cause", "process", "result", "reflection"]
 DifficultyLabel = Literal[
     "三年级基础",
     "三年级进阶",
@@ -81,25 +84,86 @@ class GhostwritingCheck(BaseModel):
         return self
 
 
-class MaterialQuestion(BaseModel):
+class TopicAnalysisCard(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    question: NonBlankStr
-    hint: NonBlankStr
+    id: NonBlankStr
+    kind: TopicCardKind
+    title: NonBlankStr = Field(max_length=16)
+    body: NonBlankStr = Field(max_length=80)
+    required_points: list[NonBlankStr] = Field(default_factory=list, max_length=3)
 
 
-class MaterialCard(BaseModel):
+class WritingTopicAnalysis(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    questions: list[MaterialQuestion] = Field(min_length=3, max_length=5)
-    encouragement: NonBlankStr
+    cards: list[TopicAnalysisCard] = Field(min_length=3, max_length=3)
+    suggested_focus: NonBlankStr = Field(max_length=80)
 
 
-class OutlineResult(BaseModel):
+class MaterialQuestionItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    sections: list[NonBlankStr] = Field(min_length=3, max_length=5)
-    tip: NonBlankStr
+    id: NonBlankStr
+    text: NonBlankStr = Field(max_length=60)
+    hint: NonBlankStr = Field(max_length=80)
+    order: int = Field(ge=1, le=3)
+
+
+class MaterialQuestionsResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    questions: list[MaterialQuestionItem] = Field(min_length=3, max_length=3)
+    encouragement: NonBlankStr = Field(max_length=40)
+
+
+class MaterialCardSlot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: NonBlankStr
+    category: MaterialCardCategory
+    text: str = Field(default="", max_length=120)
+    source_answer_ids: list[NonBlankStr] = Field(default_factory=list, max_length=3)
+    placeholder: bool = False
+
+    @model_validator(mode="after")
+    def require_source_for_non_placeholder(self) -> "MaterialCardSlot":
+        if not self.placeholder and not self.source_answer_ids:
+            raise ValueError("non-placeholder material cards require source_answer_ids")
+        if self.placeholder and self.text and not self.source_answer_ids:
+            raise ValueError("placeholder material cards without sources cannot contain story content")
+        return self
+
+
+class MaterialCardsResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cards: list[MaterialCardSlot] = Field(min_length=3, max_length=3)
+    encouragement: NonBlankStr = Field(max_length=40)
+
+
+class WritingOutlineSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: NonBlankStr
+    slot: OutlineSlot
+    heading: NonBlankStr = Field(max_length=12)
+    note: str = Field(default="", max_length=80)
+    source_card_ids: list[NonBlankStr] = Field(default_factory=list, max_length=3)
+    placeholder: bool = False
+
+    @model_validator(mode="after")
+    def require_source_for_story_content(self) -> "WritingOutlineSection":
+        if not self.placeholder and self.note.strip() and not self.source_card_ids:
+            raise ValueError("story-specific outline sections require source_card_ids")
+        return self
+
+
+class WritingOutlineResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sections: list[WritingOutlineSection] = Field(min_length=4, max_length=4)
+    tip: NonBlankStr = Field(max_length=60)
 
 
 class ReportContent(BaseModel):
