@@ -163,6 +163,110 @@ def test_material_questions_are_blocked_after_child_answers(session, client):
     assert blocked.status_code == 409
 
 
+def test_legacy_essay_cannot_enter_writing_castle_prewriting(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    essay = Essay(student_id=student.id, title="legacy", status="draft_feedback")
+    session.add(essay)
+    session.commit()
+
+    response = client.post(f"/api/essays/{essay.id}/topic-analysis", json={})
+    session.refresh(essay)
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "writing castle essay not found"
+    assert essay.status == "draft_feedback"
+    assert essay.material_card == {}
+    assert essay.outline == {}
+
+
+def test_assessment_essay_cannot_enter_writing_castle_prewriting(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    essay = Essay(student_id=student.id, title="assessment", status="assessment_completed")
+    session.add(essay)
+    session.commit()
+
+    response = client.patch(
+        f"/api/essays/{essay.id}/topic-focus",
+        json={"text": "我想写这次测评。", "adopted_from_ai": False, "skipped": False},
+    )
+    session.refresh(essay)
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "writing castle essay not found"
+    assert essay.status == "assessment_completed"
+    assert essay.material_card == {}
+    assert essay.outline == {}
+
+
+def test_material_cards_confirmed_event_counts_retained_cards_only(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+    client.patch(
+        f"/api/essays/{essay_id}/material-answers",
+        json={
+            "answers": [
+                {
+                    "id": "answer-1",
+                    "question_id": "q-event",
+                    "text": "我学会了骑车。",
+                    "skipped": False,
+                }
+            ]
+        },
+    )
+
+    response = client.patch(
+        f"/api/essays/{essay_id}/material-cards",
+        json={
+            "cards": [
+                {
+                    "id": "card-retained",
+                    "category": "event",
+                    "text": "我学会了骑车。",
+                    "source_answer_ids": ["answer-1"],
+                    "order": 1,
+                    "deleted": False,
+                    "child_edited": False,
+                    "placeholder": False,
+                },
+                {
+                    "id": "card-placeholder",
+                    "category": "detail",
+                    "text": "",
+                    "source_answer_ids": [],
+                    "order": 2,
+                    "deleted": False,
+                    "child_edited": False,
+                    "placeholder": True,
+                },
+                {
+                    "id": "card-deleted",
+                    "category": "feeling_takeaway",
+                    "text": "删掉的素材",
+                    "source_answer_ids": ["answer-1"],
+                    "order": 3,
+                    "deleted": True,
+                    "child_edited": False,
+                    "placeholder": False,
+                },
+            ]
+        },
+    )
+    event = session.exec(
+        select(ProductEvent).where(ProductEvent.event_type == "material_cards_confirmed")
+    ).one()
+
+    assert response.status_code == 200
+    assert event.payload["card_count"] == 1
+
+
 def test_skip_path_can_go_directly_to_first_draft(session, client):
     family = create_authenticated_family(session)
     student = family["student"]
@@ -173,13 +277,15 @@ def test_skip_path_can_go_directly_to_first_draft(session, client):
     essay_id = start.json()["essay"]["id"]
 
     client.patch(f"/api/essays/{essay_id}/topic-focus", json={"text": "", "adopted_from_ai": False, "skipped": True})
-    client.patch(f"/api/essays/{essay_id}/material-answers", json={"answers": []})
+    answers = client.patch(f"/api/essays/{essay_id}/material-answers", json={"answers": []})
     client.patch(f"/api/essays/{essay_id}/outline", json={"sections": [], "skipped": True})
     response = client.post(
         f"/api/essays/{essay_id}/first-draft",
         json={"draft": "这次我想写自己的进步。我先写一个简单初稿，后面再慢慢修改。"},
     )
 
+    assert answers.status_code == 200
+    assert answers.json()["material_card"]["step_state"]["questions_status"] == "skipped"
     assert response.status_code == 201
     assert response.json()["essay"]["status"] == REVISION_REQUESTED_STATUS
 

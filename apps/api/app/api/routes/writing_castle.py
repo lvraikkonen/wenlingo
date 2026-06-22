@@ -28,8 +28,13 @@ from app.services.ai_tasks import (
 )
 from app.services.essay_workflow import draft_ability_deltas
 from app.services.writing_castle_state import (
+    MATERIALS_READY_STATUS,
+    OUTLINE_READY_STATUS,
     PREWRITING_STARTED_STATUS,
     REVISION_REQUESTED_STATUS,
+    SCHEMA_VERSION,
+    SETTLED_ESSAY_STATUS,
+    TOPIC_READY_STATUS,
     assert_prewriting_editable,
     confirm_material_cards,
     init_material_card_state,
@@ -49,6 +54,16 @@ from app.services.writing_castle_state import (
 
 router = APIRouter(tags=["writing_castle"])
 DAILY_LIMIT_ERROR_MESSAGES = {"daily limit exceeded", "daily limit reached"}
+OPEN_PREWRITING_STATUSES = {
+    PREWRITING_STARTED_STATUS,
+    TOPIC_READY_STATUS,
+    MATERIALS_READY_STATUS,
+    OUTLINE_READY_STATUS,
+}
+CLOSED_PREWRITING_STATUSES = {
+    REVISION_REQUESTED_STATUS,
+    SETTLED_ESSAY_STATUS,
+}
 
 
 class ClassroomEssayCreate(BaseModel):
@@ -99,11 +114,24 @@ def _student_and_ability(session: Session, student_id: str) -> tuple[StudentProf
     return student, ability
 
 
+def _is_writing_castle_essay(essay: Essay) -> bool:
+    if essay.status not in OPEN_PREWRITING_STATUSES | CLOSED_PREWRITING_STATUSES:
+        return False
+    return (
+        essay.material_card.get("schema_version") == SCHEMA_VERSION
+        and essay.outline.get("schema_version") == SCHEMA_VERSION
+    )
+
+
 def _prewriting_open(essay: Essay) -> None:
+    if not _is_writing_castle_essay(essay):
+        raise HTTPException(status_code=404, detail="writing castle essay not found")
     try:
         assert_prewriting_editable(essay.status)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if essay.status not in OPEN_PREWRITING_STATUSES:
+        raise HTTPException(status_code=404, detail="writing castle essay not found")
 
 
 def _record_event(
@@ -182,6 +210,10 @@ def _normalize_child_edited_cards(
                 normalized["source_answer_ids"] = fallback_source_ids[:3]
         normalized_cards.append(normalized)
     return normalized_cards
+
+
+def _retained_material_card_count(cards: list[dict[str, Any]]) -> int:
+    return sum(1 for card in cards if not card.get("deleted") and not card.get("placeholder"))
 
 
 @router.post(
@@ -353,6 +385,8 @@ async def save_material_answers(
         for answer in request.answers
         if not answer.get("skipped") and str(answer.get("text") or "").strip()
     )
+    if answered_count == 0:
+        essay.material_card["step_state"]["questions_status"] = "skipped"
     _record_event(
         session,
         "material_questions_skipped" if answered_count == 0 else "material_question_answered",
@@ -443,7 +477,10 @@ async def save_material_cards(
         "material_cards_confirmed",
         essay=essay,
         student=student,
-        payload={"step": "material_cards", "card_count": len(cards)},
+        payload={
+            "step": "material_cards",
+            "card_count": _retained_material_card_count(cards),
+        },
     )
     return _save_step_response(session, essay, "material_card", essay.material_card)
 
