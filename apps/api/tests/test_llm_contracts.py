@@ -77,7 +77,7 @@ def test_material_cards_require_source_answer_ids_for_non_placeholder_cards():
     from pydantic import ValidationError
     from app.services.llm_contracts import MaterialCardsResult
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="non-placeholder material cards require source_answer_ids"):
         MaterialCardsResult(
             cards=[
                 {
@@ -86,7 +86,21 @@ def test_material_cards_require_source_answer_ids_for_non_placeholder_cards():
                     "text": "我学会了骑车。",
                     "source_answer_ids": [],
                     "placeholder": False,
-                }
+                },
+                {
+                    "id": "card-detail",
+                    "category": "detail",
+                    "text": "",
+                    "source_answer_ids": [],
+                    "placeholder": True,
+                },
+                {
+                    "id": "card-feeling",
+                    "category": "feeling_takeaway",
+                    "text": "",
+                    "source_answer_ids": [],
+                    "placeholder": True,
+                },
             ],
             encouragement="先保留真实素材。",
         )
@@ -96,7 +110,7 @@ def test_writing_outline_requires_source_card_ids_for_story_specific_sections():
     from pydantic import ValidationError
     from app.services.llm_contracts import WritingOutlineResult
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="story-specific outline sections require source_card_ids"):
         WritingOutlineResult(
             sections=[
                 {
@@ -106,7 +120,31 @@ def test_writing_outline_requires_source_card_ids_for_story_specific_sections():
                     "note": "我第一次骑车很害怕。",
                     "source_card_ids": [],
                     "placeholder": False,
-                }
+                },
+                {
+                    "id": "outline-process",
+                    "slot": "process",
+                    "heading": "经过",
+                    "note": "",
+                    "source_card_ids": [],
+                    "placeholder": True,
+                },
+                {
+                    "id": "outline-result",
+                    "slot": "result",
+                    "heading": "结果",
+                    "note": "",
+                    "source_card_ids": [],
+                    "placeholder": True,
+                },
+                {
+                    "id": "outline-reflection",
+                    "slot": "reflection",
+                    "heading": "感受",
+                    "note": "",
+                    "source_card_ids": [],
+                    "placeholder": True,
+                },
             ],
             tip="每段只抓一个重点。",
         )

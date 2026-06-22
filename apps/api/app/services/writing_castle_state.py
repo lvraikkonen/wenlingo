@@ -15,6 +15,12 @@ SETTLED_ESSAY_STATUS = "settled"
 
 MATERIAL_CARD_CATEGORIES = ("event", "detail", "feeling_takeaway")
 OUTLINE_SLOTS = ("cause", "process", "result", "reflection")
+_PREWRITING_STATUS_RANK = {
+    PREWRITING_STARTED_STATUS: 0,
+    TOPIC_READY_STATUS: 1,
+    MATERIALS_READY_STATUS: 2,
+    OUTLINE_READY_STATUS: 3,
+}
 
 
 def _now_iso() -> str:
@@ -86,19 +92,25 @@ def assert_prewriting_editable(status: str) -> None:
         raise ValueError("prewriting is closed")
 
 
+def _advance_prewriting_status(status: str, target_status: str) -> str:
+    current_rank = _PREWRITING_STATUS_RANK.get(status, -1)
+    target_rank = _PREWRITING_STATUS_RANK[target_status]
+    return status if current_rank >= target_rank else target_status
+
+
 def next_status_after_topic(status: str) -> str:
     assert_prewriting_editable(status)
-    return TOPIC_READY_STATUS
+    return _advance_prewriting_status(status, TOPIC_READY_STATUS)
 
 
 def next_status_after_materials(status: str) -> str:
     assert_prewriting_editable(status)
-    return MATERIALS_READY_STATUS
+    return _advance_prewriting_status(status, MATERIALS_READY_STATUS)
 
 
 def next_status_after_outline(status: str) -> str:
     assert_prewriting_editable(status)
-    return OUTLINE_READY_STATUS
+    return _advance_prewriting_status(status, OUTLINE_READY_STATUS)
 
 
 def merge_topic_analysis(outline: dict[str, Any], cards: list[dict[str, Any]]) -> dict[str, Any]:
@@ -145,9 +157,12 @@ def merge_material_answers(
         for answer in answers
     ]
     skipped_count = sum(1 for answer in updated["answers"] if answer.get("skipped"))
-    updated["step_state"]["questions_status"] = (
-        "skipped" if skipped_count == len(updated["answers"]) else "answered"
-    )
+    if not updated["answers"]:
+        updated["step_state"]["questions_status"] = "not_started"
+    else:
+        updated["step_state"]["questions_status"] = (
+            "skipped" if skipped_count == len(updated["answers"]) else "answered"
+        )
     return updated
 
 
@@ -156,6 +171,12 @@ def validate_card_sources(
     cards: list[dict[str, Any]],
 ) -> None:
     answer_ids = {answer["id"] for answer in normalize_material_state(material)["answers"]}
+    for card in cards:
+        source_answer_ids = card.get("source_answer_ids", [])
+        if not card.get("placeholder") and not source_answer_ids:
+            raise ValueError("non-placeholder material cards require source_answer_ids")
+        if card.get("placeholder") and card.get("text", "").strip() and not source_answer_ids:
+            raise ValueError("placeholder material cards without sources cannot contain story content")
     unknown = sorted(
         {
             source_id
@@ -194,6 +215,13 @@ def validate_outline_sources(
         for card in normalize_material_state(material)["cards"]
         if not card.get("deleted") and not card.get("placeholder")
     }
+    for section in sections:
+        if (
+            not section.get("placeholder")
+            and section.get("note", "").strip()
+            and not section.get("source_card_ids", [])
+        ):
+            raise ValueError("story-specific outline sections require source_card_ids")
     unknown = sorted(
         {
             source_id

@@ -53,6 +53,19 @@ def test_status_transitions_allow_skip_forward_but_not_regress_from_revision():
         assert_prewriting_editable(REVISION_REQUESTED_STATUS)
 
 
+def test_status_transitions_do_not_regress_advanced_prewriting_statuses():
+    assert next_status_after_topic(MATERIALS_READY_STATUS) == MATERIALS_READY_STATUS
+    assert next_status_after_topic(OUTLINE_READY_STATUS) == OUTLINE_READY_STATUS
+    assert next_status_after_materials(OUTLINE_READY_STATUS) == OUTLINE_READY_STATUS
+
+
+def test_empty_material_answers_do_not_mark_questions_skipped():
+    updated = merge_material_answers(init_material_card_state(), answers=[])
+
+    assert updated["answers"] == []
+    assert updated["step_state"]["questions_status"] == "not_started"
+
+
 def test_source_reference_validation_rejects_unknown_answer_ids():
     material = merge_material_answers(
         init_material_card_state(),
@@ -72,6 +85,33 @@ def test_source_reference_validation_rejects_source_ids_when_no_answers_saved():
             init_material_card_state(),
             [{"id": "card-event", "source_answer_ids": ["answer-1"], "placeholder": False}],
         )
+
+
+def test_source_reference_validation_requires_sources_for_non_placeholder_story_cards():
+    material = merge_material_answers(
+        init_material_card_state(),
+        answers=[{"id": "answer-1", "question_id": "q1", "text": "真实回答", "skipped": False}],
+    )
+
+    with pytest.raises(ValueError, match="non-placeholder material cards require source_answer_ids"):
+        validate_card_sources(
+            material,
+            [
+                {
+                    "id": "card-event",
+                    "text": "我学会了骑车。",
+                    "source_answer_ids": [],
+                    "placeholder": False,
+                }
+            ],
+        )
+
+
+def test_source_reference_validation_allows_empty_placeholder_cards_without_sources():
+    validate_card_sources(
+        init_material_card_state(),
+        [{"id": "card-placeholder", "text": "", "source_answer_ids": [], "placeholder": True}],
+    )
 
 
 def test_outline_source_validation_rejects_unknown_card_ids():
@@ -100,6 +140,48 @@ def test_outline_source_validation_rejects_unknown_card_ids():
             material,
             [{"id": "outline-cause", "source_card_ids": ["missing"], "placeholder": False}],
         )
+
+
+def test_outline_source_validation_requires_sources_for_non_placeholder_story_notes():
+    material_with_answer = merge_material_answers(
+        init_material_card_state(),
+        answers=[{"id": "answer-1", "question_id": "q1", "text": "真实回答", "skipped": False}],
+    )
+    material = confirm_material_cards(
+        material_with_answer,
+        cards=[
+            {
+                "id": "card-event",
+                "category": "event",
+                "text": "我学会了骑车。",
+                "source_answer_ids": ["answer-1"],
+                "order": 1,
+                "deleted": False,
+                "child_edited": False,
+                "placeholder": False,
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match="story-specific outline sections require source_card_ids"):
+        validate_outline_sources(
+            material,
+            [
+                {
+                    "id": "outline-cause",
+                    "note": "我第一次骑车很害怕。",
+                    "source_card_ids": [],
+                    "placeholder": False,
+                }
+            ],
+        )
+
+
+def test_outline_source_validation_allows_empty_placeholder_sections_without_sources():
+    validate_outline_sources(
+        init_material_card_state(),
+        [{"id": "outline-placeholder", "note": "", "source_card_ids": [], "placeholder": True}],
+    )
 
 
 def test_topic_focus_merge_preserves_topic_analysis():
