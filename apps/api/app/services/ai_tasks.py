@@ -229,6 +229,10 @@ def _payload_source_id(value) -> str | None:
 def _valid_answer_source_ids(answers: list[dict]) -> set[str]:
     source_ids = set()
     for answer in answers:
+        if answer.get("skipped"):
+            continue
+        if not str(answer.get("text") or "").strip():
+            continue
         source_id = _payload_source_id(answer.get("id"))
         if source_id is not None:
             source_ids.add(source_id)

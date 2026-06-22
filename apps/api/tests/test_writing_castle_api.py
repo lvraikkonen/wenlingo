@@ -163,6 +163,44 @@ def test_material_questions_are_blocked_after_child_answers(session, client):
     assert blocked.status_code == 409
 
 
+def test_material_questions_are_blocked_after_skip_and_do_not_mutate_status(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+
+    answers = client.patch(f"/api/essays/{essay_id}/material-answers", json={"answers": []})
+    blocked = client.post(f"/api/essays/{essay_id}/material-questions", json={})
+
+    saved = session.get(Essay, essay_id)
+    assert answers.status_code == 200
+    assert answers.json()["material_card"]["step_state"]["questions_status"] == "skipped"
+    assert blocked.status_code == 409
+    assert saved.material_card["step_state"]["questions_status"] == "skipped"
+
+
+def test_outline_generation_is_blocked_after_skip_and_does_not_mutate_status(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我的一次进步"},
+    )
+    essay_id = start.json()["essay"]["id"]
+
+    skipped = client.patch(f"/api/essays/{essay_id}/outline", json={"sections": [], "skipped": True})
+    blocked = client.post(f"/api/essays/{essay_id}/outline", json={})
+
+    saved = session.get(Essay, essay_id)
+    assert skipped.status_code == 200
+    assert skipped.json()["outline"]["step_state"]["outline_status"] == "skipped"
+    assert blocked.status_code == 409
+    assert saved.outline["step_state"]["outline_status"] == "skipped"
+
+
 def test_legacy_essay_cannot_enter_writing_castle_prewriting(session, client):
     family = create_authenticated_family(session)
     student = family["student"]

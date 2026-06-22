@@ -79,6 +79,34 @@ def test_source_reference_validation_rejects_unknown_answer_ids():
         )
 
 
+def test_source_reference_validation_rejects_skipped_and_blank_answer_ids():
+    material = merge_material_answers(
+        init_material_card_state(),
+        answers=[
+            {"id": "answer-skipped", "question_id": "q1", "text": "真实回答", "skipped": True},
+            {"id": "answer-blank", "question_id": "q2", "text": "   ", "skipped": False},
+            {"id": "answer-valid", "question_id": "q3", "text": "真实回答", "skipped": False},
+        ],
+    )
+
+    validate_card_sources(
+        material,
+        [{"id": "card-valid", "source_answer_ids": ["answer-valid"], "placeholder": False}],
+    )
+    with pytest.raises(ValueError, match="unknown source_answer_ids"):
+        validate_card_sources(
+            material,
+            [
+                {
+                    "id": "card-event",
+                    "text": "不能引用空白或跳过回答。",
+                    "source_answer_ids": ["answer-skipped", "answer-blank"],
+                    "placeholder": False,
+                }
+            ],
+        )
+
+
 def test_source_reference_validation_rejects_source_ids_when_no_answers_saved():
     with pytest.raises(ValueError, match="unknown source_answer_ids"):
         validate_card_sources(

@@ -658,6 +658,51 @@ async def test_material_card_generation_validates_source_answer_ids():
 
 
 @pytest.mark.asyncio
+async def test_material_card_generation_rejects_skipped_and_blank_answer_sources():
+    runner = RecordingRunner(material_cards_output())
+
+    await material_card_generation(
+        runner=runner,
+        answers=[
+            {"id": "answer-skipped", "question_id": "q1", "text": "我不想回答。", "skipped": True},
+            {"id": "answer-blank", "question_id": "q2", "text": "   ", "skipped": False},
+            {"id": "answer-valid", "question_id": "q3", "text": "我学会了骑车。", "skipped": False},
+        ],
+    )
+
+    validate_output = runner.calls[0]["validate_output"]
+    invalid_output = MaterialCardsResult(
+        cards=[
+            {
+                "id": "card-event",
+                "category": "event",
+                "text": "我不想回答。",
+                "source_answer_ids": ["answer-skipped", "answer-blank"],
+                "placeholder": False,
+            },
+            {
+                "id": "card-detail",
+                "category": "detail",
+                "text": "",
+                "source_answer_ids": [],
+                "placeholder": True,
+            },
+            {
+                "id": "card-feeling",
+                "category": "feeling_takeaway",
+                "text": "",
+                "source_answer_ids": [],
+                "placeholder": True,
+            },
+        ],
+        encouragement="先把真实素材收好。",
+    )
+
+    with pytest.raises(LLMTaskValidationError, match="unknown source_answer_ids"):
+        validate_output(invalid_output)
+
+
+@pytest.mark.asyncio
 async def test_outline_generation_validates_source_card_ids():
     runner = RecordingRunner(outline_output())
 

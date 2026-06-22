@@ -170,7 +170,13 @@ def validate_card_sources(
     material: dict[str, Any],
     cards: list[dict[str, Any]],
 ) -> None:
-    answer_ids = {answer["id"] for answer in normalize_material_state(material)["answers"]}
+    answer_ids = {
+        answer["id"]
+        for answer in normalize_material_state(material)["answers"]
+        if not answer.get("skipped")
+        and str(answer.get("id") or "").strip()
+        and str(answer.get("text") or "").strip()
+    }
     for card in cards:
         source_answer_ids = card.get("source_answer_ids", [])
         if not card.get("placeholder") and not source_answer_ids:

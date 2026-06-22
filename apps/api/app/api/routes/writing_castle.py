@@ -338,9 +338,12 @@ async def generate_material_questions(
     _prewriting_open(essay)
     student, _ability = _student_and_ability(session, essay.student_id)
     material = normalize_material_state(essay.material_card)
-    if material["step_state"].get("questions_status") == "generated" and not request.regenerate:
+    questions_status = material["step_state"].get("questions_status")
+    if questions_status == "generated" and not request.regenerate:
         essay.material_card = material
         return _save_step_response(session, essay, "material_card", essay.material_card)
+    if questions_status in {"skipped", "edited", "confirmed"}:
+        raise HTTPException(status_code=409, detail="material questions already saved")
     if material.get("answers"):
         raise HTTPException(status_code=409, detail="material answers already saved")
 
@@ -502,7 +505,7 @@ async def generate_outline(
     if outline_status == "generated" and not request.regenerate:
         essay.outline = outline
         return _save_step_response(session, essay, "outline", essay.outline)
-    if outline_status in {"edited", "confirmed"}:
+    if outline_status in {"skipped", "edited", "confirmed"}:
         raise HTTPException(status_code=409, detail="outline already saved")
 
     material = normalize_material_state(essay.material_card)
