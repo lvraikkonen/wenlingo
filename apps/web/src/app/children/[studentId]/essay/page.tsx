@@ -8,6 +8,8 @@ import { AssessmentRecommendationCard } from "../../../../components/AssessmentR
 import { FamilyTopbar } from "../../../../components/FamilyTopbar";
 import { FeedbackReaction } from "../../../../components/FeedbackReaction";
 import { SettlementPanel } from "../../../../components/SettlementPanel";
+import { ClassroomPrewritingWizard } from "../../../../components/writing-castle/ClassroomPrewritingWizard";
+import { WritingCastleModeShell } from "../../../../components/writing-castle/WritingCastleModeShell";
 import {
   createEssay,
   submitEssayRevision,
@@ -35,6 +37,7 @@ function EssayPageContent({ studentId }: { studentId: string }) {
   } = useAssessmentRecommendation(studentId);
   const [title, setTitle] = useState("");
   const [draft, setDraft] = useState("");
+  const [mode, setMode] = useState<"classroom" | "direct">("classroom");
   const [revision, setRevision] = useState("");
   const [essayId, setEssayId] = useState<string | null>(null);
   const [firstDraftId, setFirstDraftId] = useState<string | null>(null);
@@ -117,6 +120,23 @@ function EssayPageContent({ studentId }: { studentId: string }) {
     }
   }
 
+  function handlePrewritingFeedback(result: EssayResponse) {
+    setEssayId(result.essay.id);
+    setFirstDraftId(result.first_draft?.id ?? null);
+    setFirstDraftReaction(result.first_draft?.reaction ?? null);
+    setFeedback(result.feedback);
+    setSelectedTasks(
+      result.feedback.revision_tasks.map((task) => task.instruction),
+    );
+    setRevisionStartedAt(Date.now());
+    setRevision("");
+    setComparison(null);
+    setSettlement(null);
+    setRevisionResultId(null);
+    setRevisionResultReaction(null);
+    setError("");
+  }
+
   async function handleRevisionSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!essayId || settlement) {
@@ -194,6 +214,16 @@ function EssayPageContent({ studentId }: { studentId: string }) {
           />
         ) : null}
 
+        <WritingCastleModeShell mode={mode} onModeChange={setMode} />
+
+        {mode === "classroom" && !feedback ? (
+          <ClassroomPrewritingWizard
+            studentId={studentId}
+            onFeedback={handlePrewritingFeedback}
+          />
+        ) : null}
+
+        {mode === "direct" || feedback ? (
         <section className="rounded-lg border border-[var(--wen-border)] bg-white p-6 shadow-sm">
           <div className="flex items-center gap-2">
             <Sparkles
@@ -236,6 +266,7 @@ function EssayPageContent({ studentId }: { studentId: string }) {
             </button>
           </form>
         </section>
+        ) : null}
 
         {feedback ? (
           <section
@@ -290,6 +321,7 @@ function EssayPageContent({ studentId }: { studentId: string }) {
           </section>
         ) : null}
 
+        {mode === "direct" || feedback ? (
         <section className="rounded-lg border border-[var(--wen-border)] bg-white p-6 shadow-sm">
           <form className="space-y-4" onSubmit={handleRevisionSubmit}>
             <label className="block font-semibold">
@@ -316,6 +348,7 @@ function EssayPageContent({ studentId }: { studentId: string }) {
             </button>
           </form>
         </section>
+        ) : null}
 
         {comparison ? (
           <section

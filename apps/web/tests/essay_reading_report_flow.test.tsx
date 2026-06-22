@@ -87,6 +87,9 @@ test("essay page supports draft feedback and revision settlement", async () => {
     );
   });
 
+  await userEvent.click(
+    await screen.findByRole("button", { name: "直接写初稿" }),
+  );
   await userEvent.type(
     await screen.findByLabelText("作文题目"),
     "我学会了骑车",

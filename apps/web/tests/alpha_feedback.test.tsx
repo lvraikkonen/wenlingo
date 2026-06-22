@@ -60,6 +60,12 @@ function expectReturnToChildrenLink() {
   ).toBe(true);
 }
 
+async function chooseDirectEssayMode() {
+  await userEvent.click(
+    await screen.findByRole("button", { name: "直接写初稿" }),
+  );
+}
+
 const apiMocks = vi.hoisted(() => ({
   createAssessment: vi.fn(),
   createSentenceChallenge: vi.fn(),
@@ -1182,6 +1188,7 @@ test("essay page recommends initial assessment but allows continuing writing", a
   await waitFor(() =>
     expect(screen.queryByText("先点亮第一张能力草图")).not.toBeInTheDocument(),
   );
+  await chooseDirectEssayMode();
   expect(screen.getByLabelText("作文题目")).toBeInTheDocument();
 });
 
@@ -1194,6 +1201,7 @@ test("essay page renders draft and revision feedback reactions with persisted id
     );
   });
 
+  await chooseDirectEssayMode();
   await userEvent.type(await screen.findByLabelText("作文题目"), "我学会了骑车");
   await userEvent.type(
     screen.getByLabelText("初稿"),
@@ -1273,6 +1281,7 @@ test("essay page passes persisted reactions from draft and revision responses", 
     );
   });
 
+  await chooseDirectEssayMode();
   await userEvent.type(await screen.findByLabelText("作文题目"), "我学会了骑车");
   await userEvent.type(
     screen.getByLabelText("初稿"),
@@ -1309,6 +1318,7 @@ test("essay page ignores stale draft feedback after student route changes", asyn
     ));
   });
 
+  await chooseDirectEssayMode();
   await userEvent.type(await screen.findByLabelText("作文题目"), "我学会了骑车");
   await userEvent.type(
     screen.getByLabelText("初稿"),
@@ -1360,6 +1370,7 @@ test("essay page ignores stale revision comparison after student route changes",
     ));
   });
 
+  await chooseDirectEssayMode();
   await userEvent.type(await screen.findByLabelText("作文题目"), "我学会了骑车");
   await userEvent.type(
     screen.getByLabelText("初稿"),
