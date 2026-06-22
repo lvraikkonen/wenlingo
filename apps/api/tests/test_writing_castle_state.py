@@ -66,9 +66,21 @@ def test_source_reference_validation_rejects_unknown_answer_ids():
         )
 
 
+def test_source_reference_validation_rejects_source_ids_when_no_answers_saved():
+    with pytest.raises(ValueError, match="unknown source_answer_ids"):
+        validate_card_sources(
+            init_material_card_state(),
+            [{"id": "card-event", "source_answer_ids": ["answer-1"], "placeholder": False}],
+        )
+
+
 def test_outline_source_validation_rejects_unknown_card_ids():
-    material = confirm_material_cards(
+    material_with_answer = merge_material_answers(
         init_material_card_state(),
+        answers=[{"id": "answer-1", "question_id": "q1", "text": "真实回答", "skipped": False}],
+    )
+    material = confirm_material_cards(
+        material_with_answer,
         cards=[
             {
                 "id": "card-event",

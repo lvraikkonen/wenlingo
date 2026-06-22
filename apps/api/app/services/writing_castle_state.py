@@ -156,8 +156,6 @@ def validate_card_sources(
     cards: list[dict[str, Any]],
 ) -> None:
     answer_ids = {answer["id"] for answer in normalize_material_state(material)["answers"]}
-    if not answer_ids:
-        return
     unknown = sorted(
         {
             source_id
