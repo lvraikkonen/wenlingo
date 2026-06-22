@@ -261,12 +261,61 @@ def test_sentence_challenge_contracts_reject_extra_fields(contract, payload):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("task_name", ["material_questions", "outline_generation"])
-async def test_mock_provider_rejects_legacy_pre_writing_tasks(task_name):
-    provider = MockLLMProvider()
+async def test_writing_castle_mock_provider_returns_prewriting_contracts():
+    from app.services.ai_tasks import (
+        material_card_generation,
+        material_questions,
+        outline_generation,
+        writing_topic_analysis,
+    )
+    from app.api.deps import AITaskRunner
+    from app.core.config import Settings
 
-    with pytest.raises(ValueError, match=f"Unknown LLM task: {task_name}"):
-        await provider.complete_json(task_name, {})
+    runner = AITaskRunner(settings=Settings(llm_provider="mock"))
+
+    topic = await writing_topic_analysis(
+        runner,
+        topic_text="我学会了骑车",
+        session=None,
+        student_id="student-1",
+    )
+    questions = await material_questions(
+        runner,
+        topic_text="我学会了骑车",
+        confirmed_focus="写清楚学会骑车的过程",
+        session=None,
+        student_id="student-1",
+    )
+    cards = await material_card_generation(
+        runner,
+        answers=[
+            {"id": "answer-1", "question_id": "q1", "text": "我学会了骑车。", "skipped": False}
+        ],
+        session=None,
+        student_id="student-1",
+    )
+    outline = await outline_generation(
+        runner,
+        cards=[
+            {
+                "id": "card-event",
+                "category": "event",
+                "text": "我学会了骑车。",
+                "source_answer_ids": ["answer-1"],
+                "order": 1,
+                "deleted": False,
+                "child_edited": False,
+                "placeholder": False,
+            }
+        ],
+        session=None,
+        student_id="student-1",
+    )
+
+    assert len(topic.output.cards) == 3
+    assert len(questions.output.questions) == 3
+    assert cards.output.cards[0].source_answer_ids == ["answer-1"]
+    assert outline.output.sections[0].slot == "cause"
 
 
 def test_convert_ghostwriting_request_returns_coaching_message():

@@ -22,6 +22,7 @@ _PROMPT_MODULES = (
     "app.prompts.revision_feedback",
     "app.prompts.sentence_challenge",
     "app.prompts.sentence_feedback",
+    "app.prompts.writing_castle",
 )
 _loaded = False
 

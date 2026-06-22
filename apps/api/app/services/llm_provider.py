@@ -7,6 +7,12 @@ import httpx
 
 from app.prompts.registry import get_prompt
 from app.services.sentence_challenges import fallback_challenge, fallback_challenge_feedback
+from app.services.writing_castle_ai import (
+    fallback_material_cards,
+    fallback_material_questions,
+    fallback_outline,
+    fallback_topic_analysis,
+)
 
 
 @dataclass(frozen=True)
@@ -103,6 +109,38 @@ class MockLLMProvider:
             )
         if task_name == "sentence_challenge_feedback":
             payload = fallback_challenge_feedback(payload["target_skill"]).model_dump()
+            return LLMProviderResponse(
+                parsed_json=payload,
+                raw_response=json.dumps(payload, ensure_ascii=False),
+                provider=self.provider_name,
+                model=self.model_name,
+            )
+        if task_name == "writing_topic_analysis":
+            payload = fallback_topic_analysis(payload.get("topic_text", "")).model_dump()
+            return LLMProviderResponse(
+                parsed_json=payload,
+                raw_response=json.dumps(payload, ensure_ascii=False),
+                provider=self.provider_name,
+                model=self.model_name,
+            )
+        if task_name == "material_questions":
+            payload = fallback_material_questions().model_dump()
+            return LLMProviderResponse(
+                parsed_json=payload,
+                raw_response=json.dumps(payload, ensure_ascii=False),
+                provider=self.provider_name,
+                model=self.model_name,
+            )
+        if task_name == "material_card_generation":
+            payload = fallback_material_cards(payload.get("answers", [])).model_dump()
+            return LLMProviderResponse(
+                parsed_json=payload,
+                raw_response=json.dumps(payload, ensure_ascii=False),
+                provider=self.provider_name,
+                model=self.model_name,
+            )
+        if task_name == "outline_generation":
+            payload = fallback_outline(payload.get("cards", [])).model_dump()
             return LLMProviderResponse(
                 parsed_json=payload,
                 raw_response=json.dumps(payload, ensure_ascii=False),

@@ -33,16 +33,18 @@ def test_all_existing_ai_tasks_have_enabled_configs():
         assert TASK_CONFIGS[task_name].enabled is True
 
 
-def test_v06_reserved_tasks_are_disabled_and_not_callable():
+def test_v06a_writing_castle_tasks_are_enabled_with_prompt_keys():
     for task_name in {
         "writing_topic_analysis",
         "material_questions",
         "material_card_generation",
         "outline_generation",
     }:
-        assert TASK_CONFIGS[task_name].enabled is False
-        with pytest.raises(RoutingConfigError, match="disabled"):
-            resolve_task_config(task_name)
+        config = resolve_task_config(task_name)
+        assert config.enabled is True
+        assert config.allowed_prompt_keys == (task_name,)
+        assert config.default_prompt_key == task_name
+        assert config.daily_limit == 5
 
 
 def test_unknown_task_fails_closed():

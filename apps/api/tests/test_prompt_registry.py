@@ -12,6 +12,22 @@ EXPECTED_KEYS = {
     "essay_revision_comparison",
     "sentence_challenge_generation",
     "sentence_challenge_feedback",
+    "writing_topic_analysis",
+    "material_questions",
+    "material_card_generation",
+    "outline_generation",
+}
+
+EXPECTED_PROMPT_VERSIONS = {
+    "sentence_upgrade_feedback": "v0.5b-2026-06-08",
+    "essay_feedback": "v0.5b-2026-06-08",
+    "essay_revision_comparison": "v0.5b-2026-06-08",
+    "sentence_challenge_generation": "v0.5b-2026-06-08",
+    "sentence_challenge_feedback": "v0.5b-2026-06-08",
+    "writing_topic_analysis": "v0.6a-2026-06-20",
+    "material_questions": "v0.6a-2026-06-20",
+    "material_card_generation": "v0.6a-2026-06-20",
+    "outline_generation": "v0.6a-2026-06-20",
 }
 
 
@@ -22,7 +38,7 @@ def test_registered_prompt_keys_load_successfully():
     for key in EXPECTED_KEYS:
         prompt = get_prompt(key)
         assert prompt.prompt_key == key
-        assert prompt.version == "v0.5b-2026-06-08"
+        assert prompt.version == EXPECTED_PROMPT_VERSIONS[key]
         assert prompt.response_contract
         assert prompt.system_prompt_key in {
             "wenlingo_primary_coach",
@@ -57,8 +73,24 @@ def test_llm_provider_does_not_keep_v06_legacy_prompt_content():
     text = Path("app/services/llm_provider.py").read_text(encoding="utf-8")
 
     assert "LEGACY_RESPONSE_CONTRACTS" not in text
-    assert "material_questions" not in text
-    assert "outline_generation" not in text
+
+
+def test_writing_castle_prompts_are_registered_with_contracts():
+    from app.prompts.registry import get_prompt
+
+    expected = {
+        "writing_topic_analysis": "WritingTopicAnalysis",
+        "material_questions": "MaterialQuestionsResult",
+        "material_card_generation": "MaterialCardsResult",
+        "outline_generation": "WritingOutlineResult",
+    }
+
+    for prompt_key, contract_name in expected.items():
+        prompt = get_prompt(prompt_key)
+        assert prompt.prompt_key == prompt_key
+        assert prompt.version == "v0.6a-2026-06-20"
+        assert contract_name in prompt.response_contract
+        assert "Do not write full essay paragraphs" in prompt.response_contract
 
 
 def test_unknown_prompt_key_raises_key_error():

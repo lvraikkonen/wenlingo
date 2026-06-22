@@ -14,9 +14,13 @@ from app.services.llm_contracts import (
     EssayFeedback,
     EssayRevisionComparison,
     GhostwritingCheck,
+    MaterialCardsResult,
+    MaterialQuestionsResult,
     SentenceChallenge,
     SentenceChallengeFeedback,
     SentenceFeedback,
+    WritingOutlineResult,
+    WritingTopicAnalysis,
 )
 from app.services.ai_routing import TaskFinalStatus
 from app.services.llm_provider import LLMProvider
@@ -25,6 +29,12 @@ from app.services.sentence_challenges import (
     fallback_challenge,
     fallback_challenge_feedback,
     validate_sentence_challenge_grade_label,
+)
+from app.services.writing_castle_ai import (
+    fallback_material_cards,
+    fallback_material_questions,
+    fallback_outline,
+    fallback_topic_analysis,
 )
 
 
@@ -447,6 +457,97 @@ async def sentence_challenge_feedback(
             f"原句长度：{len(source_sentence)}；升级句长度：{len(upgraded_sentence)}"
         ),
         daily_limit=daily_limit,
+        prompt_version=prompt.version,
+    )
+
+
+async def writing_topic_analysis(
+    runner,
+    topic_text: str,
+    session: Session | None = None,
+    student_id: str | None = None,
+) -> LLMTaskResult[WritingTopicAnalysis]:
+    prompt = get_prompt("writing_topic_analysis")
+    return await runner.run(
+        session=session,
+        student_id=student_id,
+        task_type=TaskType.essay,
+        task_name=prompt.prompt_key,
+        prompt_key=prompt.prompt_key,
+        payload={"topic_text": _wrap_student_payload("teacher_topic", topic_text)},
+        output_schema=WritingTopicAnalysis,
+        deterministic_fallback_factory=lambda _context: fallback_topic_analysis(topic_text),
+        input_summary=f"写作城堡题目分析；题目长度：{len(topic_text)}",
+        prompt_version=prompt.version,
+    )
+
+
+async def material_questions(
+    runner,
+    topic_text: str,
+    confirmed_focus: str,
+    session: Session | None = None,
+    student_id: str | None = None,
+) -> LLMTaskResult[MaterialQuestionsResult]:
+    prompt = get_prompt("material_questions")
+    return await runner.run(
+        session=session,
+        student_id=student_id,
+        task_type=TaskType.essay,
+        task_name=prompt.prompt_key,
+        prompt_key=prompt.prompt_key,
+        payload={
+            "topic_text": _wrap_student_payload("teacher_topic", topic_text),
+            "confirmed_focus": _wrap_student_payload("confirmed_focus", confirmed_focus),
+        },
+        output_schema=MaterialQuestionsResult,
+        deterministic_fallback_factory=lambda _context: fallback_material_questions(),
+        input_summary=(
+            f"写作城堡素材问题；题目长度：{len(topic_text)}；"
+            f"焦点长度：{len(confirmed_focus)}"
+        ),
+        prompt_version=prompt.version,
+    )
+
+
+async def material_card_generation(
+    runner,
+    answers: list[dict],
+    session: Session | None = None,
+    student_id: str | None = None,
+) -> LLMTaskResult[MaterialCardsResult]:
+    prompt = get_prompt("material_card_generation")
+    return await runner.run(
+        session=session,
+        student_id=student_id,
+        task_type=TaskType.essay,
+        task_name=prompt.prompt_key,
+        prompt_key=prompt.prompt_key,
+        payload={"answers": answers},
+        output_schema=MaterialCardsResult,
+        deterministic_fallback_factory=lambda _context: fallback_material_cards(answers),
+        input_summary=f"写作城堡素材卡片；回答数：{len(answers)}",
+        prompt_version=prompt.version,
+    )
+
+
+async def outline_generation(
+    runner,
+    cards: list[dict],
+    session: Session | None = None,
+    student_id: str | None = None,
+) -> LLMTaskResult[WritingOutlineResult]:
+    prompt = get_prompt("outline_generation")
+    return await runner.run(
+        session=session,
+        student_id=student_id,
+        task_type=TaskType.essay,
+        task_name=prompt.prompt_key,
+        prompt_key=prompt.prompt_key,
+        payload={"cards": cards},
+        output_schema=WritingOutlineResult,
+        deterministic_fallback_factory=lambda _context: fallback_outline(cards),
+        input_summary=f"写作城堡提纲生成；素材卡数：{len(cards)}",
         prompt_version=prompt.version,
     )
 
