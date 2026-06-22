@@ -20,6 +20,10 @@ from app.domain.models import (
     utcnow,
 )
 from app.services.auth_security import hash_secret
+from tests.conftest import (
+    create_authenticated_family,
+    create_second_authenticated_family,
+)
 
 
 def as_utc(value):
@@ -371,6 +375,37 @@ def test_parent_authorization_helpers_scope_students_and_essays(session):
 
     assert essay_exc_info.value.status_code == 404
     assert other_child.parent_id == other_parent.id
+
+
+def test_prewriting_routes_reject_cross_family_access(session, client, monkeypatch):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    first = create_authenticated_family(session)
+    second = create_second_authenticated_family(session)
+
+    start = client.post(
+        f"/api/students/{second['student'].id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+        cookies=first["cookie"],
+        headers={"origin": "http://testserver"},
+    )
+    assert start.status_code == 404
+
+    own_start = client.post(
+        f"/api/students/{second['student'].id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+        cookies=second["cookie"],
+        headers={"origin": "http://testserver"},
+    )
+    assert own_start.status_code == 201
+    essay_id = own_start.json()["essay"]["id"]
+
+    blocked = client.post(
+        f"/api/essays/{essay_id}/topic-analysis",
+        json={},
+        cookies=first["cookie"],
+        headers={"origin": "http://testserver"},
+    )
+    assert blocked.status_code == 404
 
 
 def test_legacy_parent_path_ignores_problematic_session_when_auth_disabled(

@@ -8,6 +8,7 @@ from app.domain.models import (
     AbilityHistory,
     AbilityProfile,
     AlphaInviteCode,
+    Essay,
     ParentUser,
     SentenceTraining,
     StudentProfile,
@@ -318,6 +319,105 @@ def test_alpha_summary_after_assessment_returns_counts_and_ability_changes(
     assert {row.source_type for row in session.exec(select(AbilityHistory)).all()} == {
         TaskType.sentence,
         TaskType.essay,
+    }
+
+
+def test_alpha_summary_includes_writing_castle_process_summary(session, client):
+    parent = create_alpha_parent(client, session)
+    child = create_alpha_child(client, parent["id"])
+    student_id = child["id"]
+
+    start = client.post(
+        f"/api/students/{student_id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    assert start.status_code == 201
+    essay_id = start.json()["essay"]["id"]
+    client.post(f"/api/essays/{essay_id}/topic-analysis", json={})
+    client.patch(
+        f"/api/essays/{essay_id}/topic-focus",
+        json={
+            "text": "我想写学会骑车的过程。",
+            "adopted_from_ai": False,
+            "skipped": False,
+        },
+    )
+    client.patch(
+        f"/api/essays/{essay_id}/material-answers",
+        json={
+            "answers": [
+                {
+                    "id": "answer-1",
+                    "question_id": "q-event",
+                    "text": "我学会了骑车。",
+                    "skipped": False,
+                },
+                {
+                    "id": "answer-2",
+                    "question_id": "q-detail",
+                    "text": "",
+                    "skipped": True,
+                },
+            ]
+        },
+    )
+
+    response = client.get(
+        f"/api/alpha/parents/{parent['id']}/children/{student_id}/summary"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["writing_castle_summary"] == {
+        "topic": "我学会了骑车",
+        "topic_analysis_used": True,
+        "topic_focus_confirmed": True,
+        "topic_focus_edited": True,
+        "material_questions_answered": 1,
+        "material_cards_retained": 0,
+        "outline_confirmed": False,
+        "outline_edited": False,
+        "first_draft_completed": False,
+        "revision_completed": False,
+        "settlement_completed": False,
+    }
+
+
+def test_alpha_summary_tolerates_malformed_writing_castle_json(session, client):
+    parent = create_alpha_parent(client, session)
+    child = create_alpha_child(client, parent["id"])
+    session.add(
+        Essay(
+            student_id=child["id"],
+            title="旧数据题目",
+            material_card=["not", "a", "dict"],
+            outline={
+                "schema_version": "v0.6a.1",
+                "topic_analysis": "not-a-dict",
+                "child_topic_focus": ["not-a-dict"],
+                "step_state": "not-a-dict",
+                "sections": ["not-a-dict", {"child_edited": True}],
+            },
+        )
+    )
+    session.commit()
+
+    response = client.get(
+        f"/api/alpha/parents/{parent['id']}/children/{child['id']}/summary"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["writing_castle_summary"] == {
+        "topic": "旧数据题目",
+        "topic_analysis_used": False,
+        "topic_focus_confirmed": False,
+        "topic_focus_edited": False,
+        "material_questions_answered": 0,
+        "material_cards_retained": 0,
+        "outline_confirmed": False,
+        "outline_edited": True,
+        "first_draft_completed": False,
+        "revision_completed": False,
+        "settlement_completed": False,
     }
 
 

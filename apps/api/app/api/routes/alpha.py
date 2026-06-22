@@ -30,6 +30,7 @@ from app.domain.models import (
     AlphaInviteCode,
     Assessment,
     Essay,
+    EssayVersion,
     ParentAccount,
     ParentFeedback,
     ParentUser,
@@ -457,11 +458,94 @@ def _summary_payload(parent: ParentUser, student: StudentProfile, session: Sessi
         if assessment_completed
         else None,
         "sentence_training_summary": sentence_summary,
+        "writing_castle_summary": _writing_castle_summary(session, student.id),
         "empty_state": None if has_progress else EMPTY_SUMMARY,
         "next_suggestion": POPULATED_NEXT_SUGGESTION
         if has_progress
         else EMPTY_NEXT_SUGGESTION,
     }
+
+
+def _writing_castle_summary(session: Session, student_id: str) -> dict[str, Any] | None:
+    essays = session.exec(
+        select(Essay)
+        .where(Essay.student_id == student_id)
+        .order_by(Essay.created_at.desc())
+    ).all()
+    essay = next(
+        (
+            row
+            for row in essays
+            if _json_object(row.material_card).get("schema_version") == "v0.6a.1"
+            or _json_object(row.outline).get("schema_version") == "v0.6a.1"
+        ),
+        None,
+    )
+    if essay is None:
+        return None
+    material = _json_object(essay.material_card)
+    outline = _json_object(essay.outline)
+    topic_analysis = _json_object(outline.get("topic_analysis"))
+    focus = _json_object(outline.get("child_topic_focus"))
+    material_answers = _json_object_list(material.get("answers"))
+    material_cards = [
+        card
+        for card in _json_object_list(material.get("cards"))
+        if not card.get("deleted") and not card.get("placeholder")
+    ]
+    outline_state = _json_object(outline.get("step_state"))
+    outline_sections = _json_object_list(outline.get("sections"))
+    first_draft = session.exec(
+        select(EssayVersion).where(
+            EssayVersion.essay_id == essay.id,
+            EssayVersion.version_label == "first_draft",
+        )
+    ).first()
+    revision = session.exec(
+        select(EssayVersion).where(
+            EssayVersion.essay_id == essay.id,
+            EssayVersion.version_label == "revision",
+        )
+    ).first()
+    return {
+        "topic": essay.title,
+        "topic_analysis_used": topic_analysis.get("status") == "generated",
+        "topic_focus_confirmed": bool(focus.get("text")) and not focus.get("skipped"),
+        "topic_focus_edited": bool(focus.get("text"))
+        and not focus.get("adopted_from_ai"),
+        "material_questions_answered": len(
+            [
+                answer
+                for answer in material_answers
+                if _nonblank_json_text(answer.get("text"))
+                and not answer.get("skipped")
+            ]
+        ),
+        "material_cards_retained": len(material_cards),
+        "outline_confirmed": outline_state.get("outline_status") == "confirmed",
+        "outline_edited": any(
+            section.get("child_edited") for section in outline_sections
+        ),
+        "first_draft_completed": first_draft is not None,
+        "revision_completed": revision is not None,
+        "settlement_completed": essay.status == "settled",
+    }
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    return {}
+
+
+def _json_object_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _nonblank_json_text(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
 
 
 def _sentence_training_summary(session: Session, student_id: str) -> tuple[int, str | None]:
