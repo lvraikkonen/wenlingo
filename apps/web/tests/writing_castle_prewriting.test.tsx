@@ -1,9 +1,11 @@
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Suspense } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import EssayPage from "../src/app/children/[studentId]/essay/page";
+import { MaterialCardsStep } from "../src/components/writing-castle/MaterialCardsStep";
+import type { MaterialCardSlot } from "../src/lib/types";
 
 const apiMocks = vi.hoisted(() => ({
   createClassroomWritingCastleEssay: vi.fn(),
@@ -250,10 +252,10 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  vi.clearAllMocks();
+  vi.resetAllMocks();
 });
 
-test("classroom writing castle path reaches first draft feedback", async () => {
+async function startClassroomWizard() {
   await act(async () => {
     render(
       <Suspense fallback={null}>
@@ -268,6 +270,37 @@ test("classroom writing castle path reaches first draft feedback", async () => {
   await userEvent.type(screen.getByLabelText("老师作文题目"), "我学会了骑车");
   await userEvent.click(screen.getByRole("button", { name: "开始审题" }));
   expect(await screen.findByText("第 1 步 / 共 4 步：看懂题目")).toBeInTheDocument();
+}
+
+async function continueToQuestions() {
+  await userEvent.click(screen.getByRole("button", { name: "继续想素材" }));
+  expect(
+    await screen.findByText("第 2 步 / 共 4 步：想一想素材"),
+  ).toBeInTheDocument();
+}
+
+async function continueToCards() {
+  await continueToQuestions();
+  await userEvent.type(
+    screen.getByLabelText("你想写哪件真实发生的事？"),
+    "我学会了骑车。",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "整理素材卡" }));
+  expect(
+    await screen.findByText("第 3 步 / 共 4 步：整理素材卡"),
+  ).toBeInTheDocument();
+}
+
+async function continueToOutline() {
+  await continueToCards();
+  await userEvent.click(screen.getByRole("button", { name: "生成提纲" }));
+  expect(
+    await screen.findByText("第 4 步 / 共 4 步：搭一个提纲"),
+  ).toBeInTheDocument();
+}
+
+test("classroom writing castle path reaches first draft feedback", async () => {
+  await startClassroomWizard();
   expect(await screen.findByText("题目在问什么")).toBeInTheDocument();
 
   await userEvent.type(
@@ -308,4 +341,214 @@ test("classroom writing castle path reaches first draft feedback", async () => {
     draft:
       "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。",
   });
+});
+
+test("material cards keep rendered order during repeated moves", async () => {
+  const cardState: MaterialCardSlot[] = [
+    {
+      id: "card-event",
+      category: "event",
+      text: "第一张",
+      source_answer_ids: [],
+      order: 1,
+      deleted: false,
+      child_edited: false,
+      placeholder: false,
+    },
+    {
+      id: "card-detail",
+      category: "detail",
+      text: "第二张",
+      source_answer_ids: [],
+      order: 2,
+      deleted: false,
+      child_edited: false,
+      placeholder: false,
+    },
+    {
+      id: "card-feeling",
+      category: "feeling_takeaway",
+      text: "第三张",
+      source_answer_ids: [],
+      order: 3,
+      deleted: false,
+      child_edited: false,
+      placeholder: false,
+    },
+  ];
+  const handleCardsChange = vi.fn();
+  const { rerender } = render(
+    <MaterialCardsStep
+      cards={cardState}
+      onCardsChange={handleCardsChange}
+      onContinue={() => undefined}
+      onDirectWrite={() => undefined}
+    />,
+  );
+
+  await userEvent.click(screen.getAllByRole("button", { name: "上移" })[2]);
+  const afterFirstMove = handleCardsChange.mock.calls[0][0] as MaterialCardSlot[];
+  rerender(
+    <MaterialCardsStep
+      cards={afterFirstMove}
+      onCardsChange={handleCardsChange}
+      onContinue={() => undefined}
+      onDirectWrite={() => undefined}
+    />,
+  );
+
+  await userEvent.click(screen.getAllByRole("button", { name: "上移" })[1]);
+  const afterSecondMove = handleCardsChange.mock.calls[1][0] as MaterialCardSlot[];
+
+  expect(afterSecondMove.find((card) => card.id === "card-feeling")?.order).toBe(1);
+  expect(afterSecondMove.find((card) => card.id === "card-event")?.order).toBe(2);
+  expect(afterSecondMove.find((card) => card.id === "card-detail")?.order).toBe(3);
+});
+
+test("unchanged suggested focus is saved as adopted from AI", async () => {
+  await startClassroomWizard();
+
+  await userEvent.click(screen.getByRole("button", { name: "继续想素材" }));
+
+  await waitFor(() => {
+    expect(apiMocks.saveTopicFocus).toHaveBeenCalledWith("essay-1", {
+      text: "写清楚学会骑车的过程",
+      adopted_from_ai: true,
+      skipped: false,
+    });
+  });
+});
+
+test("direct writing from questions saves current answers before draft", async () => {
+  await startClassroomWizard();
+  await continueToQuestions();
+  await userEvent.type(
+    screen.getByLabelText("你想写哪件真实发生的事？"),
+    "我学会了骑车。",
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "我想直接开始写" }));
+
+  await waitFor(() => {
+    expect(apiMocks.saveMaterialAnswers).toHaveBeenCalledWith("essay-1", {
+      answers: expect.arrayContaining([
+        expect.objectContaining({
+          id: "answer-q-event",
+          question_id: "q-event",
+          text: "我学会了骑车。",
+          skipped: false,
+        }),
+      ]),
+    });
+  });
+  expect(await screen.findByLabelText("初稿")).toBeInTheDocument();
+});
+
+test("direct writing from questions stays put when save fails", async () => {
+  apiMocks.saveMaterialAnswers.mockRejectedValueOnce(new Error("save failed"));
+  await startClassroomWizard();
+  await continueToQuestions();
+
+  await userEvent.click(screen.getByRole("button", { name: "我想直接开始写" }));
+
+  expect(
+    await screen.findByRole("alert"),
+  ).toHaveTextContent("这一步没有保存成功，可以重试，也可以先继续写。");
+  expect(screen.getByText("第 2 步 / 共 4 步：想一想素材")).toBeInTheDocument();
+  expect(screen.queryByLabelText("初稿")).not.toBeInTheDocument();
+});
+
+test("direct writing from cards saves current cards before draft", async () => {
+  await startClassroomWizard();
+  await continueToCards();
+  await userEvent.clear(screen.getByLabelText("事件"));
+  await userEvent.type(screen.getByLabelText("事件"), "我学会了骑车，还摔了一跤。");
+
+  await userEvent.click(screen.getByRole("button", { name: "我想直接开始写" }));
+
+  await waitFor(() => {
+    expect(apiMocks.saveMaterialCards).toHaveBeenCalledWith("essay-1", {
+      cards: expect.arrayContaining([
+        expect.objectContaining({
+          id: "card-event",
+          text: "我学会了骑车，还摔了一跤。",
+          child_edited: true,
+        }),
+      ]),
+    });
+  });
+  expect(await screen.findByLabelText("初稿")).toBeInTheDocument();
+});
+
+test("direct writing from outline saves skipped outline before draft", async () => {
+  await startClassroomWizard();
+  await continueToOutline();
+  await userEvent.type(screen.getByLabelText("起因"), "爸爸扶着后座。");
+
+  await userEvent.click(screen.getByRole("button", { name: "我想直接开始写" }));
+
+  await waitFor(() => {
+    expect(apiMocks.saveOutline).toHaveBeenCalledWith("essay-1", {
+      sections: expect.arrayContaining([
+        expect.objectContaining({
+          id: "outline-cause",
+          note: "爸爸扶着后座。",
+          child_edited: true,
+        }),
+      ]),
+      skipped: true,
+    });
+  });
+  expect(await screen.findByLabelText("初稿")).toBeInTheDocument();
+});
+
+test("first draft submit is disabled while feedback request is pending", async () => {
+  let resolveDraft: (value: Awaited<ReturnType<typeof apiMocks.submitPrewritingFirstDraft>>) => void =
+    () => undefined;
+  const pendingDraft = new Promise<Awaited<ReturnType<typeof apiMocks.submitPrewritingFirstDraft>>>(
+    (resolve) => {
+      resolveDraft = resolve;
+    },
+  );
+  apiMocks.submitPrewritingFirstDraft.mockReturnValueOnce(pendingDraft);
+  await startClassroomWizard();
+  await continueToOutline();
+  await userEvent.click(screen.getByRole("button", { name: "确认提纲，开始写" }));
+  await userEvent.type(
+    screen.getByLabelText("初稿"),
+    "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。",
+  );
+
+  await userEvent.click(
+    screen.getByRole("button", { name: "提交初稿给 AI 教练" }),
+  );
+
+  expect(screen.getByRole("button", { name: "提交初稿给 AI 教练" })).toBeDisabled();
+  await userEvent.click(
+    screen.getByRole("button", { name: "提交初稿给 AI 教练" }),
+  );
+  expect(apiMocks.submitPrewritingFirstDraft).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    resolveDraft({
+      essay: { id: "essay-1" },
+      first_draft: {
+        id: "draft-1",
+        essay_id: "essay-1",
+        version_label: "first_draft",
+        reaction: null,
+      },
+      feedback: {
+        strengths: ["能写清楚发生了什么"],
+        improvements: [],
+        problem_monsters: [],
+        sentence_notes: [],
+        revision_tasks: [
+          { instruction: "给第二段加一个动作描写", target: "第二段" },
+        ],
+      },
+    });
+    await pendingDraft;
+  });
+  expect(await screen.findByText("修改小任务")).toBeInTheDocument();
 });

@@ -46,6 +46,7 @@ export function ClassroomPrewritingWizard({
   const [topicText, setTopicText] = useState("");
   const [essay, setEssay] = useState<WritingCastleEssay | null>(null);
   const [focus, setFocus] = useState("");
+  const [suggestedFocus, setSuggestedFocus] = useState("");
   const [answers, setAnswers] = useState<MaterialAnswer[]>([]);
   const [cards, setCards] = useState<MaterialCardSlot[]>([]);
   const [sections, setSections] = useState<WritingOutlineSection[]>([]);
@@ -79,8 +80,11 @@ export function ClassroomPrewritingWizard({
     });
 
     if (started) {
+      const nextSuggestedFocus =
+        started.outline.topic_analysis.suggested_focus ?? "";
       setEssay(started);
-      setFocus(started.outline.topic_analysis.suggested_focus ?? "");
+      setSuggestedFocus(nextSuggestedFocus);
+      setFocus(nextSuggestedFocus);
       setStep("topic_analysis");
     }
   }
@@ -93,7 +97,10 @@ export function ClassroomPrewritingWizard({
     const saved = await run("正在准备选材问题...", async () => {
       await saveTopicFocus(essay.id, {
         text: skipped ? "" : focus,
-        adopted_from_ai: false,
+        adopted_from_ai:
+          !skipped &&
+          suggestedFocus.trim().length > 0 &&
+          focus === suggestedFocus,
         skipped,
       });
       const generated = await generateMaterialQuestions(essay.id);
@@ -119,6 +126,13 @@ export function ClassroomPrewritingWizard({
       return;
     }
     if (direct) {
+      const saved = await run("正在保存素材回答...", async () =>
+        saveMaterialAnswers(essay.id, { answers }),
+      );
+      if (!saved) {
+        return;
+      }
+      setEssay(saved.essay);
       setStep("draft");
       return;
     }
@@ -141,6 +155,13 @@ export function ClassroomPrewritingWizard({
       return;
     }
     if (direct) {
+      const saved = await run("正在保存素材卡...", async () =>
+        saveMaterialCards(essay.id, { cards }),
+      );
+      if (!saved) {
+        return;
+      }
+      setEssay(saved.essay);
       setStep("draft");
       return;
     }
@@ -162,15 +183,13 @@ export function ClassroomPrewritingWizard({
     if (!essay) {
       return;
     }
-    if (!direct) {
-      const saved = await run("正在保存提纲...", async () =>
-        saveOutline(essay.id, { sections, skipped: false }),
-      );
-      if (!saved) {
-        return;
-      }
-      setEssay(saved.essay);
+    const saved = await run("正在保存提纲...", async () =>
+      saveOutline(essay.id, { sections, skipped: direct }),
+    );
+    if (!saved) {
+      return;
     }
+    setEssay(saved.essay);
     setStep("draft");
   }
 
@@ -261,6 +280,7 @@ export function ClassroomPrewritingWizard({
           draft={draft}
           onDraftChange={setDraft}
           onSubmit={submitDraft}
+          isPending={Boolean(pendingLabel)}
         />
       ) : null}
       <WizardStatus pendingLabel={pendingLabel} error={error} />

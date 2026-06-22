@@ -14,12 +14,14 @@ export function FirstDraftStep({
   draft,
   onDraftChange,
   onSubmit,
+  isPending = false,
 }: {
   cards: MaterialCardSlot[];
   sections: WritingOutlineSection[];
   draft: string;
   onDraftChange: (draft: string) => void;
   onSubmit: () => void;
+  isPending?: boolean;
 }) {
   const visibleCards = cards.filter(
     (card) => !card.deleted && card.text.trim().length > 0,
@@ -69,8 +71,9 @@ export function FirstDraftStep({
             />
           </label>
           <button
-            className="mt-4 rounded-lg bg-[var(--wen-orange)] px-4 py-2 font-semibold text-white"
+            className="mt-4 rounded-lg bg-[var(--wen-orange)] px-4 py-2 font-semibold text-white disabled:opacity-60"
             type="button"
+            disabled={isPending}
             onClick={onSubmit}
           >
             提交初稿给 AI 教练
