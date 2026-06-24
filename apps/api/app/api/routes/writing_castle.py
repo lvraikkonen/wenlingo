@@ -212,6 +212,49 @@ def _normalize_child_edited_cards(
     return normalized_cards
 
 
+def _normalize_child_edited_outline_sections(
+    outline: dict[str, Any],
+    sections: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    previous_sections = {
+        str(section.get("id") or ""): section
+        for section in normalize_outline_state(outline)["sections"]
+        if str(section.get("id") or "").strip()
+    }
+    normalized_sections = []
+    for section in sections:
+        normalized = deepcopy(section)
+        note = str(normalized.get("note") or "").strip()
+        if normalized.get("child_edited") and note:
+            normalized["placeholder"] = False
+            raw_source_card_ids = normalized.get("source_card_ids", [])
+            if isinstance(raw_source_card_ids, list):
+                has_malformed_source_id = any(
+                    not isinstance(source_id, str) or not source_id.strip()
+                    for source_id in raw_source_card_ids
+                )
+                if has_malformed_source_id:
+                    normalized_sections.append(normalized)
+                    continue
+                source_card_ids = [
+                    str(source_id).strip()
+                    for source_id in raw_source_card_ids
+                ]
+                if source_card_ids:
+                    normalized["source_card_ids"] = source_card_ids
+                else:
+                    previous = previous_sections.get(str(normalized.get("id") or ""))
+                    previous_note = str(previous.get("note") or "").strip() if previous else ""
+                    previous_source_ids = (
+                        deepcopy(previous.get("source_card_ids", [])) if previous else []
+                    )
+                    normalized["source_card_ids"] = (
+                        previous_source_ids if previous_note != note else []
+                    )
+        normalized_sections.append(normalized)
+    return normalized_sections
+
+
 def _retained_material_card_count(cards: list[dict[str, Any]]) -> int:
     return sum(1 for card in cards if not card.get("deleted") and not card.get("placeholder"))
 
@@ -560,11 +603,13 @@ async def save_outline(
         essay.outline = outline
     else:
         try:
+            sections = _normalize_child_edited_outline_sections(essay.outline, request.sections)
             essay.outline = merge_outline_sections(
                 essay.outline,
                 essay.material_card,
-                request.sections,
+                sections,
                 status="confirmed",
+                allow_child_edited_without_sources=True,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -576,7 +621,7 @@ async def save_outline(
         student=student,
         payload={
             "step": "outline",
-            "outline_section_count": len(request.sections),
+            "outline_section_count": len(essay.outline["sections"]),
             "skipped": request.skipped,
         },
     )

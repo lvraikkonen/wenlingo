@@ -212,6 +212,77 @@ def test_outline_source_validation_allows_empty_placeholder_sections_without_sou
     )
 
 
+def test_outline_source_validation_rejects_malformed_source_card_ids():
+    with pytest.raises(ValueError, match="source_card_ids must be a list of strings"):
+        validate_outline_sources(
+            init_material_card_state(),
+            [
+                {
+                    "id": "outline-placeholder",
+                    "note": "",
+                    "source_card_ids": None,
+                    "placeholder": True,
+                }
+            ],
+        )
+
+
+@pytest.mark.parametrize(
+    "source_card_ids",
+    [
+        [["nested"]],
+        [{"id": "x"}],
+        [1],
+        ["valid-card", ["nested"]],
+        [""],
+        ["   "],
+    ],
+)
+def test_outline_source_validation_rejects_malformed_source_card_id_values(source_card_ids):
+    with pytest.raises(ValueError, match="source_card_ids must be a list of strings"):
+        validate_outline_sources(
+            init_material_card_state(),
+            [
+                {
+                    "id": "outline-placeholder",
+                    "note": "",
+                    "source_card_ids": source_card_ids,
+                    "placeholder": True,
+                }
+            ],
+        )
+
+
+def test_outline_source_validation_treats_none_note_as_empty():
+    validate_outline_sources(
+        init_material_card_state(),
+        [
+            {
+                "id": "outline-placeholder",
+                "note": None,
+                "source_card_ids": [],
+                "placeholder": False,
+            }
+        ],
+    )
+
+
+@pytest.mark.parametrize("note", [[], {}, 1])
+def test_outline_source_validation_rejects_malformed_note_values(note):
+    with pytest.raises(ValueError, match="note must be a string"):
+        validate_outline_sources(
+            init_material_card_state(),
+            [
+                {
+                    "id": "outline-placeholder",
+                    "note": note,
+                    "source_card_ids": [],
+                    "placeholder": False,
+                }
+            ],
+        )
+
+
 def test_child_edited_outline_source_relaxation_is_explicit():
     section = {
         "id": "outline-result",
