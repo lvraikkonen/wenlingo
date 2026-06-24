@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   createClassroomWritingCastleEssay,
   generateMaterialCards,
   generateMaterialQuestions,
   generateOutline,
   generateTopicAnalysis,
+  getActiveClassroomWritingCastleEssay,
   saveMaterialAnswers,
   saveMaterialCards,
   saveOutline,
@@ -35,6 +36,41 @@ type Step =
   | "draft"
   | "feedback";
 
+function answersFromEssay(essay: WritingCastleEssay): MaterialAnswer[] {
+  if (essay.material_card.answers.length > 0) {
+    return essay.material_card.answers;
+  }
+  return essay.material_card.questions.map((question) => ({
+    id: `answer-${question.id}`,
+    question_id: question.id,
+    text: "",
+    skipped: false,
+  }));
+}
+
+function stepFromEssay(essay: WritingCastleEssay): Step {
+  if (
+    essay.status === "outline_ready" ||
+    essay.outline.step_state.outline_status === "confirmed" ||
+    essay.outline.step_state.outline_status === "skipped"
+  ) {
+    return "draft";
+  }
+  if (essay.outline.sections.length > 0) {
+    return "outline";
+  }
+  if (essay.material_card.cards.length > 0) {
+    return "cards";
+  }
+  if (essay.material_card.questions.length > 0) {
+    return "questions";
+  }
+  if (essay.outline.topic_analysis.status === "generated") {
+    return "topic_analysis";
+  }
+  return "topic_entry";
+}
+
 export function ClassroomPrewritingWizard({
   studentId,
   onFeedback,
@@ -53,6 +89,42 @@ export function ClassroomPrewritingWizard({
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const [pendingLabel, setPendingLabel] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadActiveEssay() {
+      try {
+        const response = await getActiveClassroomWritingCastleEssay(studentId);
+        if (!isMounted || !response.essay) {
+          return;
+        }
+        const activeEssay = response.essay;
+        setEssay(activeEssay);
+        setTopicText(activeEssay.title);
+        const nextSuggestedFocus =
+          activeEssay.outline.topic_analysis.suggested_focus ?? "";
+        setSuggestedFocus(nextSuggestedFocus);
+        setFocus(
+          activeEssay.outline.child_topic_focus.text || nextSuggestedFocus,
+        );
+        setAnswers(answersFromEssay(activeEssay));
+        setCards(activeEssay.material_card.cards);
+        setSections(activeEssay.outline.sections);
+        setStep(stepFromEssay(activeEssay));
+      } catch {
+        if (isMounted) {
+          setError("");
+        }
+      }
+    }
+
+    void loadActiveEssay();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [studentId]);
 
   async function run<T>(
     label: string,
@@ -190,6 +262,7 @@ export function ClassroomPrewritingWizard({
       return;
     }
     setEssay(saved.essay);
+    setSections(saved.essay.outline.sections);
     setStep("draft");
   }
 

@@ -8,6 +8,7 @@ import { MaterialCardsStep } from "../src/components/writing-castle/MaterialCard
 import type { MaterialCardSlot } from "../src/lib/types";
 
 const apiMocks = vi.hoisted(() => ({
+  getActiveClassroomWritingCastleEssay: vi.fn(),
   createClassroomWritingCastleEssay: vi.fn(),
   generateTopicAnalysis: vi.fn(),
   saveTopicFocus: vi.fn(),
@@ -55,6 +56,8 @@ function essayState(overrides = {}) {
 }
 
 vi.mock("../src/lib/api", () => ({
+  getActiveClassroomWritingCastleEssay:
+    apiMocks.getActiveClassroomWritingCastleEssay,
   createClassroomWritingCastleEssay: apiMocks.createClassroomWritingCastleEssay,
   generateTopicAnalysis: apiMocks.generateTopicAnalysis,
   saveTopicFocus: apiMocks.saveTopicFocus,
@@ -70,6 +73,9 @@ vi.mock("../src/lib/api", () => ({
 }));
 
 beforeEach(() => {
+  apiMocks.getActiveClassroomWritingCastleEssay.mockResolvedValue({
+    essay: null,
+  });
   apiMocks.createClassroomWritingCastleEssay.mockResolvedValue({
     essay: essayState(),
   });
@@ -551,4 +557,82 @@ test("first draft submit is disabled while feedback request is pending", async (
     await pendingDraft;
   });
   expect(await screen.findByText("修改小任务")).toBeInTheDocument();
+});
+
+test("edited outline confirmation enters draft with persisted outline reference", async () => {
+  apiMocks.saveOutline.mockImplementation(async (_essayId, payload) => ({
+    essay: essayState({
+      status: "outline_ready",
+      outline: {
+        ...essayState().outline,
+        sections: payload.sections,
+        step_state: { outline_status: "confirmed" },
+      },
+    }),
+  }));
+
+  await startClassroomWizard();
+  await continueToOutline();
+  await userEvent.type(
+    screen.getByLabelText("结果"),
+    "最后我能自己骑过小区空地。",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "确认提纲，开始写" }));
+
+  expect(await screen.findByLabelText("初稿")).toBeInTheDocument();
+  expect(screen.getByText("提纲提醒")).toBeInTheDocument();
+  expect(screen.getByText(/最后我能自己骑过小区空地/)).toBeInTheDocument();
+  expect(apiMocks.saveOutline).toHaveBeenCalledWith(
+    "essay-1",
+    expect.objectContaining({
+      skipped: false,
+      sections: expect.arrayContaining([
+        expect.objectContaining({
+          slot: "result",
+          note: "最后我能自己骑过小区空地。",
+          child_edited: true,
+          placeholder: false,
+        }),
+      ]),
+    }),
+  );
+});
+
+test("active outline-ready classroom essay resumes in draft step", async () => {
+  apiMocks.getActiveClassroomWritingCastleEssay.mockResolvedValue({
+    essay: essayState({
+      status: "outline_ready",
+      material_card: {
+        ...essayState().material_card,
+        cards: [],
+      },
+      outline: {
+        ...essayState().outline,
+        sections: [
+          {
+            id: "outline-result",
+            slot: "result",
+            heading: "结果",
+            note: "最后我能自己骑过小区空地。",
+            source_card_ids: [],
+            child_edited: true,
+            placeholder: false,
+          },
+        ],
+        step_state: { outline_status: "confirmed" },
+      },
+    }),
+  });
+
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "student-1" })} />
+      </Suspense>,
+    );
+  });
+
+  expect(await screen.findByLabelText("初稿")).toBeInTheDocument();
+  expect(screen.getByText("提纲提醒")).toBeInTheDocument();
+  expect(screen.getByText(/最后我能自己骑过小区空地/)).toBeInTheDocument();
 });

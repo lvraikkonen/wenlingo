@@ -1,4 +1,5 @@
 import type {
+  ActiveWritingCastleEssayResponse,
   AlphaChildCreateResponse,
   AlphaChildSummary,
   AlphaChildrenResponse,
@@ -265,6 +266,14 @@ export function createClassroomWritingCastleEssay(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     },
+  );
+}
+
+export function getActiveClassroomWritingCastleEssay(
+  studentId: string,
+): Promise<ActiveWritingCastleEssayResponse> {
+  return requestJson<ActiveWritingCastleEssayResponse>(
+    `/api/students/${studentId}/writing-castle/classroom/active`,
   );
 }
 
