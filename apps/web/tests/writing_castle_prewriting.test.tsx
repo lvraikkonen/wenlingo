@@ -560,12 +560,19 @@ test("first draft submit is disabled while feedback request is pending", async (
 });
 
 test("edited outline confirmation enters draft with persisted outline reference", async () => {
+  const localResultNote = "最后我能自己骑过小区空地。";
+  const persistedResultNote = "最后我能自己稳稳骑过小区空地。";
+
   apiMocks.saveOutline.mockImplementation(async (_essayId, payload) => ({
     essay: essayState({
       status: "outline_ready",
       outline: {
         ...essayState().outline,
-        sections: payload.sections,
+        sections: payload.sections.map((section) =>
+          section.slot === "result"
+            ? { ...section, note: persistedResultNote }
+            : section,
+        ),
         step_state: { outline_status: "confirmed" },
       },
     }),
@@ -573,15 +580,13 @@ test("edited outline confirmation enters draft with persisted outline reference"
 
   await startClassroomWizard();
   await continueToOutline();
-  await userEvent.type(
-    screen.getByLabelText("结果"),
-    "最后我能自己骑过小区空地。",
-  );
+  await userEvent.type(screen.getByLabelText("结果"), localResultNote);
   await userEvent.click(screen.getByRole("button", { name: "确认提纲，开始写" }));
 
   expect(await screen.findByLabelText("初稿")).toBeInTheDocument();
   expect(screen.getByText("提纲提醒")).toBeInTheDocument();
-  expect(screen.getByText(/最后我能自己骑过小区空地/)).toBeInTheDocument();
+  expect(screen.getByText(persistedResultNote)).toBeInTheDocument();
+  expect(screen.queryByText(localResultNote)).not.toBeInTheDocument();
   expect(apiMocks.saveOutline).toHaveBeenCalledWith(
     "essay-1",
     expect.objectContaining({
@@ -589,7 +594,7 @@ test("edited outline confirmation enters draft with persisted outline reference"
       sections: expect.arrayContaining([
         expect.objectContaining({
           slot: "result",
-          note: "最后我能自己骑过小区空地。",
+          note: localResultNote,
           child_edited: true,
           placeholder: false,
         }),
