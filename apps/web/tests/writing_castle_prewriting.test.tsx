@@ -5,7 +5,10 @@ import { Suspense } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import EssayPage from "../src/app/children/[studentId]/essay/page";
 import { MaterialCardsStep } from "../src/components/writing-castle/MaterialCardsStep";
-import type { MaterialCardSlot } from "../src/lib/types";
+import type {
+  ActiveWritingCastleEssayResponse,
+  MaterialCardSlot,
+} from "../src/lib/types";
 
 const apiMocks = vi.hoisted(() => ({
   getActiveClassroomWritingCastleEssay: vi.fn(),
@@ -640,4 +643,59 @@ test("active outline-ready classroom essay resumes in draft step", async () => {
   expect(await screen.findByLabelText("初稿")).toBeInTheDocument();
   expect(screen.getByText("提纲提醒")).toBeInTheDocument();
   expect(screen.getByText(/最后我能自己骑过小区空地/)).toBeInTheDocument();
+});
+
+test("slow active essay response does not overwrite locally typed topic", async () => {
+  const newTopic = "我第一次自己做饭";
+  const oldOutlineNote = "旧提纲里写的是骑车。";
+  let resolveActive: (value: ActiveWritingCastleEssayResponse) => void =
+    () => undefined;
+  const pendingActive = new Promise<ActiveWritingCastleEssayResponse>(
+    (resolve) => {
+      resolveActive = resolve;
+    },
+  );
+  apiMocks.getActiveClassroomWritingCastleEssay.mockReturnValueOnce(pendingActive);
+
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "student-1" })} />
+      </Suspense>,
+    );
+  });
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "课内同步作文" }),
+  );
+  await userEvent.type(screen.getByLabelText("老师作文题目"), newTopic);
+
+  await act(async () => {
+    resolveActive({
+      essay: essayState({
+        title: "旧题目：我学会了骑车",
+        status: "outline_ready",
+        outline: {
+          ...essayState().outline,
+          sections: [
+            {
+              id: "outline-result",
+              slot: "result",
+              heading: "结果",
+              note: oldOutlineNote,
+              source_card_ids: [],
+              child_edited: true,
+              placeholder: false,
+            },
+          ],
+          step_state: { outline_status: "confirmed" },
+        },
+      }),
+    });
+    await pendingActive;
+  });
+
+  expect(screen.getByLabelText("老师作文题目")).toHaveValue(newTopic);
+  expect(screen.queryByLabelText("初稿")).not.toBeInTheDocument();
+  expect(screen.queryByText(oldOutlineNote)).not.toBeInTheDocument();
 });

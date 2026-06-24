@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createClassroomWritingCastleEssay,
   generateMaterialCards,
@@ -89,6 +89,7 @@ export function ClassroomPrewritingWizard({
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const [pendingLabel, setPendingLabel] = useState("");
+  const ignoreActiveResumeRef = useRef(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -96,7 +97,7 @@ export function ClassroomPrewritingWizard({
     async function loadActiveEssay() {
       try {
         const response = await getActiveClassroomWritingCastleEssay(studentId);
-        if (!isMounted || !response.essay) {
+        if (!isMounted || ignoreActiveResumeRef.current || !response.essay) {
           return;
         }
         const activeEssay = response.essay;
@@ -143,6 +144,7 @@ export function ClassroomPrewritingWizard({
   }
 
   async function start() {
+    ignoreActiveResumeRef.current = true;
     const started = await run("正在看题目...", async () => {
       const created = await createClassroomWritingCastleEssay(studentId, {
         topic_text: topicText,
@@ -289,7 +291,10 @@ export function ClassroomPrewritingWizard({
           <textarea
             className="mt-2 w-full rounded-lg border border-[var(--wen-border)] px-3 py-2 font-normal"
             value={topicText}
-            onChange={(event) => setTopicText(event.target.value)}
+            onChange={(event) => {
+              ignoreActiveResumeRef.current = true;
+              setTopicText(event.target.value);
+            }}
             placeholder="把老师布置的题目写在这里"
           />
         </label>
