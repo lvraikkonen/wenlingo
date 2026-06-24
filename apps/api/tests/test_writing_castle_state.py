@@ -212,6 +212,46 @@ def test_outline_source_validation_allows_empty_placeholder_sections_without_sou
     )
 
 
+def test_child_edited_outline_source_relaxation_is_explicit():
+    section = {
+        "id": "outline-result",
+        "slot": "result",
+        "heading": "结果",
+        "note": "最后我能自己骑过小区空地。",
+        "source_card_ids": [],
+        "child_edited": True,
+        "placeholder": False,
+    }
+
+    with pytest.raises(ValueError, match="story-specific outline sections require source_card_ids"):
+        validate_outline_sources(init_material_card_state(), [section])
+
+    validate_outline_sources(
+        init_material_card_state(),
+        [section],
+        allow_child_edited_without_sources=True,
+    )
+
+
+def test_child_edited_outline_relaxation_still_rejects_unknown_sources():
+    section = {
+        "id": "outline-result",
+        "slot": "result",
+        "heading": "结果",
+        "note": "最后我能自己骑过小区空地。",
+        "source_card_ids": ["missing-card"],
+        "child_edited": True,
+        "placeholder": False,
+    }
+
+    with pytest.raises(ValueError, match="unknown source_card_ids"):
+        validate_outline_sources(
+            init_material_card_state(),
+            [section],
+            allow_child_edited_without_sources=True,
+        )
+
+
 def test_topic_focus_merge_preserves_topic_analysis():
     outline = init_outline_state()
     outline["topic_analysis"]["cards"] = [{"id": "topic-ask", "title": "题目在问什么"}]
