@@ -58,6 +58,17 @@ function essayState(overrides = {}) {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return { promise, resolve, reject };
+}
+
 vi.mock("../src/lib/api", () => ({
   getActiveClassroomWritingCastleEssay:
     apiMocks.getActiveClassroomWritingCastleEssay,
@@ -698,4 +709,38 @@ test("slow active essay response does not overwrite locally typed topic", async 
   expect(screen.getByLabelText("老师作文题目")).toHaveValue(newTopic);
   expect(screen.queryByLabelText("初稿")).not.toBeInTheDocument();
   expect(screen.queryByText(oldOutlineNote)).not.toBeInTheDocument();
+});
+
+test("slow active essay rejection does not clear local start error", async () => {
+  const standardError = "这一步没有保存成功，可以重试，也可以先继续写。";
+  const activeRequest = deferred<ActiveWritingCastleEssayResponse>();
+  apiMocks.getActiveClassroomWritingCastleEssay.mockReturnValueOnce(
+    activeRequest.promise,
+  );
+  apiMocks.createClassroomWritingCastleEssay.mockRejectedValueOnce(
+    new Error("start failed"),
+  );
+
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "student-1" })} />
+      </Suspense>,
+    );
+  });
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "课内同步作文" }),
+  );
+  await userEvent.type(screen.getByLabelText("老师作文题目"), "我第一次自己做饭");
+  await userEvent.click(screen.getByRole("button", { name: "开始审题" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(standardError);
+
+  await act(async () => {
+    activeRequest.reject(new Error("active failed"));
+    await activeRequest.promise.catch(() => undefined);
+  });
+
+  expect(screen.getByRole("alert")).toHaveTextContent(standardError);
 });

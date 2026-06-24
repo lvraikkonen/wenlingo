@@ -114,7 +114,7 @@ export function ClassroomPrewritingWizard({
         setSections(activeEssay.outline.sections);
         setStep(stepFromEssay(activeEssay));
       } catch {
-        if (isMounted) {
+        if (isMounted && !ignoreActiveResumeRef.current) {
           setError("");
         }
       }
