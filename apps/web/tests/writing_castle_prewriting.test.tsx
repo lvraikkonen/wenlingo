@@ -5,9 +5,13 @@ import { Suspense } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import EssayPage from "../src/app/children/[studentId]/essay/page";
 import { MaterialCardsStep } from "../src/components/writing-castle/MaterialCardsStep";
-import type { MaterialCardSlot } from "../src/lib/types";
+import type {
+  ActiveWritingCastleEssayResponse,
+  MaterialCardSlot,
+} from "../src/lib/types";
 
 const apiMocks = vi.hoisted(() => ({
+  getActiveClassroomWritingCastleEssay: vi.fn(),
   createClassroomWritingCastleEssay: vi.fn(),
   generateTopicAnalysis: vi.fn(),
   saveTopicFocus: vi.fn(),
@@ -54,7 +58,20 @@ function essayState(overrides = {}) {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return { promise, resolve, reject };
+}
+
 vi.mock("../src/lib/api", () => ({
+  getActiveClassroomWritingCastleEssay:
+    apiMocks.getActiveClassroomWritingCastleEssay,
   createClassroomWritingCastleEssay: apiMocks.createClassroomWritingCastleEssay,
   generateTopicAnalysis: apiMocks.generateTopicAnalysis,
   saveTopicFocus: apiMocks.saveTopicFocus,
@@ -70,6 +87,9 @@ vi.mock("../src/lib/api", () => ({
 }));
 
 beforeEach(() => {
+  apiMocks.getActiveClassroomWritingCastleEssay.mockResolvedValue({
+    essay: null,
+  });
   apiMocks.createClassroomWritingCastleEssay.mockResolvedValue({
     essay: essayState(),
   });
@@ -551,4 +571,176 @@ test("first draft submit is disabled while feedback request is pending", async (
     await pendingDraft;
   });
   expect(await screen.findByText("修改小任务")).toBeInTheDocument();
+});
+
+test("edited outline confirmation enters draft with persisted outline reference", async () => {
+  const localResultNote = "最后我能自己骑过小区空地。";
+  const persistedResultNote = "最后我能自己稳稳骑过小区空地。";
+
+  apiMocks.saveOutline.mockImplementation(async (_essayId, payload) => ({
+    essay: essayState({
+      status: "outline_ready",
+      outline: {
+        ...essayState().outline,
+        sections: payload.sections.map((section) =>
+          section.slot === "result"
+            ? { ...section, note: persistedResultNote }
+            : section,
+        ),
+        step_state: { outline_status: "confirmed" },
+      },
+    }),
+  }));
+
+  await startClassroomWizard();
+  await continueToOutline();
+  await userEvent.type(screen.getByLabelText("结果"), localResultNote);
+  await userEvent.click(screen.getByRole("button", { name: "确认提纲，开始写" }));
+
+  expect(await screen.findByLabelText("初稿")).toBeInTheDocument();
+  expect(screen.getByText("提纲提醒")).toBeInTheDocument();
+  expect(screen.getByText(persistedResultNote)).toBeInTheDocument();
+  expect(screen.queryByText(localResultNote)).not.toBeInTheDocument();
+  expect(apiMocks.saveOutline).toHaveBeenCalledWith(
+    "essay-1",
+    expect.objectContaining({
+      skipped: false,
+      sections: expect.arrayContaining([
+        expect.objectContaining({
+          slot: "result",
+          note: localResultNote,
+          child_edited: true,
+          placeholder: false,
+        }),
+      ]),
+    }),
+  );
+});
+
+test("active outline-ready classroom essay resumes in draft step", async () => {
+  apiMocks.getActiveClassroomWritingCastleEssay.mockResolvedValue({
+    essay: essayState({
+      status: "outline_ready",
+      material_card: {
+        ...essayState().material_card,
+        cards: [],
+      },
+      outline: {
+        ...essayState().outline,
+        sections: [
+          {
+            id: "outline-result",
+            slot: "result",
+            heading: "结果",
+            note: "最后我能自己骑过小区空地。",
+            source_card_ids: [],
+            child_edited: true,
+            placeholder: false,
+          },
+        ],
+        step_state: { outline_status: "confirmed" },
+      },
+    }),
+  });
+
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "student-1" })} />
+      </Suspense>,
+    );
+  });
+
+  expect(await screen.findByLabelText("初稿")).toBeInTheDocument();
+  expect(screen.getByText("提纲提醒")).toBeInTheDocument();
+  expect(screen.getByText(/最后我能自己骑过小区空地/)).toBeInTheDocument();
+});
+
+test("slow active essay response does not overwrite locally typed topic", async () => {
+  const newTopic = "我第一次自己做饭";
+  const oldOutlineNote = "旧提纲里写的是骑车。";
+  let resolveActive: (value: ActiveWritingCastleEssayResponse) => void =
+    () => undefined;
+  const pendingActive = new Promise<ActiveWritingCastleEssayResponse>(
+    (resolve) => {
+      resolveActive = resolve;
+    },
+  );
+  apiMocks.getActiveClassroomWritingCastleEssay.mockReturnValueOnce(pendingActive);
+
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "student-1" })} />
+      </Suspense>,
+    );
+  });
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "课内同步作文" }),
+  );
+  await userEvent.type(screen.getByLabelText("老师作文题目"), newTopic);
+
+  await act(async () => {
+    resolveActive({
+      essay: essayState({
+        title: "旧题目：我学会了骑车",
+        status: "outline_ready",
+        outline: {
+          ...essayState().outline,
+          sections: [
+            {
+              id: "outline-result",
+              slot: "result",
+              heading: "结果",
+              note: oldOutlineNote,
+              source_card_ids: [],
+              child_edited: true,
+              placeholder: false,
+            },
+          ],
+          step_state: { outline_status: "confirmed" },
+        },
+      }),
+    });
+    await pendingActive;
+  });
+
+  expect(screen.getByLabelText("老师作文题目")).toHaveValue(newTopic);
+  expect(screen.queryByLabelText("初稿")).not.toBeInTheDocument();
+  expect(screen.queryByText(oldOutlineNote)).not.toBeInTheDocument();
+});
+
+test("slow active essay rejection does not clear local start error", async () => {
+  const standardError = "这一步没有保存成功，可以重试，也可以先继续写。";
+  const activeRequest = deferred<ActiveWritingCastleEssayResponse>();
+  apiMocks.getActiveClassroomWritingCastleEssay.mockReturnValueOnce(
+    activeRequest.promise,
+  );
+  apiMocks.createClassroomWritingCastleEssay.mockRejectedValueOnce(
+    new Error("start failed"),
+  );
+
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "student-1" })} />
+      </Suspense>,
+    );
+  });
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "课内同步作文" }),
+  );
+  await userEvent.type(screen.getByLabelText("老师作文题目"), "我第一次自己做饭");
+  await userEvent.click(screen.getByRole("button", { name: "开始审题" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(standardError);
+
+  await act(async () => {
+    activeRequest.reject(new Error("active failed"));
+    await activeRequest.promise.catch(() => undefined);
+  });
+
+  expect(screen.getByRole("alert")).toHaveTextContent(standardError);
 });

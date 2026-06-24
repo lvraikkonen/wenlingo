@@ -120,7 +120,15 @@ test("classroom writing castle reaches first draft feedback", async ({
   await expect(page.getByText("第 4 步 / 共 4 步：搭一个提纲")).toBeVisible({
     timeout: 15_000,
   });
+  await page.getByLabel("结果").fill("最后我能自己骑过小区空地。");
   await page.getByRole("button", { name: "确认提纲，开始写" }).click();
+  await expect(page.getByText("提纲提醒")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/最后我能自己骑过小区空地/)).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByText("提纲提醒")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/最后我能自己骑过小区空地/)).toBeVisible();
+
   await page
     .getByLabel("初稿")
     .fill(

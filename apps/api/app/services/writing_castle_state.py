@@ -215,24 +215,49 @@ def confirm_material_cards(material: dict[str, Any], cards: list[dict[str, Any]]
 def validate_outline_sources(
     material: dict[str, Any],
     sections: list[dict[str, Any]],
+    *,
+    allow_child_edited_without_sources: bool = False,
 ) -> None:
     card_ids = {
         card["id"]
         for card in normalize_material_state(material)["cards"]
         if not card.get("deleted") and not card.get("placeholder")
     }
+    source_card_ids_by_section: list[list[str]] = []
     for section in sections:
+        source_card_ids = section.get("source_card_ids", [])
+        if not isinstance(source_card_ids, list):
+            raise ValueError("source_card_ids must be a list of strings")
+        normalized_source_card_ids = []
+        for source_id in source_card_ids:
+            if not isinstance(source_id, str) or not source_id.strip():
+                raise ValueError("source_card_ids must be a list of strings")
+            normalized_source_card_ids.append(source_id.strip())
+        source_card_ids_by_section.append(normalized_source_card_ids)
+        raw_note = section.get("note", "")
+        if raw_note is None:
+            note = ""
+        elif not isinstance(raw_note, str):
+            raise ValueError("note must be a string")
+        else:
+            note = raw_note
+        child_edited_without_sources_allowed = (
+            allow_child_edited_without_sources
+            and section.get("child_edited")
+            and not normalized_source_card_ids
+        )
         if (
             not section.get("placeholder")
-            and section.get("note", "").strip()
-            and not section.get("source_card_ids", [])
+            and note.strip()
+            and not normalized_source_card_ids
+            and not child_edited_without_sources_allowed
         ):
             raise ValueError("story-specific outline sections require source_card_ids")
     unknown = sorted(
         {
             source_id
-            for section in sections
-            for source_id in section.get("source_card_ids", [])
+            for source_card_ids in source_card_ids_by_section
+            for source_id in source_card_ids
             if source_id not in card_ids
         }
     )
@@ -246,8 +271,13 @@ def merge_outline_sections(
     sections: list[dict[str, Any]],
     *,
     status: str = "generated",
+    allow_child_edited_without_sources: bool = False,
 ) -> dict[str, Any]:
-    validate_outline_sources(material, sections)
+    validate_outline_sources(
+        material,
+        sections,
+        allow_child_edited_without_sources=allow_child_edited_without_sources,
+    )
     updated = normalize_outline_state(outline)
     updated["sections"] = deepcopy(sections)
     updated["step_state"]["outline_status"] = status

@@ -11,6 +11,7 @@ import {
   generateTopicAnalysis,
   getAdminAlphaOverview,
   getAdminAlphaAIUsage,
+  getActiveClassroomWritingCastleEssay,
   getDashboard,
   saveMaterialAnswers,
   saveMaterialCards,
@@ -375,6 +376,7 @@ describe("api client", () => {
       draft: "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
     };
 
+    await getActiveClassroomWritingCastleEssay("student-1");
     await createClassroomWritingCastleEssay("student-1", topicPayload);
     await generateTopicAnalysis("essay-1");
     await saveTopicFocus("essay-1", focusPayload);
@@ -387,6 +389,7 @@ describe("api client", () => {
     await submitPrewritingFirstDraft("essay-1", firstDraftPayload);
 
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/students/student-1/writing-castle/classroom/active",
       "/api/students/student-1/writing-castle/classroom",
       "/api/essays/essay-1/topic-analysis",
       "/api/essays/essay-1/topic-focus",
@@ -400,6 +403,10 @@ describe("api client", () => {
     ]);
 
     expect(fetchMock.mock.calls.map((call) => call[1])).toEqual([
+      expect.objectContaining({
+        credentials: "include",
+        cache: "no-store",
+      }),
       expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },

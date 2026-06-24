@@ -212,6 +212,117 @@ def test_outline_source_validation_allows_empty_placeholder_sections_without_sou
     )
 
 
+def test_outline_source_validation_rejects_malformed_source_card_ids():
+    with pytest.raises(ValueError, match="source_card_ids must be a list of strings"):
+        validate_outline_sources(
+            init_material_card_state(),
+            [
+                {
+                    "id": "outline-placeholder",
+                    "note": "",
+                    "source_card_ids": None,
+                    "placeholder": True,
+                }
+            ],
+        )
+
+
+@pytest.mark.parametrize(
+    "source_card_ids",
+    [
+        [["nested"]],
+        [{"id": "x"}],
+        [1],
+        ["valid-card", ["nested"]],
+        [""],
+        ["   "],
+    ],
+)
+def test_outline_source_validation_rejects_malformed_source_card_id_values(source_card_ids):
+    with pytest.raises(ValueError, match="source_card_ids must be a list of strings"):
+        validate_outline_sources(
+            init_material_card_state(),
+            [
+                {
+                    "id": "outline-placeholder",
+                    "note": "",
+                    "source_card_ids": source_card_ids,
+                    "placeholder": True,
+                }
+            ],
+        )
+
+
+def test_outline_source_validation_treats_none_note_as_empty():
+    validate_outline_sources(
+        init_material_card_state(),
+        [
+            {
+                "id": "outline-placeholder",
+                "note": None,
+                "source_card_ids": [],
+                "placeholder": False,
+            }
+        ],
+    )
+
+
+@pytest.mark.parametrize("note", [[], {}, 1])
+def test_outline_source_validation_rejects_malformed_note_values(note):
+    with pytest.raises(ValueError, match="note must be a string"):
+        validate_outline_sources(
+            init_material_card_state(),
+            [
+                {
+                    "id": "outline-placeholder",
+                    "note": note,
+                    "source_card_ids": [],
+                    "placeholder": False,
+                }
+            ],
+        )
+
+
+def test_child_edited_outline_source_relaxation_is_explicit():
+    section = {
+        "id": "outline-result",
+        "slot": "result",
+        "heading": "结果",
+        "note": "最后我能自己骑过小区空地。",
+        "source_card_ids": [],
+        "child_edited": True,
+        "placeholder": False,
+    }
+
+    with pytest.raises(ValueError, match="story-specific outline sections require source_card_ids"):
+        validate_outline_sources(init_material_card_state(), [section])
+
+    validate_outline_sources(
+        init_material_card_state(),
+        [section],
+        allow_child_edited_without_sources=True,
+    )
+
+
+def test_child_edited_outline_relaxation_still_rejects_unknown_sources():
+    section = {
+        "id": "outline-result",
+        "slot": "result",
+        "heading": "结果",
+        "note": "最后我能自己骑过小区空地。",
+        "source_card_ids": ["missing-card"],
+        "child_edited": True,
+        "placeholder": False,
+    }
+
+    with pytest.raises(ValueError, match="unknown source_card_ids"):
+        validate_outline_sources(
+            init_material_card_state(),
+            [section],
+            allow_child_edited_without_sources=True,
+        )
+
+
 def test_topic_focus_merge_preserves_topic_analysis():
     outline = init_outline_state()
     outline["topic_analysis"]["cards"] = [{"id": "topic-ask", "title": "题目在问什么"}]

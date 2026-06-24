@@ -83,6 +83,46 @@ def test_classroom_prewriting_happy_path_reaches_first_draft_feedback(session, c
     }
 
 
+def test_active_classroom_writing_castle_essay_returns_latest_open_outline(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+    edited_outline = {
+        **start.json()["essay"]["outline"],
+        "sections": [
+            {
+                "id": "outline-result",
+                "slot": "result",
+                "heading": "结果",
+                "note": "最后我能自己骑过小区空地。",
+                "source_card_ids": [],
+                "child_edited": True,
+                "placeholder": False,
+            }
+        ],
+        "step_state": {"outline_status": "confirmed"},
+    }
+    saved = session.get(Essay, essay_id)
+    saved.status = OUTLINE_READY_STATUS
+    saved.outline = edited_outline
+    session.add(saved)
+    session.commit()
+
+    response = client.get(
+        f"/api/students/{student.id}/writing-castle/classroom/active",
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["essay"]["id"] == essay_id
+    assert payload["essay"]["outline"]["sections"][0]["note"] == "最后我能自己骑过小区空地。"
+
+
 def test_generation_endpoints_are_idempotent_and_do_not_overwrite_child_edits(session, client):
     family = create_authenticated_family(session)
     student = family["student"]
@@ -199,6 +239,306 @@ def test_outline_generation_is_blocked_after_skip_and_does_not_mutate_status(ses
     assert skipped.json()["outline"]["step_state"]["outline_status"] == "skipped"
     assert blocked.status_code == 409
     assert saved.outline["step_state"]["outline_status"] == "skipped"
+
+
+def test_child_edited_placeholder_outline_section_can_be_confirmed(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+
+    client.patch(
+        f"/api/essays/{essay_id}/material-answers",
+        json={
+            "answers": [
+                {
+                    "id": "answer-1",
+                    "question_id": "q-event",
+                    "text": "我在小区空地学会了骑车。",
+                    "skipped": False,
+                }
+            ]
+        },
+    )
+    cards = client.post(f"/api/essays/{essay_id}/material-cards", json={})
+    assert cards.status_code == 200
+    confirmed_cards = client.patch(
+        f"/api/essays/{essay_id}/material-cards",
+        json={"cards": cards.json()["material_card"]["cards"]},
+    )
+    assert confirmed_cards.status_code == 200
+
+    outline = client.post(f"/api/essays/{essay_id}/outline", json={})
+    assert outline.status_code == 200
+    sections = outline.json()["outline"]["sections"]
+    assert any(
+        section["slot"] == "result"
+        and section["placeholder"] is True
+        and section["source_card_ids"] == []
+        for section in sections
+    )
+
+    edited_sections = [
+        {
+            **section,
+            "note": "最后我能自己骑过小区空地。",
+            "child_edited": True,
+            "placeholder": False,
+            "source_card_ids": [],
+        }
+        if section["slot"] == "result"
+        else section
+        for section in sections
+    ]
+
+    response = client.patch(
+        f"/api/essays/{essay_id}/outline",
+        json={"sections": edited_sections, "skipped": False},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["essay"]["status"] == OUTLINE_READY_STATUS
+    assert payload["outline"]["step_state"]["outline_status"] == "confirmed"
+    edited_result = next(
+        section for section in payload["outline"]["sections"] if section["slot"] == "result"
+    )
+    assert edited_result["note"] == "最后我能自己骑过小区空地。"
+    assert edited_result["child_edited"] is True
+    assert edited_result["source_card_ids"] == []
+
+    saved = session.get(Essay, essay_id)
+    saved_result = next(
+        section for section in saved.outline["sections"] if section["slot"] == "result"
+    )
+    assert saved_result["note"] == "最后我能自己骑过小区空地。"
+
+    event = session.exec(
+        select(ProductEvent).where(ProductEvent.event_type == "outline_confirmed")
+    ).one()
+    assert event.payload["outline_section_count"] == 4
+
+
+def test_child_edited_outline_with_malformed_source_card_ids_returns_400(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+
+    client.patch(
+        f"/api/essays/{essay_id}/material-answers",
+        json={
+            "answers": [
+                {
+                    "id": "answer-1",
+                    "question_id": "q-event",
+                    "text": "我在小区空地学会了骑车。",
+                    "skipped": False,
+                }
+            ]
+        },
+    )
+    cards = client.post(f"/api/essays/{essay_id}/material-cards", json={})
+    assert cards.status_code == 200
+    confirmed_cards = client.patch(
+        f"/api/essays/{essay_id}/material-cards",
+        json={"cards": cards.json()["material_card"]["cards"]},
+    )
+    assert confirmed_cards.status_code == 200
+
+    outline = client.post(f"/api/essays/{essay_id}/outline", json={})
+    assert outline.status_code == 200
+    sections = outline.json()["outline"]["sections"]
+
+    edited_sections = [
+        {
+            **section,
+            "note": "最后我能自己骑过小区空地。",
+            "child_edited": True,
+            "placeholder": False,
+            "source_card_ids": None,
+        }
+        if section["slot"] == "result"
+        else section
+        for section in sections
+    ]
+
+    response = client.patch(
+        f"/api/essays/{essay_id}/outline",
+        json={"sections": edited_sections, "skipped": False},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "source_card_ids must be a list of strings"
+
+
+def test_untouched_outline_with_malformed_source_card_ids_returns_400(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+
+    client.patch(
+        f"/api/essays/{essay_id}/material-answers",
+        json={
+            "answers": [
+                {
+                    "id": "answer-1",
+                    "question_id": "q-event",
+                    "text": "我在小区空地学会了骑车。",
+                    "skipped": False,
+                }
+            ]
+        },
+    )
+    cards = client.post(f"/api/essays/{essay_id}/material-cards", json={})
+    assert cards.status_code == 200
+    confirmed_cards = client.patch(
+        f"/api/essays/{essay_id}/material-cards",
+        json={"cards": cards.json()["material_card"]["cards"]},
+    )
+    assert confirmed_cards.status_code == 200
+
+    outline = client.post(f"/api/essays/{essay_id}/outline", json={})
+    assert outline.status_code == 200
+    sections = outline.json()["outline"]["sections"]
+    assert any(
+        section["slot"] == "result" and section["placeholder"] is True
+        for section in sections
+    )
+
+    edited_sections = [
+        {**section, "source_card_ids": None}
+        if section["slot"] == "result"
+        else section
+        for section in sections
+    ]
+
+    response = client.patch(
+        f"/api/essays/{essay_id}/outline",
+        json={"sections": edited_sections, "skipped": False},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "source_card_ids must be a list of strings"
+
+
+def test_outline_with_malformed_source_card_id_value_returns_400(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+
+    client.patch(
+        f"/api/essays/{essay_id}/material-answers",
+        json={
+            "answers": [
+                {
+                    "id": "answer-1",
+                    "question_id": "q-event",
+                    "text": "我在小区空地学会了骑车。",
+                    "skipped": False,
+                }
+            ]
+        },
+    )
+    cards = client.post(f"/api/essays/{essay_id}/material-cards", json={})
+    assert cards.status_code == 200
+    confirmed_cards = client.patch(
+        f"/api/essays/{essay_id}/material-cards",
+        json={"cards": cards.json()["material_card"]["cards"]},
+    )
+    assert confirmed_cards.status_code == 200
+
+    outline = client.post(f"/api/essays/{essay_id}/outline", json={})
+    assert outline.status_code == 200
+    sections = outline.json()["outline"]["sections"]
+    assert any(
+        section["slot"] == "result" and section["placeholder"] is True
+        for section in sections
+    )
+
+    edited_sections = [
+        {**section, "source_card_ids": [["nested"]]}
+        if section["slot"] == "result"
+        else section
+        for section in sections
+    ]
+
+    response = client.patch(
+        f"/api/essays/{essay_id}/outline",
+        json={"sections": edited_sections, "skipped": False},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "source_card_ids must be a list of strings"
+
+
+def test_outline_with_malformed_note_returns_400(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+
+    client.patch(
+        f"/api/essays/{essay_id}/material-answers",
+        json={
+            "answers": [
+                {
+                    "id": "answer-1",
+                    "question_id": "q-event",
+                    "text": "我在小区空地学会了骑车。",
+                    "skipped": False,
+                }
+            ]
+        },
+    )
+    cards = client.post(f"/api/essays/{essay_id}/material-cards", json={})
+    assert cards.status_code == 200
+    confirmed_cards = client.patch(
+        f"/api/essays/{essay_id}/material-cards",
+        json={"cards": cards.json()["material_card"]["cards"]},
+    )
+    assert confirmed_cards.status_code == 200
+
+    outline = client.post(f"/api/essays/{essay_id}/outline", json={})
+    assert outline.status_code == 200
+    sections = outline.json()["outline"]["sections"]
+
+    edited_sections = [
+        {**section, "note": ["bad"], "placeholder": False}
+        if section["slot"] == "result"
+        else section
+        for section in sections
+    ]
+
+    response = client.patch(
+        f"/api/essays/{essay_id}/outline",
+        json={"sections": edited_sections, "skipped": False},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "note must be a string"
 
 
 def test_legacy_essay_cannot_enter_writing_castle_prewriting(session, client):

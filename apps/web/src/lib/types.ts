@@ -244,6 +244,10 @@ export type WritingCastleEssayResponse = {
   essay: WritingCastleEssay;
 };
 
+export type ActiveWritingCastleEssayResponse = {
+  essay: WritingCastleEssay | null;
+};
+
 export type WritingCastleTopicAnalysisResponse = WritingCastleEssayResponse & {
   topic_analysis: WritingCastleTopicAnalysis;
 };
