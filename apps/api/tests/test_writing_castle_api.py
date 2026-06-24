@@ -83,6 +83,46 @@ def test_classroom_prewriting_happy_path_reaches_first_draft_feedback(session, c
     }
 
 
+def test_active_classroom_writing_castle_essay_returns_latest_open_outline(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+    edited_outline = {
+        **start.json()["essay"]["outline"],
+        "sections": [
+            {
+                "id": "outline-result",
+                "slot": "result",
+                "heading": "结果",
+                "note": "最后我能自己骑过小区空地。",
+                "source_card_ids": [],
+                "child_edited": True,
+                "placeholder": False,
+            }
+        ],
+        "step_state": {"outline_status": "confirmed"},
+    }
+    saved = session.get(Essay, essay_id)
+    saved.status = OUTLINE_READY_STATUS
+    saved.outline = edited_outline
+    session.add(saved)
+    session.commit()
+
+    response = client.get(
+        f"/api/students/{student.id}/writing-castle/classroom/active",
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["essay"]["id"] == essay_id
+    assert payload["essay"]["outline"]["sections"][0]["note"] == "最后我能自己骑过小区空地。"
+
+
 def test_generation_endpoints_are_idempotent_and_do_not_overwrite_child_edits(session, client):
     family = create_authenticated_family(session)
     student = family["student"]

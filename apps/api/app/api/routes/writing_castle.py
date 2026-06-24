@@ -294,6 +294,24 @@ async def create_classroom_writing_castle_essay(
     return {"essay": _essay_payload(essay)}
 
 
+@router.get("/api/students/{student_id}/writing-castle/classroom/active")
+async def get_active_classroom_writing_castle_essay(
+    student_id: str,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    context: ParentContext | None = Depends(require_auth_mode_state_change),
+):
+    student = require_student_for_auth_mode(session, settings, context, student_id)
+    essays = session.exec(
+        select(Essay)
+        .where(Essay.student_id == student.id)
+        .where(Essay.status.in_(OPEN_PREWRITING_STATUSES))
+        .order_by(Essay.created_at.desc())
+    ).all()
+    essay = next((candidate for candidate in essays if _is_writing_castle_essay(candidate)), None)
+    return {"essay": _essay_payload(essay) if essay else None}
+
+
 @router.post("/api/essays/{essay_id}/topic-analysis")
 async def generate_topic_analysis(
     essay_id: str,
