@@ -82,10 +82,10 @@ def normalize_material_state(value: dict[str, Any] | None) -> dict[str, Any]:
     normalized.update(deepcopy(value))
     normalized["step_state"] = {
         **init_material_card_state(schema_version=schema_version)["step_state"],
-        **value.get("step_state", {}),
+        **deepcopy(value.get("step_state", {})),
     }
     if schema_version == SCHEMA_VERSION:
-        normalized["scaffold_ref"] = value.get("scaffold_ref")
+        normalized["scaffold_ref"] = deepcopy(value.get("scaffold_ref"))
     return normalized
 
 
@@ -97,18 +97,18 @@ def normalize_outline_state(value: dict[str, Any] | None) -> dict[str, Any]:
     normalized.update(deepcopy(value))
     normalized["topic_analysis"] = {
         **init_outline_state(schema_version=schema_version)["topic_analysis"],
-        **value.get("topic_analysis", {}),
+        **deepcopy(value.get("topic_analysis", {})),
     }
     normalized["child_topic_focus"] = {
         **init_outline_state(schema_version=schema_version)["child_topic_focus"],
-        **value.get("child_topic_focus", {}),
+        **deepcopy(value.get("child_topic_focus", {})),
     }
     normalized["step_state"] = {
         **init_outline_state(schema_version=schema_version)["step_state"],
-        **value.get("step_state", {}),
+        **deepcopy(value.get("step_state", {})),
     }
     if schema_version == SCHEMA_VERSION:
-        normalized["scaffold"] = value.get("scaffold")
+        normalized["scaffold"] = deepcopy(value.get("scaffold"))
     return normalized
 
 

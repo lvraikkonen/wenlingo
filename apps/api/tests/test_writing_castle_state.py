@@ -107,6 +107,51 @@ def test_legacy_v06a_state_normalizes_without_v06b_scaffold():
     assert "scaffold" not in normalized_outline
 
 
+def test_normalize_material_state_does_not_alias_input_nested_fields():
+    material = init_material_card_state()
+    material["step_state"]["questions_status"] = "generated"
+    material["scaffold_ref"] = {
+        "topic_type": "person_portrait",
+        "topic_variant": "default",
+        "scaffold_template_version": "person_portrait.default.v0.6b.1",
+    }
+
+    normalized = normalize_material_state(material)
+    normalized["step_state"]["questions_status"] = "mutated"
+    normalized["scaffold_ref"]["topic_type"] = "generic_narrative"
+
+    assert material["step_state"]["questions_status"] == "generated"
+    assert material["scaffold_ref"]["topic_type"] == "person_portrait"
+
+
+def test_normalize_outline_state_does_not_alias_input_nested_fields():
+    snapshot = resolve_scaffold_snapshot("person_portrait", None, "manual")
+    outline = init_outline_state()
+    outline["topic_analysis"] = {
+        "cards": [{"id": "topic-card-1", "text": "原始卡片"}],
+        "status": "generated",
+    }
+    outline["child_topic_focus"]["text"] = "原始重点"
+    outline["step_state"]["outline_status"] = "generated"
+    outline["scaffold"] = snapshot
+
+    normalized = normalize_outline_state(outline)
+    normalized["topic_analysis"]["cards"][0]["text"] = "变更卡片"
+    normalized["child_topic_focus"]["text"] = "变更重点"
+    normalized["step_state"]["outline_status"] = "mutated"
+    normalized["scaffold"]["display_name_child"] = "变更标签"
+
+    assert outline["topic_analysis"]["cards"][0]["text"] == "原始卡片"
+    assert outline["child_topic_focus"]["text"] == "原始重点"
+    assert outline["step_state"]["outline_status"] == "generated"
+    assert outline["scaffold"]["display_name_child"] == "写一个人"
+
+
+def test_resolve_essay_scaffold_fails_closed_for_unsupported_json_state():
+    with pytest.raises(ValueError, match="resolved scaffold is required"):
+        resolve_essay_scaffold(FakeEssay({}, {}))
+
+
 def test_patch_helpers_preserve_unrelated_fields():
     material = init_material_card_state()
     material["cards"] = [{"id": "card-event", "text": "保留", "deleted": False}]
