@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -17,7 +17,7 @@ from app.api.feedback_state import feedback_reaction_value
 from app.api.routes.alpha import record_product_event
 from app.core.config import Settings, get_settings
 from app.domain.enums import TaskType
-from app.domain.models import AbilityProfile, Essay, EssayVersion, StudentProfile
+from app.domain.models import AbilityProfile, Essay, EssayVersion, ProductEvent, StudentProfile
 from app.services.abilities import apply_ability_delta
 from app.services.ai_tasks import (
     essay_feedback,
@@ -79,11 +79,14 @@ class ClassroomEssayCreate(BaseModel):
     topic_text: str = Field(min_length=1, max_length=300)
 
 
+OverrideReason = Literal["manual_choice", "suggestion_accepted", "fallback_selected"]
+
+
 class ScaffoldSelectionSave(BaseModel):
     topic_type: str = Field(min_length=1, max_length=80)
     topic_variant: str | None = Field(default=None, max_length=80)
     accepted_suggestion_id: str | None = Field(default=None, max_length=120)
-    override_reason: str | None = Field(default="manual_choice", max_length=40)
+    override_reason: OverrideReason | None = "manual_choice"
     unsupported_future_type: str | None = Field(default=None, max_length=80)
 
     @field_validator("unsupported_future_type")
@@ -144,9 +147,11 @@ def _is_writing_castle_essay(essay: Essay) -> bool:
     if essay.status not in OPEN_PREWRITING_STATUSES | CLOSED_PREWRITING_STATUSES:
         return False
     supported_schema_versions = {LEGACY_SCHEMA_VERSION, SCHEMA_VERSION}
+    material_schema_version = essay.material_card.get("schema_version")
+    outline_schema_version = essay.outline.get("schema_version")
     return (
-        essay.material_card.get("schema_version") in supported_schema_versions
-        and essay.outline.get("schema_version") in supported_schema_versions
+        material_schema_version == outline_schema_version
+        and material_schema_version in supported_schema_versions
     )
 
 
@@ -222,6 +227,14 @@ def _resolved_scaffold_or_legacy(essay: Essay) -> dict[str, Any] | None:
         return resolve_essay_scaffold(essay)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _scaffold_selection_source(override_reason: OverrideReason | None) -> str:
+    if override_reason == "suggestion_accepted":
+        return "ai_suggested"
+    if override_reason == "fallback_selected":
+        return "fallback"
+    return "manual"
 
 
 def _material_answer_source_ids(material: dict[str, Any]) -> list[str]:
@@ -388,7 +401,7 @@ async def save_scaffold_selection(
         snapshot = resolve_scaffold_snapshot(
             request.topic_type,
             request.topic_variant,
-            "ai_suggested" if request.override_reason == "suggestion_accepted" else "manual",
+            _scaffold_selection_source(request.override_reason),
         )
         detected_future_type = detect_unsupported_future_type(_essay_topic_text(essay))
         unsupported_future_type = detected_future_type or request.unsupported_future_type
@@ -398,20 +411,24 @@ async def save_scaffold_selection(
         essay.material_card, essay.outline = attach_scaffold_snapshot(material, outline, snapshot)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    _record_event(
-        session,
-        "scaffold_selected",
-        essay=essay,
-        student=student,
-        payload={
-            "step": "scaffold_selection",
-            "topic_type": snapshot["topic_type"],
-            "topic_variant": snapshot["topic_variant"],
-            "scaffold_template_version": snapshot["scaffold_template_version"],
-            "selection_source": snapshot["selection_source"],
-            "unsupported_future_type": snapshot.get("unsupported_future_type", ""),
-            "unsupported_override": bool(snapshot.get("unsupported_override")),
-        },
+    session.add(
+        ProductEvent(
+            event_type="scaffold_selected",
+            parent_id=student.parent_id,
+            student_id=student.id,
+            payload={
+                "essay_id": essay.id,
+                "step": "scaffold_selection",
+                "topic_type": snapshot["topic_type"],
+                "topic_variant": snapshot["topic_variant"],
+                "scaffold_template_version": snapshot["scaffold_template_version"],
+                "selection_source": snapshot["selection_source"],
+                "override_reason": request.override_reason or "manual_choice",
+                "accepted_suggestion_id": request.accepted_suggestion_id or "",
+                "unsupported_future_type": snapshot.get("unsupported_future_type", ""),
+                "unsupported_override": bool(snapshot.get("unsupported_override")),
+            },
+        )
     )
     return _save_step_response(session, essay, "scaffold", snapshot)
 
@@ -547,6 +564,7 @@ async def save_material_answers(
 ):
     essay = require_essay_for_auth_mode(session, settings, context, essay_id)
     _prewriting_open(essay)
+    _resolved_scaffold_or_legacy(essay)
     student, _ability = _student_and_ability(session, essay.student_id)
     essay.material_card = merge_material_answers(essay.material_card, answers=request.answers)
     essay.status = next_status_after_materials(essay.status)
