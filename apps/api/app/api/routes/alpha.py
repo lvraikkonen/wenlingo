@@ -86,6 +86,7 @@ P0_EVENT_TYPES = {
     "sentence_challenge_feedback_failed",
     "ai_daily_limit_reached",
     "writing_castle_started",
+    "scaffold_selected",
     "topic_analysis_completed",
     "topic_focus_confirmed",
     "topic_focus_skipped",
@@ -133,6 +134,14 @@ SAFE_PAYLOAD_KEYS = {
     "card_count",
     "outline_section_count",
     "skipped",
+    "topic_type",
+    "topic_variant",
+    "scaffold_template_version",
+    "selection_source",
+    "override_reason",
+    "accepted_suggestion_id",
+    "unsupported_future_type",
+    "unsupported_override",
 }
 JSON_SAFE_SCALARS = (str, int, float, bool, type(None))
 INVITE_CODE_VALUE_PATTERN = re.compile(

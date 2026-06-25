@@ -83,6 +83,43 @@ def contains_key(value, key: str) -> bool:
     return False
 
 
+def test_scaffold_selected_product_event_contract_preserves_scaffold_payload(session):
+    payload = {
+        "essay_id": "essay-1",
+        "step": "scaffold_selection",
+        "topic_type": "person_portrait",
+        "topic_variant": "default",
+        "scaffold_template_version": "person_portrait.default.v0.6b.1",
+        "selection_source": "ai_suggested",
+        "override_reason": "suggestion_accepted",
+        "accepted_suggestion_id": "suggestion-1",
+        "unsupported_future_type": "reading_response_recommendation",
+        "unsupported_override": True,
+        "unsafe_key": "drop me",
+    }
+
+    event = alpha_routes.record_product_event(
+        session,
+        "scaffold_selected",
+        payload=payload,
+    )
+    session.commit()
+    session.refresh(event)
+
+    assert event.payload == {
+        "essay_id": "essay-1",
+        "step": "scaffold_selection",
+        "topic_type": "person_portrait",
+        "topic_variant": "default",
+        "scaffold_template_version": "person_portrait.default.v0.6b.1",
+        "selection_source": "ai_suggested",
+        "override_reason": "suggestion_accepted",
+        "accepted_suggestion_id": "suggestion-1",
+        "unsupported_future_type": "reading_response_recommendation",
+        "unsupported_override": True,
+    }
+
+
 class ProviderFailureFallbackRunner:
     provider_name = "fake"
     model_name = "provider-failure-fallback"

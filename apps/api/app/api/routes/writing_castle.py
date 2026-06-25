@@ -17,7 +17,7 @@ from app.api.feedback_state import feedback_reaction_value
 from app.api.routes.alpha import record_product_event
 from app.core.config import Settings, get_settings
 from app.domain.enums import TaskType
-from app.domain.models import AbilityProfile, Essay, EssayVersion, ProductEvent, StudentProfile
+from app.domain.models import AbilityProfile, Essay, EssayVersion, StudentProfile
 from app.services.abilities import apply_ability_delta
 from app.services.ai_tasks import (
     essay_feedback,
@@ -411,24 +411,22 @@ async def save_scaffold_selection(
         essay.material_card, essay.outline = attach_scaffold_snapshot(material, outline, snapshot)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    session.add(
-        ProductEvent(
-            event_type="scaffold_selected",
-            parent_id=student.parent_id,
-            student_id=student.id,
-            payload={
-                "essay_id": essay.id,
-                "step": "scaffold_selection",
-                "topic_type": snapshot["topic_type"],
-                "topic_variant": snapshot["topic_variant"],
-                "scaffold_template_version": snapshot["scaffold_template_version"],
-                "selection_source": snapshot["selection_source"],
-                "override_reason": request.override_reason or "manual_choice",
-                "accepted_suggestion_id": request.accepted_suggestion_id or "",
-                "unsupported_future_type": snapshot.get("unsupported_future_type", ""),
-                "unsupported_override": bool(snapshot.get("unsupported_override")),
-            },
-        )
+    _record_event(
+        session,
+        "scaffold_selected",
+        essay=essay,
+        student=student,
+        payload={
+            "step": "scaffold_selection",
+            "topic_type": snapshot["topic_type"],
+            "topic_variant": snapshot["topic_variant"],
+            "scaffold_template_version": snapshot["scaffold_template_version"],
+            "selection_source": snapshot["selection_source"],
+            "override_reason": request.override_reason or "manual_choice",
+            "accepted_suggestion_id": request.accepted_suggestion_id or "",
+            "unsupported_future_type": snapshot.get("unsupported_future_type", ""),
+            "unsupported_override": bool(snapshot.get("unsupported_override")),
+        },
     )
     return _save_step_response(session, essay, "scaffold", snapshot)
 
