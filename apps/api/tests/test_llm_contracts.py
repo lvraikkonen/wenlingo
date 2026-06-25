@@ -79,6 +79,57 @@ def test_writing_topic_analysis_contract_is_short_and_structured():
     assert result.cards[0].kind == "topic_question"
 
 
+def test_writing_castle_prewriting_prompt_contracts_define_exact_json_shapes():
+    expectations = {
+        "writing_topic_analysis": [
+            "Return only this exact JSON object",
+            '"cards"',
+            '"kind":"topic_question"',
+            '"kind":"must_include"',
+            '"kind":"shine_point"',
+            '"suggested_focus"',
+            "Do not include any keys not shown",
+        ],
+        "material_questions": [
+            "Return only this exact JSON object",
+            '"questions"',
+            '"id":"q1"',
+            '"id":"q2"',
+            '"id":"q3"',
+            '"encouragement"',
+            "Do not include any keys not shown",
+        ],
+        "material_card_generation": [
+            "Return only this exact JSON object",
+            '"cards"',
+            '"category":"event"',
+            '"category":"detail"',
+            '"category":"feeling_takeaway"',
+            '"source_answer_ids"',
+            '"placeholder"',
+            "Use source_answer_ids only from payload.answers[*].id",
+            "Do not include any keys not shown",
+        ],
+        "outline_generation": [
+            "Return only this exact JSON object",
+            '"sections"',
+            '"slot":"cause"',
+            '"slot":"process"',
+            '"slot":"result"',
+            '"slot":"reflection"',
+            '"source_card_ids"',
+            '"placeholder"',
+            "Use source_card_ids only from payload.cards[*].id",
+            "Do not include any keys not shown",
+        ],
+    }
+
+    for task_name, snippets in expectations.items():
+        contract = response_contract_for_task(task_name)
+        for snippet in snippets:
+            assert snippet in contract
+
+
 def test_material_cards_require_source_answer_ids_for_non_placeholder_cards():
     from pydantic import ValidationError
     from app.services.llm_contracts import MaterialCardsResult

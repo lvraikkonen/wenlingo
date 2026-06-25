@@ -70,6 +70,28 @@ def response(
     )
 
 
+def response_payload(
+    *,
+    parsed_json: dict[str, Any],
+    raw_response: str,
+    provider: str,
+    model: str,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+) -> LLMProviderResponse:
+    return LLMProviderResponse(
+        parsed_json=parsed_json,
+        raw_response=raw_response,
+        provider=provider,
+        model=model,
+        usage={
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
+    )
+
+
 def local_fallback(context: FailureContext) -> TinyOutput:
     return TinyOutput(message="local fallback")
 
@@ -379,6 +401,66 @@ async def test_schema_validation_failure_falls_back_and_keeps_primary_usage(sess
     assert saved.attempt_summaries[0]["prompt_tokens"] == 11
     assert saved.attempt_summaries[0]["completion_tokens"] == 7
     assert saved.attempt_summaries[1]["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_schema_validation_failure_records_privacy_safe_error_summary(session):
+    primary = FakeProvider(
+        provider_name="primary",
+        model_name="cheap-fast",
+        actions=[
+            response_payload(
+                parsed_json={"message": "no"},
+                raw_response='{"message":"no"}',
+                provider="primary",
+                model="cheap-fast",
+                prompt_tokens=11,
+                completion_tokens=7,
+            )
+        ],
+    )
+    fallback = FakeProvider(
+        provider_name="fallback",
+        model_name="strong-default",
+        actions=[
+            response_payload(
+                parsed_json={"message": "ok"},
+                raw_response='{"message":"ok"}',
+                provider="fallback",
+                model="strong-default",
+                prompt_tokens=13,
+                completion_tokens=5,
+            )
+        ],
+    )
+
+    await run_ai_task(
+        settings=Settings(llm_provider="mock"),
+        session=session,
+        task_type=TaskType.sentence,
+        task_name="sentence_upgrade_feedback",
+        student_id="s1",
+        payload={"draft": "tiny draft"},
+        output_schema=TinyOutput,
+        prompt_key="sentence_upgrade_feedback",
+        input_summary="tiny test",
+        deterministic_fallback_factory=local_fallback,
+        primary_provider=primary,
+        fallback_provider=fallback,
+    )
+
+    saved = session.exec(select(LLMCallLog)).one()
+    primary_summary = saved.attempt_summaries[0]
+    assert primary_summary["status"] == TaskFallbackReason.SCHEMA_VALIDATION_FAILED
+    assert primary_summary["validation_errors"] == [
+        {
+            "loc": "message",
+            "type": "string_too_short",
+            "msg": "String should have at least 3 characters",
+        }
+    ]
+    assert "no" not in str(primary_summary["validation_errors"])
+    assert "raw_response" not in primary_summary
 
 
 @pytest.mark.asyncio

@@ -57,9 +57,10 @@ class AttemptRecord:
     total_tokens: int
     estimated_cost: float
     pricing_status: str
+    validation_errors: tuple[dict[str, str], ...] = ()
 
     def to_summary(self) -> dict[str, Any]:
-        return {
+        summary = {
             "attempt_index": self.attempt_index,
             "role": self.role,
             "provider": self.provider,
@@ -73,6 +74,9 @@ class AttemptRecord:
             "estimated_cost": self.estimated_cost,
             "pricing_status": self.pricing_status,
         }
+        if self.validation_errors:
+            summary["validation_errors"] = list(self.validation_errors)
+        return summary
 
 
 def _provider_name(provider: LLMProvider) -> str:
@@ -128,6 +132,20 @@ def _classify_provider_exception(exc: Exception) -> str:
     if "rate" in message and "limit" in message:
         return TaskFallbackReason.RATE_LIMIT
     return TaskFallbackReason.API_ERROR
+
+
+def _validation_error_summary(exc: ValidationError) -> tuple[dict[str, str], ...]:
+    summaries = []
+    for error in exc.errors()[:8]:
+        loc = ".".join(str(part) for part in error.get("loc", ())) or "__root__"
+        summaries.append(
+            {
+                "loc": loc,
+                "type": str(error.get("type", "")),
+                "msg": str(error.get("msg", "")),
+            }
+        )
+    return tuple(summaries)
 
 
 def _coerce_fallback_output(
@@ -242,6 +260,7 @@ async def _attempt_provider(
     provider_name = _provider_name(provider)
     model_name = _model_name(provider)
     output: T | None = None
+    validation_errors: tuple[dict[str, str], ...] = ()
     started_at = perf_counter()
     try:
         response = await provider.complete_json(task_name, payload)
@@ -256,6 +275,7 @@ async def _attempt_provider(
         except ValidationError as exc:
             reason = TaskFallbackReason.SCHEMA_VALIDATION_FAILED
             error_class = exc.__class__.__name__
+            validation_errors = _validation_error_summary(exc)
             output = None
         else:
             try:
@@ -292,6 +312,7 @@ async def _attempt_provider(
             pricing=pricing,
         ),
         pricing_status=_attempt_pricing_status(pricing, route_pricing_status),
+        validation_errors=validation_errors,
     )
     return output, response, attempt, reason
 
