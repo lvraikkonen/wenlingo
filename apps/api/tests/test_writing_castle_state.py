@@ -1,14 +1,18 @@
 import pytest
 
+from app.services.writing_castle_scaffold import resolve_scaffold_snapshot
 from app.services.writing_castle_state import (
+    LEGACY_SCHEMA_VERSION,
     MATERIALS_READY_STATUS,
     OUTLINE_READY_STATUS,
     PREWRITING_STARTED_STATUS,
     REVISION_REQUESTED_STATUS,
     SCHEMA_VERSION,
+    attach_scaffold_snapshot,
     TOPIC_READY_STATUS,
     assert_prewriting_editable,
     confirm_material_cards,
+    has_resolved_scaffold,
     init_material_card_state,
     init_outline_state,
     merge_material_answers,
@@ -16,9 +20,18 @@ from app.services.writing_castle_state import (
     next_status_after_materials,
     next_status_after_outline,
     next_status_after_topic,
+    normalize_material_state,
+    normalize_outline_state,
+    resolve_essay_scaffold,
     validate_card_sources,
     validate_outline_sources,
 )
+
+
+class FakeEssay:
+    def __init__(self, material_card, outline):
+        self.material_card = material_card
+        self.outline = outline
 
 
 def test_init_states_include_schema_version_and_empty_slots():
@@ -29,6 +42,69 @@ def test_init_states_include_schema_version_and_empty_slots():
     assert outline["schema_version"] == SCHEMA_VERSION
     assert material["cards"] == []
     assert outline["sections"] == []
+
+
+def test_v06b_init_states_use_current_schema_without_scaffold():
+    material = init_material_card_state()
+    outline = init_outline_state()
+
+    assert material["schema_version"] == "v0.6b.1"
+    assert outline["schema_version"] == "v0.6b.1"
+    assert material["scaffold_ref"] is None
+    assert outline["scaffold"] is None
+    assert has_resolved_scaffold(material, outline) is False
+
+
+def test_attach_scaffold_snapshot_stores_full_snapshot_and_ref():
+    material = init_material_card_state()
+    outline = init_outline_state()
+    snapshot = resolve_scaffold_snapshot("person_portrait", None, "manual")
+
+    updated_material, updated_outline = attach_scaffold_snapshot(material, outline, snapshot)
+
+    assert updated_outline["scaffold"] == snapshot
+    assert updated_material["scaffold_ref"] == {
+        "topic_type": "person_portrait",
+        "topic_variant": "default",
+        "scaffold_template_version": "person_portrait.default.v0.6b.1",
+    }
+    assert has_resolved_scaffold(updated_material, updated_outline) is True
+
+
+def test_resolve_essay_scaffold_fails_closed_on_ref_mismatch():
+    snapshot = resolve_scaffold_snapshot("person_portrait", None, "manual")
+    material, outline = attach_scaffold_snapshot(init_material_card_state(), init_outline_state(), snapshot)
+    material["scaffold_ref"]["topic_type"] = "generic_narrative"
+
+    with pytest.raises(ValueError, match="scaffold_ref mismatch"):
+        resolve_essay_scaffold(FakeEssay(material, outline))
+
+
+def test_resolve_essay_scaffold_returns_saved_snapshot_not_registry_rebuild():
+    snapshot = resolve_scaffold_snapshot("person_portrait", None, "manual")
+    snapshot["display_name_child"] = "保存时的写人标签"
+    material, outline = attach_scaffold_snapshot(init_material_card_state(), init_outline_state(), snapshot)
+
+    resolved = resolve_essay_scaffold(FakeEssay(material, outline))
+
+    assert resolved["display_name_child"] == "保存时的写人标签"
+
+
+def test_legacy_v06a_state_normalizes_without_v06b_scaffold():
+    material = {"schema_version": LEGACY_SCHEMA_VERSION, "questions": [], "answers": [], "cards": []}
+    outline = {
+        "schema_version": LEGACY_SCHEMA_VERSION,
+        "topic_analysis": {"cards": [], "status": "not_started"},
+        "sections": [],
+    }
+
+    normalized_material = normalize_material_state(material)
+    normalized_outline = normalize_outline_state(outline)
+
+    assert normalized_material["schema_version"] == LEGACY_SCHEMA_VERSION
+    assert normalized_outline["schema_version"] == LEGACY_SCHEMA_VERSION
+    assert "scaffold_ref" not in normalized_material
+    assert "scaffold" not in normalized_outline
 
 
 def test_patch_helpers_preserve_unrelated_fields():

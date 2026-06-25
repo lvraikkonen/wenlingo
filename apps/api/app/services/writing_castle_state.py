@@ -3,8 +3,10 @@ from datetime import timezone
 from typing import Any
 
 from app.domain.models import utcnow
+from app.services.writing_castle_scaffold import SCHEMA_VERSION as CURRENT_SCHEMA_VERSION
 
-SCHEMA_VERSION = "v0.6a.1"
+LEGACY_SCHEMA_VERSION = "v0.6a.1"
+SCHEMA_VERSION = CURRENT_SCHEMA_VERSION
 
 PREWRITING_STARTED_STATUS = "prewriting_started"
 TOPIC_READY_STATUS = "topic_ready"
@@ -27,9 +29,20 @@ def _now_iso() -> str:
     return utcnow().astimezone(timezone.utc).isoformat()
 
 
-def init_material_card_state() -> dict[str, Any]:
-    return {
-        "schema_version": SCHEMA_VERSION,
+def _is_supported_schema(value: dict[str, Any] | None) -> bool:
+    return isinstance(value, dict) and value.get("schema_version") in {
+        LEGACY_SCHEMA_VERSION,
+        SCHEMA_VERSION,
+    }
+
+
+def _is_legacy_schema(value: dict[str, Any] | None) -> bool:
+    return isinstance(value, dict) and value.get("schema_version") == LEGACY_SCHEMA_VERSION
+
+
+def init_material_card_state(*, schema_version: str = SCHEMA_VERSION) -> dict[str, Any]:
+    state = {
+        "schema_version": schema_version,
         "questions": [],
         "answers": [],
         "cards": [],
@@ -38,11 +51,14 @@ def init_material_card_state() -> dict[str, Any]:
             "cards_status": "not_started",
         },
     }
+    if schema_version == SCHEMA_VERSION:
+        state["scaffold_ref"] = None
+    return state
 
 
-def init_outline_state() -> dict[str, Any]:
-    return {
-        "schema_version": SCHEMA_VERSION,
+def init_outline_state(*, schema_version: str = SCHEMA_VERSION) -> dict[str, Any]:
+    state = {
+        "schema_version": schema_version,
         "topic_analysis": {"cards": [], "status": "not_started"},
         "child_topic_focus": {
             "text": "",
@@ -53,38 +69,97 @@ def init_outline_state() -> dict[str, Any]:
         "sections": [],
         "step_state": {"outline_status": "not_started"},
     }
+    if schema_version == SCHEMA_VERSION:
+        state["scaffold"] = None
+    return state
 
 
 def normalize_material_state(value: dict[str, Any] | None) -> dict[str, Any]:
-    if not value or value.get("schema_version") != SCHEMA_VERSION:
+    if not _is_supported_schema(value):
         return init_material_card_state()
-    normalized = init_material_card_state()
+    schema_version = value["schema_version"]
+    normalized = init_material_card_state(schema_version=schema_version)
     normalized.update(deepcopy(value))
     normalized["step_state"] = {
-        **init_material_card_state()["step_state"],
+        **init_material_card_state(schema_version=schema_version)["step_state"],
         **value.get("step_state", {}),
     }
+    if schema_version == SCHEMA_VERSION:
+        normalized["scaffold_ref"] = value.get("scaffold_ref")
     return normalized
 
 
 def normalize_outline_state(value: dict[str, Any] | None) -> dict[str, Any]:
-    if not value or value.get("schema_version") != SCHEMA_VERSION:
+    if not _is_supported_schema(value):
         return init_outline_state()
-    normalized = init_outline_state()
+    schema_version = value["schema_version"]
+    normalized = init_outline_state(schema_version=schema_version)
     normalized.update(deepcopy(value))
     normalized["topic_analysis"] = {
-        **init_outline_state()["topic_analysis"],
+        **init_outline_state(schema_version=schema_version)["topic_analysis"],
         **value.get("topic_analysis", {}),
     }
     normalized["child_topic_focus"] = {
-        **init_outline_state()["child_topic_focus"],
+        **init_outline_state(schema_version=schema_version)["child_topic_focus"],
         **value.get("child_topic_focus", {}),
     }
     normalized["step_state"] = {
-        **init_outline_state()["step_state"],
+        **init_outline_state(schema_version=schema_version)["step_state"],
         **value.get("step_state", {}),
     }
+    if schema_version == SCHEMA_VERSION:
+        normalized["scaffold"] = value.get("scaffold")
     return normalized
+
+
+def _scaffold_ref(snapshot: dict[str, Any]) -> dict[str, str]:
+    return {
+        "topic_type": snapshot["topic_type"],
+        "topic_variant": snapshot["topic_variant"],
+        "scaffold_template_version": snapshot["scaffold_template_version"],
+    }
+
+
+def attach_scaffold_snapshot(
+    material: dict[str, Any],
+    outline: dict[str, Any],
+    snapshot: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    updated_material = normalize_material_state(material)
+    updated_outline = normalize_outline_state(outline)
+    if updated_material.get("schema_version") != SCHEMA_VERSION:
+        raise ValueError("cannot attach v0.6b scaffold to legacy material state")
+    if updated_outline.get("schema_version") != SCHEMA_VERSION:
+        raise ValueError("cannot attach v0.6b scaffold to legacy outline state")
+    updated_material["scaffold_ref"] = _scaffold_ref(snapshot)
+    updated_outline["scaffold"] = deepcopy(snapshot)
+    return updated_material, updated_outline
+
+
+def has_resolved_scaffold(material: dict[str, Any], outline: dict[str, Any]) -> bool:
+    return bool(
+        isinstance(material, dict)
+        and isinstance(outline, dict)
+        and material.get("schema_version") == SCHEMA_VERSION
+        and outline.get("schema_version") == SCHEMA_VERSION
+        and isinstance(material.get("scaffold_ref"), dict)
+        and isinstance(outline.get("scaffold"), dict)
+    )
+
+
+def resolve_essay_scaffold(essay: Any) -> dict[str, Any] | None:
+    material = normalize_material_state(getattr(essay, "material_card", None))
+    outline = normalize_outline_state(getattr(essay, "outline", None))
+    if _is_legacy_schema(material) and _is_legacy_schema(outline):
+        return None
+    snapshot = outline.get("scaffold")
+    ref = material.get("scaffold_ref")
+    if not isinstance(snapshot, dict) or not isinstance(ref, dict):
+        raise ValueError("resolved scaffold is required")
+    expected = _scaffold_ref(snapshot)
+    if ref != expected:
+        raise ValueError("scaffold_ref mismatch")
+    return deepcopy(snapshot)
 
 
 def assert_prewriting_editable(status: str) -> None:
