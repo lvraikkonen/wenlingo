@@ -2,7 +2,7 @@ from copy import deepcopy
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
@@ -28,6 +28,7 @@ from app.services.ai_tasks import (
 )
 from app.services.essay_workflow import draft_ability_deltas
 from app.services.writing_castle_state import (
+    LEGACY_SCHEMA_VERSION,
     MATERIALS_READY_STATUS,
     OUTLINE_READY_STATUS,
     PREWRITING_STARTED_STATUS,
@@ -36,6 +37,7 @@ from app.services.writing_castle_state import (
     SETTLED_ESSAY_STATUS,
     TOPIC_READY_STATUS,
     assert_prewriting_editable,
+    attach_scaffold_snapshot,
     confirm_material_cards,
     init_material_card_state,
     init_outline_state,
@@ -50,6 +52,13 @@ from app.services.writing_castle_state import (
     next_status_after_topic,
     normalize_material_state,
     normalize_outline_state,
+    resolve_essay_scaffold,
+)
+from app.services.writing_castle_scaffold import (
+    FUTURE_TOPIC_TYPES,
+    detect_unsupported_future_type,
+    resolve_scaffold_snapshot,
+    supported_topic_type_choices,
 )
 
 router = APIRouter(tags=["writing_castle"])
@@ -68,6 +77,23 @@ CLOSED_PREWRITING_STATUSES = {
 
 class ClassroomEssayCreate(BaseModel):
     topic_text: str = Field(min_length=1, max_length=300)
+
+
+class ScaffoldSelectionSave(BaseModel):
+    topic_type: str = Field(min_length=1, max_length=80)
+    topic_variant: str | None = Field(default=None, max_length=80)
+    accepted_suggestion_id: str | None = Field(default=None, max_length=120)
+    override_reason: str | None = Field(default="manual_choice", max_length=40)
+    unsupported_future_type: str | None = Field(default=None, max_length=80)
+
+    @field_validator("unsupported_future_type")
+    @classmethod
+    def validate_unsupported_future_type(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value not in FUTURE_TOPIC_TYPES:
+            raise ValueError("unsupported_future_type must be a known future topic type")
+        return value
 
 
 class EmptyGenerateRequest(BaseModel):
@@ -117,9 +143,10 @@ def _student_and_ability(session: Session, student_id: str) -> tuple[StudentProf
 def _is_writing_castle_essay(essay: Essay) -> bool:
     if essay.status not in OPEN_PREWRITING_STATUSES | CLOSED_PREWRITING_STATUSES:
         return False
+    supported_schema_versions = {LEGACY_SCHEMA_VERSION, SCHEMA_VERSION}
     return (
-        essay.material_card.get("schema_version") == SCHEMA_VERSION
-        and essay.outline.get("schema_version") == SCHEMA_VERSION
+        essay.material_card.get("schema_version") in supported_schema_versions
+        and essay.outline.get("schema_version") in supported_schema_versions
     )
 
 
@@ -178,6 +205,23 @@ def _save_step_response(
     session.add(essay)
     session.commit()
     return {"essay": _essay_payload(essay), key: value}
+
+
+def _essay_topic_text(essay: Essay) -> str:
+    outline = normalize_outline_state(essay.outline)
+    requirement = outline.get("topic_requirement") or {}
+    return (
+        str(requirement.get("topic_text") or "")
+        or str(getattr(essay, "title", "") or "")
+        or str(getattr(essay, "prompt", "") or "")
+    )
+
+
+def _resolved_scaffold_or_legacy(essay: Essay) -> dict[str, Any] | None:
+    try:
+        return resolve_essay_scaffold(essay)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def _material_answer_source_ids(material: dict[str, Any]) -> list[str]:
@@ -291,7 +335,12 @@ async def create_classroom_writing_castle_essay(
         payload={"step": "classroom"},
     )
     session.commit()
-    return {"essay": _essay_payload(essay)}
+    unsupported_future_type = detect_unsupported_future_type(topic_text)
+    return {
+        "essay": _essay_payload(essay),
+        "supported_topic_types": supported_topic_type_choices(),
+        "unsupported_future_type": unsupported_future_type,
+    }
 
 
 @router.get("/api/students/{student_id}/writing-castle/classroom/active")
@@ -312,6 +361,61 @@ async def get_active_classroom_writing_castle_essay(
     return {"essay": _essay_payload(essay) if essay else None}
 
 
+@router.patch("/api/essays/{essay_id}/scaffold-selection")
+async def save_scaffold_selection(
+    essay_id: str,
+    request: ScaffoldSelectionSave,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    context: ParentContext | None = Depends(require_auth_mode_state_change),
+):
+    essay = require_essay_for_auth_mode(session, settings, context, essay_id)
+    _prewriting_open(essay)
+    student, _ability = _student_and_ability(session, essay.student_id)
+    outline = normalize_outline_state(essay.outline)
+    material = normalize_material_state(essay.material_card)
+    if (
+        outline["topic_analysis"].get("status") == "generated"
+        or material.get("answers")
+        or material.get("cards")
+        or outline.get("sections")
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="scaffold cannot change after prewriting content exists",
+        )
+    try:
+        snapshot = resolve_scaffold_snapshot(
+            request.topic_type,
+            request.topic_variant,
+            "ai_suggested" if request.override_reason == "suggestion_accepted" else "manual",
+        )
+        detected_future_type = detect_unsupported_future_type(_essay_topic_text(essay))
+        unsupported_future_type = detected_future_type or request.unsupported_future_type
+        if unsupported_future_type:
+            snapshot["unsupported_future_type"] = unsupported_future_type
+            snapshot["unsupported_override"] = True
+        essay.material_card, essay.outline = attach_scaffold_snapshot(material, outline, snapshot)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _record_event(
+        session,
+        "scaffold_selected",
+        essay=essay,
+        student=student,
+        payload={
+            "step": "scaffold_selection",
+            "topic_type": snapshot["topic_type"],
+            "topic_variant": snapshot["topic_variant"],
+            "scaffold_template_version": snapshot["scaffold_template_version"],
+            "selection_source": snapshot["selection_source"],
+            "unsupported_future_type": snapshot.get("unsupported_future_type", ""),
+            "unsupported_override": bool(snapshot.get("unsupported_override")),
+        },
+    )
+    return _save_step_response(session, essay, "scaffold", snapshot)
+
+
 @router.post("/api/essays/{essay_id}/topic-analysis")
 async def generate_topic_analysis(
     essay_id: str,
@@ -323,6 +427,7 @@ async def generate_topic_analysis(
 ):
     essay = require_essay_for_auth_mode(session, settings, context, essay_id)
     _prewriting_open(essay)
+    _resolved_scaffold_or_legacy(essay)
     student, _ability = _student_and_ability(session, essay.student_id)
     outline = normalize_outline_state(essay.outline)
     topic_analysis = outline["topic_analysis"]
@@ -397,6 +502,7 @@ async def generate_material_questions(
 ):
     essay = require_essay_for_auth_mode(session, settings, context, essay_id)
     _prewriting_open(essay)
+    _resolved_scaffold_or_legacy(essay)
     student, _ability = _student_and_ability(session, essay.student_id)
     material = normalize_material_state(essay.material_card)
     questions_status = material["step_state"].get("questions_status")
@@ -476,6 +582,7 @@ async def generate_material_cards(
 ):
     essay = require_essay_for_auth_mode(session, settings, context, essay_id)
     _prewriting_open(essay)
+    _resolved_scaffold_or_legacy(essay)
     student, _ability = _student_and_ability(session, essay.student_id)
     material = normalize_material_state(essay.material_card)
     cards_status = material["step_state"].get("cards_status")
@@ -529,6 +636,7 @@ async def save_material_cards(
 ):
     essay = require_essay_for_auth_mode(session, settings, context, essay_id)
     _prewriting_open(essay)
+    _resolved_scaffold_or_legacy(essay)
     student, _ability = _student_and_ability(session, essay.student_id)
     cards = _normalize_child_edited_cards(essay.material_card, request.cards)
     try:
@@ -560,6 +668,7 @@ async def generate_outline(
 ):
     essay = require_essay_for_auth_mode(session, settings, context, essay_id)
     _prewriting_open(essay)
+    _resolved_scaffold_or_legacy(essay)
     student, _ability = _student_and_ability(session, essay.student_id)
     outline = normalize_outline_state(essay.outline)
     outline_status = outline["step_state"].get("outline_status")
@@ -613,6 +722,7 @@ async def save_outline(
 ):
     essay = require_essay_for_auth_mode(session, settings, context, essay_id)
     _prewriting_open(essay)
+    _resolved_scaffold_or_legacy(essay)
     student, _ability = _student_and_ability(session, essay.student_id)
     if request.skipped:
         outline = normalize_outline_state(essay.outline)

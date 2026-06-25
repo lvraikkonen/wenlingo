@@ -1,13 +1,236 @@
+import pytest
 from sqlmodel import select
 
 from app.domain.models import Essay, EssayVersion, LLMCallLog, ProductEvent
 from app.services.writing_castle_state import (
+    LEGACY_SCHEMA_VERSION,
     OUTLINE_READY_STATUS,
     PREWRITING_STARTED_STATUS,
     REVISION_REQUESTED_STATUS,
     SCHEMA_VERSION,
+    init_material_card_state,
+    init_outline_state,
 )
 from tests.conftest import create_authenticated_family
+
+
+def _select_generic_scaffold(client, essay_id):
+    response = client.patch(
+        f"/api/essays/{essay_id}/scaffold-selection",
+        json={"topic_type": "generic_narrative", "topic_variant": "learned_skill"},
+    )
+    assert response.status_code == 200
+    return response
+
+
+def test_classroom_creation_returns_supported_scaffold_choices(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    response = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我的自画像"},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["essay"]["outline"]["schema_version"] == "v0.6b.1"
+    assert payload["essay"]["outline"]["scaffold"] is None
+    assert [choice["topic_type"] for choice in payload["supported_topic_types"]] == [
+        "generic_narrative",
+        "person_portrait",
+        "imaginative_story",
+        "expository_introduction",
+    ]
+
+
+def test_generation_requires_selected_scaffold_for_v06b_session(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我的自画像"},
+    )
+    essay_id = start.json()["essay"]["id"]
+
+    blocked = client.post(f"/api/essays/{essay_id}/topic-analysis", json={})
+
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"] == "resolved scaffold is required"
+
+
+def test_manual_scaffold_selection_defaults_variant_and_allows_topic_analysis(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我的自画像"},
+    )
+    essay_id = start.json()["essay"]["id"]
+
+    selection = client.patch(
+        f"/api/essays/{essay_id}/scaffold-selection",
+        json={"topic_type": "person_portrait", "override_reason": "manual_choice"},
+    )
+    topic = client.post(f"/api/essays/{essay_id}/topic-analysis", json={})
+
+    assert selection.status_code == 200
+    selected = selection.json()["essay"]
+    assert selected["outline"]["scaffold"]["topic_type"] == "person_portrait"
+    assert selected["outline"]["scaffold"]["topic_variant"] == "default"
+    assert selected["material_card"]["scaffold_ref"]["scaffold_template_version"] == "person_portrait.default.v0.6b.1"
+    assert topic.status_code == 200
+
+
+def test_creation_surfaces_deterministic_unsupported_future_type(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    response = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "推荐一本书"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["unsupported_future_type"] == "reading_response_recommendation"
+
+
+@pytest.mark.parametrize(
+    ("topic_text", "topic_type", "topic_variant"),
+    [
+        ("那次经历真难忘", "generic_narrative", None),
+        ("我的自画像", "person_portrait", None),
+        ("变形记", "imaginative_story", None),
+        ("国宝大熊猫", "expository_introduction", None),
+    ],
+)
+def test_each_p0_family_can_select_and_start_topic_analysis(
+    session,
+    client,
+    topic_text,
+    topic_type,
+    topic_variant,
+):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": topic_text},
+    )
+    essay_id = start.json()["essay"]["id"]
+
+    selection_payload = {"topic_type": topic_type, "override_reason": "manual_choice"}
+    if topic_variant is not None:
+        selection_payload["topic_variant"] = topic_variant
+    selected = client.patch(
+        f"/api/essays/{essay_id}/scaffold-selection",
+        json=selection_payload,
+    )
+    topic = client.post(f"/api/essays/{essay_id}/topic-analysis", json={})
+
+    assert selected.status_code == 200
+    assert topic.status_code == 200
+    assert selected.json()["essay"]["outline"]["scaffold"]["topic_type"] == topic_type
+
+
+@pytest.mark.parametrize(
+    ("topic_text", "future_type"),
+    [
+        ("写信", "practical_writing"),
+        ("推荐一本书", "reading_response_recommendation"),
+        ("围绕中心意思写", "central_idea_reflection"),
+    ],
+)
+def test_creation_surfaces_release_blocking_unsupported_future_types(
+    session,
+    client,
+    topic_text,
+    future_type,
+):
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    response = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": topic_text},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["unsupported_future_type"] == future_type
+
+
+def test_unsupported_future_type_can_direct_draft_without_scaffold(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "推荐一本书"},
+    )
+    essay_id = start.json()["essay"]["id"]
+    assert start.json()["unsupported_future_type"] == "reading_response_recommendation"
+
+    draft = client.post(
+        f"/api/essays/{essay_id}/first-draft",
+        json={
+            "draft": "我想推荐《西游记》。这本书里有很多有趣的人物，我最喜欢孙悟空。他一路保护唐僧，还会想办法解决困难。"
+        },
+    )
+
+    assert draft.status_code == 201
+
+
+def test_unsupported_future_type_override_is_saved_for_parent_summary(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "推荐一本书"},
+    )
+    essay_id = start.json()["essay"]["id"]
+
+    selected = client.patch(
+        f"/api/essays/{essay_id}/scaffold-selection",
+        json={
+            "topic_type": "expository_introduction",
+            "override_reason": "fallback_selected",
+            "unsupported_future_type": "reading_response_recommendation",
+        },
+    )
+
+    scaffold = selected.json()["essay"]["outline"]["scaffold"]
+    assert scaffold["unsupported_future_type"] == "reading_response_recommendation"
+    assert scaffold["unsupported_override"] is True
+
+
+def test_scaffold_change_after_answers_is_rejected_without_migration(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我的自画像"},
+    )
+    essay_id = start.json()["essay"]["id"]
+    client.patch(
+        f"/api/essays/{essay_id}/scaffold-selection",
+        json={"topic_type": "person_portrait", "override_reason": "manual_choice"},
+    )
+    answers = client.patch(
+        f"/api/essays/{essay_id}/material-answers",
+        json={
+            "answers": [
+                {"id": "answer-1", "question_id": "q1", "text": "我想写我的特点。", "skipped": False}
+            ]
+        },
+    )
+
+    changed = client.patch(
+        f"/api/essays/{essay_id}/scaffold-selection",
+        json={"topic_type": "generic_narrative", "override_reason": "manual_choice"},
+    )
+
+    assert answers.status_code == 200
+    assert changed.status_code == 409
+    assert changed.json()["detail"] == "scaffold cannot change after prewriting content exists"
 
 
 def test_classroom_prewriting_happy_path_reaches_first_draft_feedback(session, client):
@@ -23,6 +246,12 @@ def test_classroom_prewriting_happy_path_reaches_first_draft_feedback(session, c
     assert start.json()["essay"]["status"] == PREWRITING_STARTED_STATUS
     assert start.json()["essay"]["material_card"]["schema_version"] == SCHEMA_VERSION
     assert start.json()["essay"]["outline"]["schema_version"] == SCHEMA_VERSION
+
+    selected = client.patch(
+        f"/api/essays/{essay_id}/scaffold-selection",
+        json={"topic_type": "generic_narrative", "topic_variant": "learned_skill"},
+    )
+    assert selected.status_code == 200
 
     topic = client.post(f"/api/essays/{essay_id}/topic-analysis", json={})
     assert topic.status_code == 200
@@ -131,6 +360,7 @@ def test_generation_endpoints_are_idempotent_and_do_not_overwrite_child_edits(se
         json={"topic_text": "我学会了骑车"},
     )
     essay_id = start.json()["essay"]["id"]
+    _select_generic_scaffold(client, essay_id)
 
     first = client.post(f"/api/essays/{essay_id}/topic-analysis", json={})
     second = client.post(f"/api/essays/{essay_id}/topic-analysis", json={})
@@ -164,6 +394,7 @@ def test_topic_analysis_is_blocked_after_child_topic_focus(session, client):
         json={"topic_text": "我学会了骑车"},
     )
     essay_id = start.json()["essay"]["id"]
+    _select_generic_scaffold(client, essay_id)
 
     focus = client.patch(
         f"/api/essays/{essay_id}/topic-focus",
@@ -183,6 +414,7 @@ def test_material_questions_are_blocked_after_child_answers(session, client):
         json={"topic_text": "我学会了骑车"},
     )
     essay_id = start.json()["essay"]["id"]
+    _select_generic_scaffold(client, essay_id)
 
     answers = client.patch(
         f"/api/essays/{essay_id}/material-answers",
@@ -211,6 +443,7 @@ def test_material_questions_are_blocked_after_skip_and_do_not_mutate_status(sess
         json={"topic_text": "我学会了骑车"},
     )
     essay_id = start.json()["essay"]["id"]
+    _select_generic_scaffold(client, essay_id)
 
     answers = client.patch(f"/api/essays/{essay_id}/material-answers", json={"answers": []})
     blocked = client.post(f"/api/essays/{essay_id}/material-questions", json={})
@@ -230,6 +463,7 @@ def test_outline_generation_is_blocked_after_skip_and_does_not_mutate_status(ses
         json={"topic_text": "我的一次进步"},
     )
     essay_id = start.json()["essay"]["id"]
+    _select_generic_scaffold(client, essay_id)
 
     skipped = client.patch(f"/api/essays/{essay_id}/outline", json={"sections": [], "skipped": True})
     blocked = client.post(f"/api/essays/{essay_id}/outline", json={})
@@ -250,6 +484,7 @@ def test_child_edited_placeholder_outline_section_can_be_confirmed(session, clie
         json={"topic_text": "我学会了骑车"},
     )
     essay_id = start.json()["essay"]["id"]
+    _select_generic_scaffold(client, essay_id)
 
     client.patch(
         f"/api/essays/{essay_id}/material-answers",
@@ -332,6 +567,7 @@ def test_child_edited_outline_with_malformed_source_card_ids_returns_400(session
         json={"topic_text": "我学会了骑车"},
     )
     essay_id = start.json()["essay"]["id"]
+    _select_generic_scaffold(client, essay_id)
 
     client.patch(
         f"/api/essays/{essay_id}/material-answers",
@@ -389,6 +625,7 @@ def test_untouched_outline_with_malformed_source_card_ids_returns_400(session, c
         json={"topic_text": "我学会了骑车"},
     )
     essay_id = start.json()["essay"]["id"]
+    _select_generic_scaffold(client, essay_id)
 
     client.patch(
         f"/api/essays/{essay_id}/material-answers",
@@ -444,6 +681,7 @@ def test_outline_with_malformed_source_card_id_value_returns_400(session, client
         json={"topic_text": "我学会了骑车"},
     )
     essay_id = start.json()["essay"]["id"]
+    _select_generic_scaffold(client, essay_id)
 
     client.patch(
         f"/api/essays/{essay_id}/material-answers",
@@ -499,6 +737,7 @@ def test_outline_with_malformed_note_returns_400(session, client):
         json={"topic_text": "我学会了骑车"},
     )
     essay_id = start.json()["essay"]["id"]
+    _select_generic_scaffold(client, essay_id)
 
     client.patch(
         f"/api/essays/{essay_id}/material-answers",
@@ -558,6 +797,24 @@ def test_legacy_essay_cannot_enter_writing_castle_prewriting(session, client):
     assert essay.outline == {}
 
 
+def test_legacy_prewriting_session_can_generate_without_scaffold(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    essay = Essay(
+        student_id=student.id,
+        title="我学会了骑车",
+        status=PREWRITING_STARTED_STATUS,
+        material_card=init_material_card_state(schema_version=LEGACY_SCHEMA_VERSION),
+        outline=init_outline_state(schema_version=LEGACY_SCHEMA_VERSION),
+    )
+    session.add(essay)
+    session.commit()
+
+    response = client.post(f"/api/essays/{essay.id}/topic-analysis", json={})
+
+    assert response.status_code == 200
+
+
 def test_assessment_essay_cannot_enter_writing_castle_prewriting(session, client):
     family = create_authenticated_family(session)
     student = family["student"]
@@ -586,6 +843,7 @@ def test_material_cards_confirmed_event_counts_retained_cards_only(session, clie
         json={"topic_text": "我学会了骑车"},
     )
     essay_id = start.json()["essay"]["id"]
+    _select_generic_scaffold(client, essay_id)
     client.patch(
         f"/api/essays/{essay_id}/material-answers",
         json={
@@ -653,6 +911,7 @@ def test_skip_path_can_go_directly_to_first_draft(session, client):
         json={"topic_text": "我的一次进步"},
     )
     essay_id = start.json()["essay"]["id"]
+    _select_generic_scaffold(client, essay_id)
 
     client.patch(f"/api/essays/{essay_id}/topic-focus", json={"text": "", "adopted_from_ai": False, "skipped": True})
     answers = client.patch(f"/api/essays/{essay_id}/material-answers", json={"answers": []})
@@ -677,6 +936,7 @@ def test_writing_castle_events_are_recorded(session, client):
         json={"topic_text": "我学会了骑车"},
     )
     essay_id = start.json()["essay"]["id"]
+    _select_generic_scaffold(client, essay_id)
     client.post(f"/api/essays/{essay_id}/topic-analysis", json={})
 
     event_types = {
