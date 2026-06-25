@@ -297,3 +297,23 @@ def test_admin_ai_usage_reports_pricing_configured_when_rates_are_set(
     assert response.status_code == 200
     assert response.json()["pricing_configured"] is True
     assert response.json()["usage"][0]["estimated_cost"] == 0.0002
+
+
+def test_admin_ai_usage_reports_pricing_configured_when_profile_rates_are_set(
+    session,
+    monkeypatch,
+):
+    monkeypatch.setenv("LLM_PRIMARY_INPUT_COST_PER_1K_TOKENS", "0.001")
+    monkeypatch.setenv("LLM_PRIMARY_OUTPUT_COST_PER_1K_TOKENS", "0.002")
+    monkeypatch.setenv("LLM_FALLBACK_INPUT_COST_PER_1K_TOKENS", "0.003")
+    monkeypatch.setenv("LLM_FALLBACK_OUTPUT_COST_PER_1K_TOKENS", "0.004")
+    app = create_admin_client(session, monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/admin/alpha/ai-usage",
+            headers={"X-Alpha-Admin-Token": "secret"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"pricing_configured": True, "usage": []}

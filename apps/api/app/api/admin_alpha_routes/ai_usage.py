@@ -20,6 +20,10 @@ def alpha_admin_ai_usage(
     pricing_configured = (
         settings.llm_input_cost_per_1k_tokens > 0
         or settings.llm_output_cost_per_1k_tokens > 0
+        or settings.llm_primary_input_cost_per_1k_tokens > 0
+        or settings.llm_primary_output_cost_per_1k_tokens > 0
+        or settings.llm_fallback_input_cost_per_1k_tokens > 0
+        or settings.llm_fallback_output_cost_per_1k_tokens > 0
     )
     aggregates: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
     for log in session.exec(select(LLMCallLog)).all():

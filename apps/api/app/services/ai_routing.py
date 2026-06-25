@@ -355,8 +355,32 @@ def _pricing_for(
     pricing = COST_REGISTRY.get(logical_model.pricing_key)
     if pricing is not None:
         return pricing, PricingStatus.CONFIGURED
+    profile_rates = {
+        "primary_http": (
+            settings.llm_primary_input_cost_per_1k_tokens,
+            settings.llm_primary_output_cost_per_1k_tokens,
+        ),
+        "fallback_http": (
+            settings.llm_fallback_input_cost_per_1k_tokens,
+            settings.llm_fallback_output_cost_per_1k_tokens,
+        ),
+    }
+    input_cost, output_cost = profile_rates.get(logical_model.provider_profile, (0.0, 0.0))
+    if _provider_mode(settings) == "http" and input_cost > 0 and output_cost > 0:
+        return (
+            ModelPricing(
+                logical_model.pricing_key,
+                logical_model.provider_profile,
+                logical_model.model,
+                input_cost,
+                output_cost,
+                "env",
+            ),
+            PricingStatus.CONFIGURED,
+        )
     if (
         _provider_mode(settings) == "http"
+        and _environment(settings) == "development"
         and settings.llm_input_cost_per_1k_tokens > 0
         and settings.llm_output_cost_per_1k_tokens > 0
     ):

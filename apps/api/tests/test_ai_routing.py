@@ -154,6 +154,69 @@ def test_http_route_uses_env_cost_rates_for_overridden_models():
     assert route.pricing_status == PricingStatus.CONFIGURED
 
 
+def test_http_route_uses_profile_specific_env_cost_rates_for_overridden_models():
+    route = resolve_task_route(
+        settings=Settings(
+            llm_provider="http",
+            llm_primary_http_model="primary-prod-model",
+            llm_fallback_http_model="fallback-prod-model",
+            llm_primary_input_cost_per_1k_tokens=0.00014,
+            llm_primary_output_cost_per_1k_tokens=0.00028,
+            llm_fallback_input_cost_per_1k_tokens=0.001,
+            llm_fallback_output_cost_per_1k_tokens=0.002,
+        ),
+        task_name="outline_generation",
+        prompt_key="outline_generation",
+    )
+
+    assert route.primary_pricing is not None
+    assert route.fallback_pricing is not None
+    assert route.primary_pricing.pricing_key == "primary_http:primary-prod-model"
+    assert route.fallback_pricing.pricing_key == "fallback_http:fallback-prod-model"
+    assert route.primary_pricing.input_cost_per_1k_tokens == 0.00014
+    assert route.primary_pricing.output_cost_per_1k_tokens == 0.00028
+    assert route.fallback_pricing.input_cost_per_1k_tokens == 0.001
+    assert route.fallback_pricing.output_cost_per_1k_tokens == 0.002
+    assert route.pricing_status == PricingStatus.CONFIGURED
+
+
+def test_production_http_override_requires_profile_specific_or_registry_pricing():
+    with pytest.raises(RoutingConfigError, match="pricing"):
+        validate_ai_routing_startup(
+            Settings(
+                environment="production",
+                llm_provider="http",
+                llm_primary_http_base_url="https://primary.example/v1",
+                llm_primary_http_api_key="primary-key",
+                llm_primary_http_model="primary-prod-model",
+                llm_fallback_http_base_url="https://fallback.example/v1",
+                llm_fallback_http_api_key="fallback-key",
+                llm_fallback_http_model="fallback-prod-model",
+                llm_input_cost_per_1k_tokens=0.00014,
+                llm_output_cost_per_1k_tokens=0.00028,
+            )
+        )
+
+
+def test_production_http_override_accepts_profile_specific_env_pricing():
+    validate_ai_routing_startup(
+        Settings(
+            environment="production",
+            llm_provider="http",
+            llm_primary_http_base_url="https://primary.example/v1",
+            llm_primary_http_api_key="primary-key",
+            llm_primary_http_model="primary-prod-model",
+            llm_fallback_http_base_url="https://fallback.example/v1",
+            llm_fallback_http_api_key="fallback-key",
+            llm_fallback_http_model="fallback-prod-model",
+            llm_primary_input_cost_per_1k_tokens=0.00014,
+            llm_primary_output_cost_per_1k_tokens=0.00028,
+            llm_fallback_input_cost_per_1k_tokens=0.001,
+            llm_fallback_output_cost_per_1k_tokens=0.002,
+        )
+    )
+
+
 def test_staging_missing_pricing_fails_fast(monkeypatch):
     monkeypatch.delitem(COST_REGISTRY, "mock:cheap-fast", raising=False)
 

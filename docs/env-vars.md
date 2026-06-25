@@ -84,8 +84,12 @@ modules.
 | `SENTENCE_CHALLENGE_DAILY_LIMIT_PER_STUDENT` | `10` | V0.5b sentence QA | No | API restart | Generation limit for sentence challenges. |
 | `SENTENCE_FEEDBACK_DAILY_LIMIT_PER_STUDENT` | `10` | V0.5b sentence QA | No | API restart | Feedback limit for generated/free-input sentence work. |
 | `LLM_DAILY_LIMIT_TIMEZONE` | `Asia/Shanghai` | Yes | No | API restart | Product-day boundary for limit counting and Admin usage dates. |
-| `LLM_INPUT_COST_PER_1K_TOKENS` | `0.0` | Optional | No | API restart | Cost estimate input rate. |
-| `LLM_OUTPUT_COST_PER_1K_TOKENS` | `0.0` | Optional | No | API restart | Cost estimate output rate. |
+| `LLM_INPUT_COST_PER_1K_TOKENS` | `0.0` | Dev fallback only | No | API restart | Generic cost estimate input rate. Used only as a development fallback for routed HTTP models that are not in the Cost Registry and do not have profile-specific pricing. Do not rely on this for staging/production routed model overrides. |
+| `LLM_OUTPUT_COST_PER_1K_TOKENS` | `0.0` | Dev fallback only | No | API restart | Generic cost estimate output rate. Used only as a development fallback for routed HTTP models that are not in the Cost Registry and do not have profile-specific pricing. Do not rely on this for staging/production routed model overrides. |
+| `LLM_PRIMARY_INPUT_COST_PER_1K_TOKENS` | `0.0` | HTTP primary override pricing | No | API restart | Input cost for `LLM_PRIMARY_HTTP_MODEL` when the routed primary override is not in the Cost Registry. |
+| `LLM_PRIMARY_OUTPUT_COST_PER_1K_TOKENS` | `0.0` | HTTP primary override pricing | No | API restart | Output cost for `LLM_PRIMARY_HTTP_MODEL` when the routed primary override is not in the Cost Registry. |
+| `LLM_FALLBACK_INPUT_COST_PER_1K_TOKENS` | `0.0` | HTTP fallback override pricing | No | API restart | Input cost for `LLM_FALLBACK_HTTP_MODEL` when the routed fallback override is not in the Cost Registry. |
+| `LLM_FALLBACK_OUTPUT_COST_PER_1K_TOKENS` | `0.0` | HTTP fallback override pricing | No | API restart | Output cost for `LLM_FALLBACK_HTTP_MODEL` when the routed fallback override is not in the Cost Registry. |
 
 ## V0.5c AI Routing
 
@@ -96,14 +100,14 @@ V0.5c routes AI tasks through code-level task and model registries. Environment 
 | `LLM_PROVIDER` | yes | `mock` for local tests, `http` for OpenAI-compatible HTTP profiles. |
 | `LLM_PRIMARY_HTTP_BASE_URL` | staging/production real provider | Base URL for the primary OpenAI-compatible provider profile. |
 | `LLM_PRIMARY_HTTP_API_KEY` | staging/production real provider | API key for the primary profile. |
-| `LLM_PRIMARY_HTTP_MODEL` | optional | Concrete model override for the primary logical model. Must have Cost Registry pricing in staging/production. |
+| `LLM_PRIMARY_HTTP_MODEL` | optional | Concrete model override for the primary logical model. Must have Cost Registry pricing or `LLM_PRIMARY_*_COST_PER_1K_TOKENS` pricing in staging/production. |
 | `LLM_FALLBACK_HTTP_BASE_URL` | staging/production real provider | Base URL for the fallback OpenAI-compatible provider profile. |
 | `LLM_FALLBACK_HTTP_API_KEY` | staging/production real provider | API key for the fallback profile. |
-| `LLM_FALLBACK_HTTP_MODEL` | optional | Concrete model override for the fallback logical model. Must have Cost Registry pricing in staging/production. |
+| `LLM_FALLBACK_HTTP_MODEL` | optional | Concrete model override for the fallback logical model. Must have Cost Registry pricing or `LLM_FALLBACK_*_COST_PER_1K_TOKENS` pricing in staging/production. |
 | `LLM_DAILY_LIMIT_ENABLED` | recommended in Dev/Alpha | Enables task-level daily limits. |
 | `LLM_DAILY_LIMIT_TIMEZONE` | yes | Product day timezone, default `Asia/Shanghai`. |
 
-Do not use global `LLM_MODEL` as a production AI routing bypass after V0.5c. All enabled production AI tasks must resolve through ModelRouter.
+Do not use global `LLM_MODEL` as a production AI routing bypass after V0.5c. All enabled production AI tasks must resolve through ModelRouter. When primary and fallback providers use different deployed model overrides, configure their prices separately with the profile-specific cost variables above; the generic `LLM_INPUT_COST_PER_1K_TOKENS` / `LLM_OUTPUT_COST_PER_1K_TOKENS` pair is only a development fallback.
 
 ### Legacy Migration
 
@@ -157,6 +161,14 @@ LLM_PRIMARY_HTTP_MODEL=<primary routed model>
 LLM_FALLBACK_HTTP_BASE_URL=<fallback provider base URL>
 LLM_FALLBACK_HTTP_API_KEY=<server-side secret>
 LLM_FALLBACK_HTTP_MODEL=<fallback routed model>
+# Dev-only same-price fallback is acceptable when primary/fallback use the same model.
+LLM_INPUT_COST_PER_1K_TOKENS=<dev generic input cost>
+LLM_OUTPUT_COST_PER_1K_TOKENS=<dev generic output cost>
+# For staging/production model overrides, configure profile-specific pricing instead.
+LLM_PRIMARY_INPUT_COST_PER_1K_TOKENS=<primary input cost>
+LLM_PRIMARY_OUTPUT_COST_PER_1K_TOKENS=<primary output cost>
+LLM_FALLBACK_INPUT_COST_PER_1K_TOKENS=<fallback input cost>
+LLM_FALLBACK_OUTPUT_COST_PER_1K_TOKENS=<fallback output cost>
 LLM_DAILY_LIMIT_ENABLED=true
 SENTENCE_CHALLENGE_DAILY_LIMIT_PER_STUDENT=10
 SENTENCE_FEEDBACK_DAILY_LIMIT_PER_STUDENT=10
