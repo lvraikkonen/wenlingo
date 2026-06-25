@@ -47,6 +47,14 @@ def test_v06a_writing_castle_tasks_are_enabled_with_prompt_keys():
         assert config.daily_limit == 5
 
 
+def test_outline_generation_uses_extended_timeout_budget():
+    config = resolve_task_config("outline_generation")
+
+    assert config.primary_timeout_seconds == 25
+    assert config.fallback_timeout_seconds == 20
+    assert config.max_total_latency_seconds == 45
+
+
 def test_unknown_task_fails_closed():
     with pytest.raises(RoutingConfigError, match="Unknown AI task"):
         resolve_task_config("unknown_task")
@@ -122,6 +130,28 @@ def test_http_route_uses_http_profiles_and_model_overrides():
     assert route.primary_pricing is None
     assert route.fallback_pricing is None
     assert route.pricing_status == PricingStatus.UNCONFIGURED
+
+
+def test_http_route_uses_env_cost_rates_for_overridden_models():
+    route = resolve_task_route(
+        settings=Settings(
+            llm_provider="http",
+            llm_primary_http_model="deepseek-v4-flash",
+            llm_fallback_http_model="deepseek-v4-flash",
+            llm_input_cost_per_1k_tokens=0.00014,
+            llm_output_cost_per_1k_tokens=0.00028,
+        ),
+        task_name="outline_generation",
+        prompt_key="outline_generation",
+    )
+
+    assert route.primary_pricing is not None
+    assert route.fallback_pricing is not None
+    assert route.primary_pricing.pricing_key == "primary_http:deepseek-v4-flash"
+    assert route.fallback_pricing.pricing_key == "fallback_http:deepseek-v4-flash"
+    assert route.primary_pricing.input_cost_per_1k_tokens == 0.00014
+    assert route.primary_pricing.output_cost_per_1k_tokens == 0.00028
+    assert route.pricing_status == PricingStatus.CONFIGURED
 
 
 def test_staging_missing_pricing_fails_fast(monkeypatch):

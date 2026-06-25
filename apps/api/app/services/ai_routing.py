@@ -277,9 +277,9 @@ TASK_CONFIGS: dict[str, TaskConfig] = {
         task_name="outline_generation",
         primary_model="cheap_fast",
         fallback_model="strong_default",
-        primary_timeout_seconds=10,
-        fallback_timeout_seconds=8,
-        max_total_latency_seconds=18,
+        primary_timeout_seconds=25,
+        fallback_timeout_seconds=20,
+        max_total_latency_seconds=45,
         daily_limit=5,
         cost_tier="low",
         allowed_prompt_keys=("outline_generation",),
@@ -355,6 +355,22 @@ def _pricing_for(
     pricing = COST_REGISTRY.get(logical_model.pricing_key)
     if pricing is not None:
         return pricing, PricingStatus.CONFIGURED
+    if (
+        _provider_mode(settings) == "http"
+        and settings.llm_input_cost_per_1k_tokens > 0
+        and settings.llm_output_cost_per_1k_tokens > 0
+    ):
+        return (
+            ModelPricing(
+                logical_model.pricing_key,
+                logical_model.provider_profile,
+                logical_model.model,
+                settings.llm_input_cost_per_1k_tokens,
+                settings.llm_output_cost_per_1k_tokens,
+                "env",
+            ),
+            PricingStatus.CONFIGURED,
+        )
     if _environment(settings) in {"staging", "production"}:
         raise RoutingConfigError(
             f"Missing pricing for routed model: {logical_model.pricing_key}"
