@@ -4,6 +4,10 @@ from typing import Any
 
 from app.domain.models import utcnow
 from app.services.writing_castle_scaffold import SCHEMA_VERSION as CURRENT_SCHEMA_VERSION
+from app.services.writing_castle_sources import (
+    normalize_source_refs,
+    validate_expository_fact_sources,
+)
 
 LEGACY_SCHEMA_VERSION = "v0.6a.1"
 SCHEMA_VERSION = CURRENT_SCHEMA_VERSION
@@ -151,6 +155,7 @@ def attach_scaffold_snapshot(
     if updated_outline.get("schema_version") != SCHEMA_VERSION:
         raise ValueError("cannot attach v0.6b scaffold to legacy outline state")
     updated_material["scaffold_ref"] = _scaffold_ref(snapshot)
+    updated_material.pop("scaffold", None)
     updated_outline["scaffold"] = deepcopy(snapshot)
     return updated_material, updated_outline
 
@@ -261,29 +266,97 @@ def merge_material_answers(
     return updated
 
 
+def _card_source_refs(card: dict[str, Any], *, require_v06b_source_refs: bool) -> list[dict[str, Any]]:
+    if isinstance(card.get("source_refs"), list):
+        return normalize_source_refs(card.get("source_refs"))
+    if require_v06b_source_refs:
+        raise ValueError("v0.6b material cards require source_refs")
+    return [
+        {"source_type": "real_experience", "answer_id": source_id}
+        for source_id in card.get("source_answer_ids", [])
+    ]
+
+
+def _material_slot_content_kinds(
+    material: dict[str, Any],
+    scaffold: dict[str, Any] | None,
+) -> dict[str, str]:
+    if not isinstance(scaffold, dict):
+        return {}
+    ref = material.get("scaffold_ref")
+    if isinstance(ref, dict) and _scaffold_ref(scaffold) != ref:
+        raise ValueError("scaffold_ref mismatch")
+    return {
+        str(slot.get("id")): str(slot.get("content_kind") or "")
+        for slot in scaffold.get("material_slots", [])
+        if isinstance(slot, dict) and str(slot.get("id") or "").strip()
+    }
+
+
+def _cards_with_normalized_source_refs(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized_cards = []
+    for card in cards:
+        normalized = deepcopy(card)
+        if isinstance(normalized.get("source_refs"), list):
+            normalized["source_refs"] = normalize_source_refs(normalized["source_refs"])
+        normalized_cards.append(normalized)
+    return normalized_cards
+
+
 def validate_card_sources(
     material: dict[str, Any],
     cards: list[dict[str, Any]],
+    *,
+    scaffold: dict[str, Any] | None = None,
 ) -> None:
+    normalized_material = normalize_material_state(material)
+    require_v06b_source_refs = normalized_material.get("schema_version") == SCHEMA_VERSION
+    content_kinds = _material_slot_content_kinds(normalized_material, scaffold)
     answer_ids = {
         answer["id"]
-        for answer in normalize_material_state(material)["answers"]
+        for answer in normalized_material["answers"]
         if not answer.get("skipped")
         and str(answer.get("id") or "").strip()
         and str(answer.get("text") or "").strip()
     }
+    source_ref_answer_ids: set[str] = set()
     for card in cards:
         source_answer_ids = card.get("source_answer_ids", [])
-        source_refs = card.get("source_refs", [])
-        if not card.get("placeholder") and not source_answer_ids and not source_refs:
+        raw_source_refs = card.get("source_refs")
+        card_text = str(card.get("text") or "")
+        if card.get("placeholder") and not card_text.strip() and not source_answer_ids and raw_source_refs is None:
+            refs = []
+        else:
+            refs = _card_source_refs(card, require_v06b_source_refs=require_v06b_source_refs)
+        if not card.get("placeholder") and not refs and require_v06b_source_refs:
+            raise ValueError("v0.6b material cards require source_refs")
+        if not card.get("placeholder") and not source_answer_ids and not refs:
             raise ValueError("non-placeholder material cards require source refs")
         if (
             card.get("placeholder")
-            and card.get("text", "").strip()
+            and card_text.strip()
             and not source_answer_ids
-            and not source_refs
+            and not refs
         ):
             raise ValueError("placeholder material cards without sources cannot contain story content")
+        category = str(card.get("category") or "")
+        if (
+            not card.get("placeholder")
+            and require_v06b_source_refs
+            and content_kinds
+            and category not in content_kinds
+        ):
+            raise ValueError(f"unknown material card category: {category}")
+        if (
+            not card.get("placeholder")
+            and content_kinds.get(category) == "factual"
+        ):
+            validate_expository_fact_sources(card_text, refs)
+        source_ref_answer_ids.update(
+            str(ref.get("answer_id") or "").strip()
+            for ref in refs
+            if "answer_id" in ref and str(ref.get("answer_id") or "").strip()
+        )
     unknown = sorted(
         {
             source_id
@@ -294,6 +367,11 @@ def validate_card_sources(
     )
     if unknown:
         raise ValueError(f"unknown source_answer_ids: {', '.join(unknown)}")
+    unknown_source_ref_answer_ids = sorted(
+        source_id for source_id in source_ref_answer_ids if source_id not in answer_ids
+    )
+    if unknown_source_ref_answer_ids:
+        raise ValueError(f"unknown source_ref answer_ids: {', '.join(unknown_source_ref_answer_ids)}")
 
 
 def merge_material_cards(
@@ -301,16 +379,22 @@ def merge_material_cards(
     cards: list[dict[str, Any]],
     *,
     status: str = "generated",
+    scaffold: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     updated = normalize_material_state(material)
-    validate_card_sources(updated, cards)
-    updated["cards"] = deepcopy(cards)
+    validate_card_sources(updated, cards, scaffold=scaffold)
+    updated["cards"] = _cards_with_normalized_source_refs(cards)
     updated["step_state"]["cards_status"] = status
     return updated
 
 
-def confirm_material_cards(material: dict[str, Any], cards: list[dict[str, Any]]) -> dict[str, Any]:
-    return merge_material_cards(material, cards, status="confirmed")
+def confirm_material_cards(
+    material: dict[str, Any],
+    cards: list[dict[str, Any]],
+    *,
+    scaffold: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return merge_material_cards(material, cards, status="confirmed", scaffold=scaffold)
 
 
 def validate_outline_sources(

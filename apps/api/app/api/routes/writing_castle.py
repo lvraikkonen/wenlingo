@@ -253,18 +253,43 @@ def _normalize_child_edited_cards(
     material: dict[str, Any],
     cards: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    material_state = normalize_material_state(material)
+    is_v06b = material_state.get("schema_version") == SCHEMA_VERSION
+    previous_cards = {
+        str(card.get("id") or ""): card
+        for card in material_state["cards"]
+        if str(card.get("id") or "").strip()
+    }
     fallback_source_ids = _material_answer_source_ids(material)
     normalized_cards = []
     for card in cards:
         normalized = deepcopy(card)
-        if (
-            normalized.get("child_edited")
-            and str(normalized.get("text") or "").strip()
-            and normalized.get("placeholder")
-        ):
+        text = str(normalized.get("text") or "").strip()
+        previous = previous_cards.get(str(normalized.get("id") or ""))
+        previous_was_placeholder = bool(previous and previous.get("placeholder"))
+        needs_child_source_ref = (
+            normalized.get("placeholder")
+            or previous_was_placeholder
+            or not normalized.get("source_refs")
+        )
+        if normalized.get("child_edited") and text and needs_child_source_ref:
             normalized["placeholder"] = False
             if not normalized.get("source_answer_ids"):
                 normalized["source_answer_ids"] = fallback_source_ids[:3]
+            if not normalized.get("source_refs"):
+                if is_v06b:
+                    normalized["source_refs"] = [
+                        {
+                            "source_type": "child_confirmed",
+                            "confirmation_id": str(normalized.get("id") or "child-edited-card"),
+                            "confirmed_text": text,
+                        }
+                    ]
+                else:
+                    normalized["source_refs"] = [
+                        {"source_type": "real_experience", "answer_id": source_id}
+                        for source_id in normalized["source_answer_ids"]
+                    ]
         normalized_cards.append(normalized)
     return normalized_cards
 
@@ -628,7 +653,12 @@ async def generate_material_cards(
             }
         )
     try:
-        essay.material_card = merge_material_cards(material, cards, status="generated")
+        essay.material_card = merge_material_cards(
+            material,
+            cards,
+            status="generated",
+            scaffold=scaffold,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     essay.status = next_status_after_materials(essay.status)
@@ -655,11 +685,11 @@ async def save_material_cards(
 ):
     essay = require_essay_for_auth_mode(session, settings, context, essay_id)
     _prewriting_open(essay)
-    _resolved_scaffold_or_legacy(essay)
+    scaffold = _resolved_scaffold_or_legacy(essay)
     student, _ability = _student_and_ability(session, essay.student_id)
     cards = _normalize_child_edited_cards(essay.material_card, request.cards)
     try:
-        essay.material_card = confirm_material_cards(essay.material_card, cards)
+        essay.material_card = confirm_material_cards(essay.material_card, cards, scaffold=scaffold)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     essay.status = next_status_after_materials(essay.status)

@@ -69,6 +69,7 @@ def test_attach_scaffold_snapshot_stores_full_snapshot_and_ref():
         "topic_variant": "default",
         "scaffold_template_version": "person_portrait.default.v0.6b.1",
     }
+    assert "scaffold" not in updated_material
     assert has_resolved_scaffold(updated_material, updated_outline) is True
 
 
@@ -214,7 +215,7 @@ def test_empty_material_answers_do_not_mark_questions_skipped():
 
 def test_source_reference_validation_rejects_unknown_answer_ids():
     material = merge_material_answers(
-        init_material_card_state(),
+        init_material_card_state(schema_version=LEGACY_SCHEMA_VERSION),
         answers=[{"id": "answer-1", "question_id": "q1", "text": "真实回答", "skipped": False}],
     )
 
@@ -227,7 +228,7 @@ def test_source_reference_validation_rejects_unknown_answer_ids():
 
 def test_source_reference_validation_rejects_skipped_and_blank_answer_ids():
     material = merge_material_answers(
-        init_material_card_state(),
+        init_material_card_state(schema_version=LEGACY_SCHEMA_VERSION),
         answers=[
             {"id": "answer-skipped", "question_id": "q1", "text": "真实回答", "skipped": True},
             {"id": "answer-blank", "question_id": "q2", "text": "   ", "skipped": False},
@@ -256,14 +257,14 @@ def test_source_reference_validation_rejects_skipped_and_blank_answer_ids():
 def test_source_reference_validation_rejects_source_ids_when_no_answers_saved():
     with pytest.raises(ValueError, match="unknown source_answer_ids"):
         validate_card_sources(
-            init_material_card_state(),
+            init_material_card_state(schema_version=LEGACY_SCHEMA_VERSION),
             [{"id": "card-event", "source_answer_ids": ["answer-1"], "placeholder": False}],
         )
 
 
 def test_source_reference_validation_requires_sources_for_non_placeholder_story_cards():
     material = merge_material_answers(
-        init_material_card_state(),
+        init_material_card_state(schema_version=LEGACY_SCHEMA_VERSION),
         answers=[{"id": "answer-1", "question_id": "q1", "text": "真实回答", "skipped": False}],
     )
 
@@ -309,6 +310,54 @@ def test_merge_material_cards_accepts_source_refs_only_non_placeholder_cards():
     ]
 
 
+def test_source_reference_validation_rejects_unknown_source_ref_answer_ids():
+    material = merge_material_answers(
+        init_material_card_state(),
+        answers=[{"id": "answer-1", "question_id": "q1", "text": "真实回答", "skipped": False}],
+    )
+
+    with pytest.raises(ValueError, match="unknown source_ref answer_ids"):
+        validate_card_sources(
+            material,
+            [
+                {
+                    "id": "card-event",
+                    "category": "event",
+                    "text": "我学会了骑车。",
+                    "source_answer_ids": [],
+                    "source_refs": [{"source_type": "real_experience", "answer_id": "missing"}],
+                    "placeholder": False,
+                }
+            ],
+        )
+
+
+def test_merge_material_cards_stores_normalized_source_refs():
+    material = init_material_card_state()
+
+    updated = merge_material_cards(
+        material,
+        [
+            {
+                "id": "card-child",
+                "category": "event",
+                "text": "孩子自己补充。",
+                "source_answer_ids": [],
+                "source_refs": [
+                    {
+                        "source_type": " child_confirmed ",
+                        "confirmation_id": "card-child",
+                        "confirmed_text": "孩子自己补充。",
+                    }
+                ],
+                "placeholder": False,
+            }
+        ],
+    )
+
+    assert updated["cards"][0]["source_refs"][0]["source_type"] == "child_confirmed"
+
+
 def test_source_reference_validation_allows_empty_placeholder_cards_without_sources():
     validate_card_sources(
         init_material_card_state(),
@@ -318,7 +367,7 @@ def test_source_reference_validation_allows_empty_placeholder_cards_without_sour
 
 def test_outline_source_validation_rejects_unknown_card_ids():
     material_with_answer = merge_material_answers(
-        init_material_card_state(),
+        init_material_card_state(schema_version=LEGACY_SCHEMA_VERSION),
         answers=[{"id": "answer-1", "question_id": "q1", "text": "真实回答", "skipped": False}],
     )
     material = confirm_material_cards(
@@ -346,7 +395,7 @@ def test_outline_source_validation_rejects_unknown_card_ids():
 
 def test_outline_source_validation_requires_sources_for_non_placeholder_story_notes():
     material_with_answer = merge_material_answers(
-        init_material_card_state(),
+        init_material_card_state(schema_version=LEGACY_SCHEMA_VERSION),
         answers=[{"id": "answer-1", "question_id": "q1", "text": "真实回答", "skipped": False}],
     )
     material = confirm_material_cards(
@@ -510,3 +559,106 @@ def test_topic_focus_merge_preserves_topic_analysis():
 
     assert updated["topic_analysis"]["cards"] == [{"id": "topic-ask", "title": "题目在问什么"}]
     assert updated["child_topic_focus"]["text"] == "我想写自己学会骑车的过程。"
+
+
+def test_expository_factual_card_rejects_topic_requirement_without_explicit_fact():
+    snapshot = resolve_scaffold_snapshot("expository_introduction", None, "manual")
+    material, _outline = attach_scaffold_snapshot(init_material_card_state(), init_outline_state(), snapshot)
+
+    with pytest.raises(ValueError, match="topic_requirement does not explicitly contain factual claim"):
+        validate_card_sources(
+            material,
+            [
+                {
+                    "id": "card-fact",
+                    "category": "known_information",
+                    "text": "大熊猫主要吃竹子。",
+                    "source_refs": [
+                        {
+                            "source_type": "topic_requirement",
+                            "topic_requirement_id": "topic",
+                            "quote_or_summary": "题目要求介绍国宝大熊猫。",
+                        }
+                    ],
+                    "source_answer_ids": [],
+                    "placeholder": False,
+                }
+            ],
+            scaffold=snapshot,
+        )
+
+
+def test_card_factual_validation_uses_saved_scaffold_snapshot_metadata():
+    snapshot = resolve_scaffold_snapshot("expository_introduction", None, "manual")
+    for slot in snapshot["material_slots"]:
+        if slot["id"] == "known_information":
+            slot["content_kind"] = "content"
+    material, _outline = attach_scaffold_snapshot(init_material_card_state(), init_outline_state(), snapshot)
+    assert "scaffold" not in material
+
+    validate_card_sources(
+        material,
+        [
+            {
+                "id": "card-fact",
+                "category": "known_information",
+                "text": "大熊猫主要吃竹子。",
+                "source_refs": [
+                    {
+                        "source_type": "topic_requirement",
+                        "topic_requirement_id": "topic",
+                        "quote_or_summary": "题目要求介绍国宝大熊猫。",
+                    }
+                ],
+                "source_answer_ids": [],
+                "placeholder": False,
+            }
+        ],
+        scaffold=snapshot,
+    )
+
+
+def test_v06b_scaffold_rejects_unknown_non_placeholder_card_category():
+    snapshot = resolve_scaffold_snapshot("expository_introduction", None, "manual")
+    material, _outline = attach_scaffold_snapshot(init_material_card_state(), init_outline_state(), snapshot)
+
+    with pytest.raises(ValueError, match="unknown material card category"):
+        validate_card_sources(
+            material,
+            [
+                {
+                    "id": "card-typo",
+                    "category": "known_infomation",
+                    "text": "孩子自己确认的信息。",
+                    "source_answer_ids": [],
+                    "source_refs": [
+                        {
+                            "source_type": "child_confirmed",
+                            "confirmation_id": "card-typo",
+                            "confirmed_text": "孩子自己确认的信息。",
+                        }
+                    ],
+                    "placeholder": False,
+                }
+            ],
+            scaffold=snapshot,
+        )
+
+
+def test_v06b_cards_require_source_refs_even_when_source_answer_ids_exist():
+    snapshot = resolve_scaffold_snapshot("imaginative_story", None, "manual")
+    material, _outline = attach_scaffold_snapshot(init_material_card_state(), init_outline_state(), snapshot)
+
+    with pytest.raises(ValueError, match="v0.6b material cards require source_refs"):
+        validate_card_sources(
+            material,
+            [
+                {
+                    "id": "card-setting",
+                    "category": "magic_setting",
+                    "text": "我变成了一朵云。",
+                    "source_answer_ids": ["answer-1"],
+                    "placeholder": False,
+                }
+            ],
+        )

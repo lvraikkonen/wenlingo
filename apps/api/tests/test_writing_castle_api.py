@@ -1134,9 +1134,10 @@ def test_material_cards_confirmed_event_counts_retained_cards_only(session, clie
             "cards": [
                 {
                     "id": "card-retained",
-                    "category": "event",
+                    "category": "skill_name",
                     "text": "我学会了骑车。",
                     "source_answer_ids": ["answer-1"],
+                    "source_refs": [{"source_type": "real_experience", "answer_id": "answer-1"}],
                     "order": 1,
                     "deleted": False,
                     "child_edited": False,
@@ -1144,7 +1145,7 @@ def test_material_cards_confirmed_event_counts_retained_cards_only(session, clie
                 },
                 {
                     "id": "card-placeholder",
-                    "category": "detail",
+                    "category": "first_try",
                     "text": "",
                     "source_answer_ids": [],
                     "order": 2,
@@ -1157,6 +1158,7 @@ def test_material_cards_confirmed_event_counts_retained_cards_only(session, clie
                     "category": "feeling_takeaway",
                     "text": "删掉的素材",
                     "source_answer_ids": ["answer-1"],
+                    "source_refs": [{"source_type": "real_experience", "answer_id": "answer-1"}],
                     "order": 3,
                     "deleted": True,
                     "child_edited": False,
@@ -1171,6 +1173,133 @@ def test_material_cards_confirmed_event_counts_retained_cards_only(session, clie
 
     assert response.status_code == 200
     assert event.payload["card_count"] == 1
+
+
+def test_expository_child_edited_placeholder_card_uses_child_confirmed_source_ref(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "国宝大熊猫"},
+    )
+    essay_id = start.json()["essay"]["id"]
+    selected = client.patch(
+        f"/api/essays/{essay_id}/scaffold-selection",
+        json={"topic_type": "expository_introduction", "override_reason": "manual_choice"},
+    )
+    assert selected.status_code == 200
+    client.patch(
+        f"/api/essays/{essay_id}/material-answers",
+        json={
+            "answers": [
+                {
+                    "id": "answer-1",
+                    "question_id": "q-known",
+                    "text": "我查到大熊猫主要吃竹子。",
+                    "skipped": False,
+                }
+            ]
+        },
+    )
+
+    response = client.patch(
+        f"/api/essays/{essay_id}/material-cards",
+        json={
+            "cards": [
+                {
+                    "id": "card-known-information",
+                    "category": "known_information",
+                    "text": "大熊猫主要吃竹子。",
+                    "source_answer_ids": [],
+                    "source_refs": [],
+                    "order": 1,
+                    "deleted": False,
+                    "child_edited": True,
+                    "placeholder": True,
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    card = response.json()["material_card"]["cards"][0]
+    assert card["source_answer_ids"] == ["answer-1"]
+    assert card["source_refs"][0]["source_type"] == "child_confirmed"
+    assert card["source_refs"][0]["confirmation_id"] == "card-known-information"
+    assert card["source_refs"][0]["confirmed_text"] == "大熊猫主要吃竹子。"
+
+
+def test_child_edited_saved_placeholder_submitted_as_non_placeholder_gets_child_confirmed_ref(
+    session,
+    client,
+):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "国宝大熊猫"},
+    )
+    essay_id = start.json()["essay"]["id"]
+    selected = client.patch(
+        f"/api/essays/{essay_id}/scaffold-selection",
+        json={"topic_type": "expository_introduction", "override_reason": "manual_choice"},
+    )
+    assert selected.status_code == 200
+    client.patch(
+        f"/api/essays/{essay_id}/material-answers",
+        json={
+            "answers": [
+                {
+                    "id": "answer-1",
+                    "question_id": "q-known",
+                    "text": "我查到大熊猫主要吃竹子。",
+                    "skipped": False,
+                }
+            ]
+        },
+    )
+    essay = session.get(Essay, essay_id)
+    material = dict(essay.material_card)
+    material["cards"] = [
+        {
+            "id": "card-known-information",
+            "category": "known_information",
+            "text": "",
+            "source_answer_ids": [],
+            "source_refs": [],
+            "order": 1,
+            "deleted": False,
+            "child_edited": False,
+            "placeholder": True,
+        }
+    ]
+    essay.material_card = material
+    session.add(essay)
+    session.commit()
+
+    response = client.patch(
+        f"/api/essays/{essay_id}/material-cards",
+        json={
+            "cards": [
+                {
+                    "id": "card-known-information",
+                    "category": "known_information",
+                    "text": "大熊猫主要吃竹子。",
+                    "source_answer_ids": [],
+                    "source_refs": [],
+                    "order": 1,
+                    "deleted": False,
+                    "child_edited": True,
+                    "placeholder": False,
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    card = response.json()["material_card"]["cards"][0]
+    assert card["source_refs"][0]["source_type"] == "child_confirmed"
+    assert card["source_refs"][0]["confirmation_id"] == "card-known-information"
 
 
 def test_skip_path_can_go_directly_to_first_draft(session, client):
