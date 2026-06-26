@@ -1,7 +1,7 @@
 from alembic import op
 import sqlalchemy as sa
 
-revision = "20260625_v06b_llm_timing_metadata"
+revision = "20260625_v06b_llm_meta"
 down_revision = "20260618_v05c1_daily_limit"
 branch_labels = None
 depends_on = None
