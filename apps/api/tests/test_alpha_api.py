@@ -333,6 +333,11 @@ def test_alpha_summary_includes_writing_castle_process_summary(session, client):
     )
     assert start.status_code == 201
     essay_id = start.json()["essay"]["id"]
+    selected = client.patch(
+        f"/api/essays/{essay_id}/scaffold-selection",
+        json={"topic_type": "person_portrait", "override_reason": "manual_choice"},
+    )
+    assert selected.status_code == 200
     client.post(f"/api/essays/{essay_id}/topic-analysis", json={})
     client.patch(
         f"/api/essays/{essay_id}/topic-focus",
@@ -367,8 +372,15 @@ def test_alpha_summary_includes_writing_castle_process_summary(session, client):
     )
 
     assert response.status_code == 200
-    assert response.json()["writing_castle_summary"] == {
+    payload = response.json()
+    assert payload["writing_castle_summary"] == {
         "topic": "我学会了骑车",
+        "selected_topic_type": "写一个人",
+        "selected_topic_type_parent": "写人类：特点 + 事例",
+        "selection_source": "manual",
+        "material_source_categories": ["real_experience"],
+        "unsupported_future_type_overridden": False,
+        "copy_ready_ai_body_generated": False,
         "topic_analysis_used": True,
         "topic_focus_confirmed": True,
         "topic_focus_edited": True,
@@ -408,6 +420,12 @@ def test_alpha_summary_tolerates_malformed_writing_castle_json(session, client):
     assert response.status_code == 200
     assert response.json()["writing_castle_summary"] == {
         "topic": "旧数据题目",
+        "selected_topic_type": "",
+        "selected_topic_type_parent": "",
+        "selection_source": "",
+        "material_source_categories": [],
+        "unsupported_future_type_overridden": False,
+        "copy_ready_ai_body_generated": False,
         "topic_analysis_used": False,
         "topic_focus_confirmed": False,
         "topic_focus_edited": False,

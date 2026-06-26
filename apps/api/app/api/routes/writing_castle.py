@@ -17,7 +17,7 @@ from app.api.feedback_state import feedback_reaction_value
 from app.api.routes.alpha import record_product_event
 from app.core.config import Settings, get_settings
 from app.domain.enums import TaskType
-from app.domain.models import AbilityProfile, Essay, EssayVersion, StudentProfile
+from app.domain.models import AbilityProfile, Essay, EssayVersion, StudentProfile, utcnow
 from app.services.abilities import apply_ability_delta
 from app.services.ai_tasks import (
     essay_feedback,
@@ -177,6 +177,7 @@ def _record_event(
     safe_payload = {"essay_id": essay.id}
     if payload:
         safe_payload.update(payload)
+    safe_payload["server_completed_at"] = utcnow().isoformat()
     try:
         record_product_event(
             session,
@@ -187,6 +188,17 @@ def _record_event(
         )
     except Exception:
         pass
+
+
+def _scaffold_event_payload(scaffold: dict[str, Any] | None) -> dict[str, Any]:
+    if not scaffold:
+        return {"scaffold_schema": "legacy_v0.6a"}
+    return {
+        "topic_type": scaffold["topic_type"],
+        "topic_variant": scaffold["topic_variant"],
+        "scaffold_template_version": scaffold["scaffold_template_version"],
+        "selection_source": scaffold.get("selection_source", ""),
+    }
 
 
 def _essay_payload(essay: Essay) -> dict[str, Any]:
@@ -443,10 +455,7 @@ async def save_scaffold_selection(
         student=student,
         payload={
             "step": "scaffold_selection",
-            "topic_type": snapshot["topic_type"],
-            "topic_variant": snapshot["topic_variant"],
-            "scaffold_template_version": snapshot["scaffold_template_version"],
-            "selection_source": snapshot["selection_source"],
+            **_scaffold_event_payload(snapshot),
             "override_reason": request.override_reason or "manual_choice",
             "accepted_suggestion_id": request.accepted_suggestion_id or "",
             "unsupported_future_type": snapshot.get("unsupported_future_type", ""),
@@ -494,7 +503,7 @@ async def generate_topic_analysis(
         "topic_analysis_completed",
         essay=essay,
         student=student,
-        payload={"step": "topic_analysis"},
+        payload={"step": "topic_analysis", **_scaffold_event_payload(scaffold)},
     )
     return _save_step_response(session, essay, "topic_analysis", essay.outline["topic_analysis"])
 
@@ -574,7 +583,7 @@ async def generate_material_questions(
         "material_questions_completed",
         essay=essay,
         student=student,
-        payload={"step": "material_questions"},
+        payload={"step": "material_questions", **_scaffold_event_payload(scaffold)},
     )
     return _save_step_response(session, essay, "material_card", essay.material_card)
 
@@ -589,7 +598,7 @@ async def save_material_answers(
 ):
     essay = require_essay_for_auth_mode(session, settings, context, essay_id)
     _prewriting_open(essay)
-    _resolved_scaffold_or_legacy(essay)
+    scaffold = _resolved_scaffold_or_legacy(essay)
     student, _ability = _student_and_ability(session, essay.student_id)
     essay.material_card = merge_material_answers(essay.material_card, answers=request.answers)
     essay.status = next_status_after_materials(essay.status)
@@ -607,6 +616,7 @@ async def save_material_answers(
         student=student,
         payload={
             "step": "material_answers",
+            **_scaffold_event_payload(scaffold),
             "answered_count": answered_count,
             "skipped": answered_count == 0,
         },
@@ -669,6 +679,7 @@ async def generate_material_cards(
         student=student,
         payload={
             "step": "material_cards",
+            **_scaffold_event_payload(scaffold),
             "card_count": len(cards),
         },
     )
@@ -700,6 +711,7 @@ async def save_material_cards(
         student=student,
         payload={
             "step": "material_cards",
+            **_scaffold_event_payload(scaffold),
             "card_count": _retained_material_card_count(cards),
         },
     )
@@ -756,6 +768,7 @@ async def generate_outline(
         student=student,
         payload={
             "step": "outline",
+            **_scaffold_event_payload(scaffold),
             "outline_section_count": len(sections),
         },
     )
@@ -772,7 +785,7 @@ async def save_outline(
 ):
     essay = require_essay_for_auth_mode(session, settings, context, essay_id)
     _prewriting_open(essay)
-    _resolved_scaffold_or_legacy(essay)
+    scaffold = _resolved_scaffold_or_legacy(essay)
     student, _ability = _student_and_ability(session, essay.student_id)
     if request.skipped:
         outline = normalize_outline_state(essay.outline)
@@ -799,6 +812,7 @@ async def save_outline(
         student=student,
         payload={
             "step": "outline",
+            **_scaffold_event_payload(scaffold),
             "outline_section_count": len(essay.outline["sections"]),
             "skipped": request.skipped,
         },
@@ -883,12 +897,16 @@ async def submit_first_draft(
     except IntegrityError as exc:
         session.rollback()
         raise HTTPException(status_code=409, detail="first draft already submitted") from exc
+    try:
+        scaffold = resolve_essay_scaffold(essay)
+    except (KeyError, TypeError, ValueError):
+        scaffold = None
     _record_event(
         session,
         "prewriting_first_draft_submitted",
         essay=essay,
         student=student,
-        payload={"step": "first_draft"},
+        payload={"step": "first_draft", **_scaffold_event_payload(scaffold)},
     )
     apply_ability_delta(
         session,

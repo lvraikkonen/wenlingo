@@ -39,6 +39,7 @@ from app.domain.models import (
     StudentProfile,
 )
 from app.services.auth_security import mask_email, mask_phone
+from app.services.writing_castle_state import LEGACY_SCHEMA_VERSION, SCHEMA_VERSION
 
 router = APIRouter(prefix="/api/alpha", tags=["alpha"])
 LOGGER = logging.getLogger(__name__)
@@ -142,6 +143,12 @@ SAFE_PAYLOAD_KEYS = {
     "accepted_suggestion_id",
     "unsupported_future_type",
     "unsupported_override",
+    "scaffold_schema",
+    "frontend_clicked_at",
+    "request_started_at",
+    "server_completed_at",
+    "response_received_at",
+    "duration_ms",
 }
 JSON_SAFE_SCALARS = (str, int, float, bool, type(None))
 INVITE_CODE_VALUE_PATTERN = re.compile(
@@ -476,6 +483,7 @@ def _summary_payload(parent: ParentUser, student: StudentProfile, session: Sessi
 
 
 def _writing_castle_summary(session: Session, student_id: str) -> dict[str, Any] | None:
+    supported_schema_versions = {LEGACY_SCHEMA_VERSION, SCHEMA_VERSION}
     essays = session.exec(
         select(Essay)
         .where(Essay.student_id == student_id)
@@ -485,8 +493,8 @@ def _writing_castle_summary(session: Session, student_id: str) -> dict[str, Any]
         (
             row
             for row in essays
-            if _json_object(row.material_card).get("schema_version") == "v0.6a.1"
-            or _json_object(row.outline).get("schema_version") == "v0.6a.1"
+            if _json_object(row.material_card).get("schema_version") in supported_schema_versions
+            or _json_object(row.outline).get("schema_version") in supported_schema_versions
         ),
         None,
     )
@@ -502,6 +510,17 @@ def _writing_castle_summary(session: Session, student_id: str) -> dict[str, Any]
         for card in _json_object_list(material.get("cards"))
         if not card.get("deleted") and not card.get("placeholder")
     ]
+    scaffold = _json_object(outline.get("scaffold"))
+    source_categories = sorted(
+        {
+            ref.get("source_type")
+            for card in material_cards
+            for ref in _json_object_list(card.get("source_refs"))
+            if ref.get("source_type")
+        }
+    )
+    if not source_categories and material_answers:
+        source_categories = ["real_experience"]
     outline_state = _json_object(outline.get("step_state"))
     outline_sections = _json_object_list(outline.get("sections"))
     first_draft = session.exec(
@@ -518,6 +537,12 @@ def _writing_castle_summary(session: Session, student_id: str) -> dict[str, Any]
     ).first()
     return {
         "topic": essay.title,
+        "selected_topic_type": scaffold.get("display_name_child", ""),
+        "selected_topic_type_parent": scaffold.get("display_name_parent", ""),
+        "selection_source": scaffold.get("selection_source", ""),
+        "material_source_categories": source_categories,
+        "unsupported_future_type_overridden": bool(scaffold.get("unsupported_future_type")),
+        "copy_ready_ai_body_generated": False,
         "topic_analysis_used": topic_analysis.get("status") == "generated",
         "topic_focus_confirmed": bool(focus.get("text")) and not focus.get("skipped"),
         "topic_focus_edited": bool(focus.get("text"))

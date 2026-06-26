@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 import json
 from time import perf_counter
 from typing import Any, Generic, TypeVar
@@ -10,7 +11,7 @@ from sqlmodel import Session
 
 from app.core.config import Settings
 from app.domain.enums import TaskType
-from app.domain.models import LLMCallLog
+from app.domain.models import LLMCallLog, utcnow
 from app.services.ai_routing import (
     ModelPricing,
     PricingStatus,
@@ -57,6 +58,8 @@ class AttemptRecord:
     total_tokens: int
     estimated_cost: float
     pricing_status: str
+    request_started_at: datetime | None = None
+    response_received_at: datetime | None = None
     validation_errors: tuple[dict[str, str], ...] = ()
 
     def to_summary(self) -> dict[str, Any]:
@@ -159,6 +162,36 @@ def _coerce_fallback_output(
     return output_schema.model_validate(output)
 
 
+def _source_policy_summary(scaffold: dict[str, Any]) -> str:
+    source_policy = scaffold.get("source_policy")
+    if not isinstance(source_policy, dict):
+        return ""
+    raw_sources = source_policy.get("required_for_content")
+    if not isinstance(raw_sources, list):
+        raw_sources = source_policy.get("allowed")
+    if not isinstance(raw_sources, list):
+        return ""
+    sources = [source for source in raw_sources if isinstance(source, str) and source.strip()]
+    return ",".join(sources)
+
+
+def _scaffold_observability_metadata(payload: dict[str, Any]) -> dict[str, str]:
+    scaffold = payload.get("scaffold")
+    if not isinstance(scaffold, dict):
+        return {
+            "topic_type": "",
+            "topic_variant": "",
+            "scaffold_template_version": "",
+            "source_policy_summary": "",
+        }
+    return {
+        "topic_type": str(scaffold.get("topic_type") or ""),
+        "topic_variant": str(scaffold.get("topic_variant") or ""),
+        "scaffold_template_version": str(scaffold.get("scaffold_template_version") or ""),
+        "source_policy_summary": _source_policy_summary(scaffold),
+    }
+
+
 def _record_log(
     *,
     session: Session | None,
@@ -176,6 +209,7 @@ def _record_log(
     error_message: str,
     resolved_provider: str,
     resolved_model: str,
+    payload: dict[str, Any],
     pricing_status: str | None = None,
 ) -> LLMCallLog | None:
     if session is None:
@@ -186,6 +220,23 @@ def _record_log(
     total_tokens = sum(attempt.total_tokens for attempt in attempts)
     estimated_cost = sum(attempt.estimated_cost for attempt in attempts)
     latency_ms = sum(attempt.latency_ms for attempt in attempts)
+    request_started_at = min(
+        (
+            attempt.request_started_at
+            for attempt in attempts
+            if attempt.request_started_at is not None
+        ),
+        default=None,
+    )
+    response_received_at = max(
+        (
+            attempt.response_received_at
+            for attempt in attempts
+            if attempt.response_received_at is not None
+        ),
+        default=None,
+    )
+    scaffold_metadata = _scaffold_observability_metadata(payload)
     primary_attempt = next(
         (attempt for attempt in attempts if attempt.role == "primary"),
         None,
@@ -228,6 +279,13 @@ def _record_log(
         total_tokens=total_tokens,
         estimated_cost=estimated_cost,
         latency_ms=latency_ms,
+        topic_type=scaffold_metadata["topic_type"],
+        topic_variant=scaffold_metadata["topic_variant"],
+        scaffold_template_version=scaffold_metadata["scaffold_template_version"],
+        source_policy_summary=scaffold_metadata["source_policy_summary"],
+        duration_ms=latency_ms,
+        request_started_at=request_started_at,
+        response_received_at=response_received_at,
     )
     session.add(log)
     session.flush()
@@ -261,6 +319,7 @@ async def _attempt_provider(
     model_name = _model_name(provider)
     output: T | None = None
     validation_errors: tuple[dict[str, str], ...] = ()
+    request_started_at = utcnow()
     started_at = perf_counter()
     try:
         response = await provider.complete_json(task_name, payload)
@@ -292,6 +351,7 @@ async def _attempt_provider(
                 reason = "success"
                 error_class = ""
     latency_ms = int((perf_counter() - started_at) * 1000)
+    response_received_at = utcnow()
     prompt_tokens = _usage_token(response, "prompt_tokens")
     completion_tokens = _usage_token(response, "completion_tokens")
     total_tokens = _usage_total_tokens(response, prompt_tokens, completion_tokens)
@@ -312,6 +372,8 @@ async def _attempt_provider(
             pricing=pricing,
         ),
         pricing_status=_attempt_pricing_status(pricing, route_pricing_status),
+        request_started_at=request_started_at,
+        response_received_at=response_received_at,
         validation_errors=validation_errors,
     )
     return output, response, attempt, reason
@@ -387,6 +449,7 @@ async def run_ai_task(
                 error_message="daily limit reached",
                 resolved_provider="local_fallback",
                 resolved_model="local_fallback",
+                payload=payload,
                 pricing_status=route.pricing_status,
             )
             return AITaskResult(output=output, log=log, status=TaskFinalStatus.DAILY_LIMIT_REACHED)
@@ -423,6 +486,7 @@ async def run_ai_task(
             error_message="",
             resolved_provider=primary_response.provider,
             resolved_model=primary_response.model,
+            payload=payload,
         )
         if session is not None:
             consume_daily_task_reservation(
@@ -462,6 +526,7 @@ async def run_ai_task(
             error_message="",
             resolved_provider=fallback_response.provider,
             resolved_model=fallback_response.model,
+            payload=payload,
         )
         if session is not None:
             consume_daily_task_reservation(
@@ -509,6 +574,7 @@ async def run_ai_task(
             error_message="; ".join(errors),
             resolved_provider="local_fallback",
             resolved_model="local_fallback",
+            payload=payload,
         )
         if session is not None:
             consume_daily_task_reservation(

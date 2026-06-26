@@ -1,6 +1,7 @@
 import html
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from time import perf_counter
 from typing import Any, Callable, Generic, TypeVar
 
@@ -124,6 +125,13 @@ def log_llm_result(
     total_tokens: int = 0,
     estimated_cost: float = 0.0,
     latency_ms: int = 0,
+    topic_type: str = "",
+    topic_variant: str = "",
+    scaffold_template_version: str = "",
+    source_policy_summary: str = "",
+    duration_ms: int | None = None,
+    request_started_at: datetime | None = None,
+    response_received_at: datetime | None = None,
 ) -> LLMCallLog:
     log = LLMCallLog(
         student_id=student_id,
@@ -145,6 +153,13 @@ def log_llm_result(
         total_tokens=total_tokens,
         estimated_cost=estimated_cost,
         latency_ms=latency_ms,
+        topic_type=topic_type,
+        topic_variant=topic_variant,
+        scaffold_template_version=scaffold_template_version,
+        source_policy_summary=source_policy_summary,
+        duration_ms=duration_ms or 0,
+        request_started_at=request_started_at,
+        response_received_at=response_received_at,
     )
     session.add(log)
     session.flush()

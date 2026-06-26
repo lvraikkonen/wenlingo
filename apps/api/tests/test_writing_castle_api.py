@@ -1326,6 +1326,40 @@ def test_skip_path_can_go_directly_to_first_draft(session, client):
     assert response.json()["essay"]["status"] == REVISION_REQUESTED_STATUS
 
 
+def test_first_draft_event_metadata_tolerates_malformed_persisted_scaffold(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我的一次进步"},
+    )
+    essay_id = start.json()["essay"]["id"]
+    essay = session.get(Essay, essay_id)
+    material = dict(essay.material_card)
+    outline = dict(essay.outline)
+    material["scaffold_ref"] = {}
+    outline["scaffold"] = {
+        "schema_version": SCHEMA_VERSION,
+        "topic_variant": "default",
+    }
+    essay.material_card = material
+    essay.outline = outline
+    session.add(essay)
+    session.commit()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/first-draft",
+        json={"draft": "这次我想写自己的进步。我先写一个简单初稿，后面再慢慢修改。"},
+    )
+
+    event = session.exec(
+        select(ProductEvent).where(ProductEvent.event_type == "prewriting_first_draft_submitted")
+    ).one()
+    assert response.status_code == 201
+    assert event.payload["scaffold_schema"] == "legacy_v0.6a"
+    assert event.payload["server_completed_at"]
+
+
 def test_writing_castle_events_are_recorded(session, client):
     family = create_authenticated_family(session)
     student = family["student"]
@@ -1338,8 +1372,30 @@ def test_writing_castle_events_are_recorded(session, client):
     _select_generic_scaffold(client, essay_id)
     client.post(f"/api/essays/{essay_id}/topic-analysis", json={})
 
-    event_types = {
-        event.event_type
-        for event in session.exec(select(ProductEvent).where(ProductEvent.student_id == student.id)).all()
-    }
+    events = session.exec(select(ProductEvent).where(ProductEvent.student_id == student.id)).all()
+    event_types = {event.event_type for event in events}
+    events_by_type = {event.event_type: event for event in events}
+    writing_castle_events = [
+        events_by_type[event_type]
+        for event_type in {
+            "writing_castle_started",
+            "scaffold_selected",
+            "topic_analysis_completed",
+        }
+    ]
     assert {"writing_castle_started", "topic_analysis_completed"} <= event_types
+    assert all(event.payload["server_completed_at"] for event in writing_castle_events)
+    assert events_by_type["scaffold_selected"].payload["topic_type"] == "generic_narrative"
+    assert events_by_type["scaffold_selected"].payload["topic_variant"] == "learned_skill"
+    assert (
+        events_by_type["scaffold_selected"].payload["scaffold_template_version"]
+        == "generic_narrative.learned_skill.v0.6b.1"
+    )
+    assert events_by_type["scaffold_selected"].payload["selection_source"] == "manual"
+    assert events_by_type["topic_analysis_completed"].payload["topic_type"] == "generic_narrative"
+    assert events_by_type["topic_analysis_completed"].payload["topic_variant"] == "learned_skill"
+    assert (
+        events_by_type["topic_analysis_completed"].payload["scaffold_template_version"]
+        == "generic_narrative.learned_skill.v0.6b.1"
+    )
+    assert events_by_type["topic_analysis_completed"].payload["selection_source"] == "manual"

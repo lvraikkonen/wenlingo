@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from sqlmodel import select
 
 from app.domain.enums import TaskType
@@ -69,3 +71,42 @@ def test_log_llm_result_persists_usage_latency_and_cost(session):
     assert saved.total_tokens == 150
     assert saved.estimated_cost == 0.00025
     assert saved.latency_ms == 45
+
+
+def test_log_llm_result_persists_v06b_scaffold_metadata(session):
+    request_started_at = datetime(2026, 6, 25, 10, 0, 0, tzinfo=timezone.utc)
+    response_received_at = datetime(2026, 6, 25, 10, 0, 1, tzinfo=timezone.utc)
+
+    log_llm_result(
+        session=session,
+        student_id="s1",
+        task_type=TaskType.essay,
+        task_name="material_questions",
+        prompt_key="material_questions",
+        provider="mock",
+        model="mock",
+        prompt_version="v0.6b-2026-06-25",
+        input_summary="写作城堡素材问题",
+        raw_response="{}",
+        output_json={},
+        validation_ok=True,
+        error_message="",
+        retry_count=0,
+        topic_type="person_portrait",
+        topic_variant="default",
+        scaffold_template_version="person_portrait.default.v0.6b.1",
+        source_policy_summary="real_experience,observation,child_confirmed",
+        request_started_at=request_started_at,
+        response_received_at=response_received_at,
+        duration_ms=1000,
+    )
+
+    saved = session.exec(select(LLMCallLog)).one()
+
+    assert saved.topic_type == "person_portrait"
+    assert saved.topic_variant == "default"
+    assert saved.scaffold_template_version == "person_portrait.default.v0.6b.1"
+    assert saved.source_policy_summary == "real_experience,observation,child_confirmed"
+    assert saved.request_started_at is not None
+    assert saved.response_received_at is not None
+    assert saved.duration_ms == 1000

@@ -187,6 +187,68 @@ async def test_run_ai_task_records_primary_success(session, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_ai_task_records_v06b_scaffold_observability_metadata(session):
+    primary = FakeProvider(
+        provider_name="primary",
+        model_name="cheap-fast",
+        actions=[
+            response(
+                message="hello child",
+                provider="primary",
+                model="cheap-fast",
+                prompt_tokens=10,
+                completion_tokens=5,
+            )
+        ],
+    )
+    fallback = FakeProvider(
+        provider_name="fallback",
+        model_name="strong-default",
+        actions=[],
+    )
+    scaffold = {
+        "topic_type": "person_portrait",
+        "topic_variant": "default",
+        "scaffold_template_version": "person_portrait.default.v0.6b.1",
+        "source_policy": {
+            "allowed": ["real_experience", "observation", "child_confirmed"],
+            "required_for_content": [
+                "real_experience",
+                "observation",
+                "child_confirmed",
+            ],
+        },
+    }
+
+    await run_ai_task(
+        settings=Settings(llm_provider="mock"),
+        session=session,
+        task_type=TaskType.essay,
+        task_name="material_questions",
+        student_id="s1",
+        payload={"topic": "我的同学", "scaffold": scaffold},
+        output_schema=TinyOutput,
+        prompt_key="material_questions",
+        input_summary="写作城堡素材问题",
+        deterministic_fallback_factory=local_fallback,
+        primary_provider=primary,
+        fallback_provider=fallback,
+        prompt_version="v0.6b-2026-06-25",
+    )
+
+    saved = session.exec(select(LLMCallLog)).one()
+    assert saved.topic_type == "person_portrait"
+    assert saved.topic_variant == "default"
+    assert saved.scaffold_template_version == "person_portrait.default.v0.6b.1"
+    assert saved.source_policy_summary == "real_experience,observation,child_confirmed"
+    assert saved.request_started_at is not None
+    assert saved.response_received_at is not None
+    assert saved.response_received_at >= saved.request_started_at
+    assert saved.duration_ms >= 0
+    assert saved.latency_ms >= 0
+
+
+@pytest.mark.asyncio
 async def test_run_ai_task_defaults_prompt_version_to_prompt_key(session):
     primary = FakeProvider(
         provider_name="primary",

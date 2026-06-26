@@ -329,6 +329,19 @@ class LLMCallLog(SQLModel, table=True):
     total_tokens: int = 0
     estimated_cost: float = 0.0
     latency_ms: int = 0
+    topic_type: str = Field(default="", index=True)
+    topic_variant: str = Field(default="", index=True)
+    scaffold_template_version: str = Field(default="", index=True)
+    source_policy_summary: str = ""
+    duration_ms: int = 0
+    request_started_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    response_received_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     created_at: datetime = timestamp_field()
 
 
