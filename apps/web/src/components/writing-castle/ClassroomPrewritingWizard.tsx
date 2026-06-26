@@ -41,6 +41,46 @@ type Step =
   | "draft"
   | "feedback";
 
+const LOADING_STAGE_MS = 2200;
+
+const LOADING_COPY = {
+  start_classroom: ["正在准备作文类型……"],
+  topic_analysis: [
+    "正在读题目……",
+    "正在找这类作文的重点……",
+    "正在整理审题提示……",
+  ],
+  material_questions: [
+    "正在根据题型准备问题……",
+    "正在提醒你从哪里找素材……",
+    "马上就能开始想素材了……",
+  ],
+  material_cards: [
+    "正在整理你的回答……",
+    "正在把素材放进合适卡片……",
+    "正在检查有没有替你编内容……",
+  ],
+  outline: [
+    "正在搭提纲……",
+    "正在按题型安排段落……",
+    "正在检查提纲有没有素材来源……",
+  ],
+  first_draft_feedback: [
+    "AI 教练正在读你的初稿……",
+    "正在先找写得好的地方……",
+    "正在准备一个小修改任务……",
+  ],
+  save_answers: ["正在保存素材回答……"],
+  save_cards: ["正在保存素材卡……"],
+  save_outline: ["正在保存提纲……"],
+} as const;
+
+type LoadingKey = keyof typeof LOADING_COPY;
+
+function loadingMessages(key: LoadingKey): readonly string[] {
+  return LOADING_COPY[key];
+}
+
 const DEFAULT_SUPPORTED_TOPIC_TYPES: TopicTypeChoice[] = [
   {
     topic_type: "generic_narrative",
@@ -127,8 +167,10 @@ export function ClassroomPrewritingWizard({
     useState<FutureTopicType | null>(null);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
-  const [pendingLabel, setPendingLabel] = useState("");
+  const [pendingMessages, setPendingMessages] = useState<readonly string[]>([]);
+  const [pendingMessageIndex, setPendingMessageIndex] = useState(0);
   const ignoreActiveResumeRef = useRef(false);
+  const pendingLabel = pendingMessages[pendingMessageIndex] ?? "";
 
   useEffect(() => {
     let isMounted = true;
@@ -179,11 +221,28 @@ export function ClassroomPrewritingWizard({
     };
   }, [studentId]);
 
+  useEffect(() => {
+    if (pendingMessages.length <= 1) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setPendingMessageIndex((index) => {
+        if (index >= pendingMessages.length - 1) {
+          window.clearInterval(timer);
+          return index;
+        }
+        return index + 1;
+      });
+    }, LOADING_STAGE_MS);
+    return () => window.clearInterval(timer);
+  }, [pendingMessages]);
+
   async function run<T>(
-    label: string,
+    loadingKey: LoadingKey,
     action: () => Promise<T>,
   ): Promise<T | null> {
-    setPendingLabel(label);
+    setPendingMessages([...loadingMessages(loadingKey)]);
+    setPendingMessageIndex(0);
     setError("");
     try {
       return await action();
@@ -191,13 +250,14 @@ export function ClassroomPrewritingWizard({
       setError("这一步没有保存成功，可以重试，也可以先继续写。");
       return null;
     } finally {
-      setPendingLabel("");
+      setPendingMessages([]);
+      setPendingMessageIndex(0);
     }
   }
 
   async function start() {
     ignoreActiveResumeRef.current = true;
-    const started = await run("正在准备作文类型...", async () =>
+    const started = await run("start_classroom", async () =>
       createClassroomWritingCastleEssay(studentId, {
         topic_text: topicText,
       }),
@@ -225,7 +285,7 @@ export function ClassroomPrewritingWizard({
       return;
     }
 
-    const started = await run("正在看题目...", async () => {
+    const started = await run("topic_analysis", async () => {
       const saved = await selectWritingCastleScaffold(essay.id, {
         topic_type: topicType,
         override_reason: "manual_choice",
@@ -252,7 +312,7 @@ export function ClassroomPrewritingWizard({
       return;
     }
 
-    const saved = await run("正在准备选材问题...", async () => {
+    const saved = await run("material_questions", async () => {
       await saveTopicFocus(essay.id, {
         text: skipped ? "" : focus,
         adopted_from_ai:
@@ -284,7 +344,7 @@ export function ClassroomPrewritingWizard({
       return;
     }
     if (direct) {
-      const saved = await run("正在保存素材回答...", async () =>
+      const saved = await run("save_answers", async () =>
         saveMaterialAnswers(essay.id, { answers }),
       );
       if (!saved) {
@@ -295,7 +355,7 @@ export function ClassroomPrewritingWizard({
       return;
     }
 
-    const saved = await run("正在整理素材卡...", async () => {
+    const saved = await run("material_cards", async () => {
       await saveMaterialAnswers(essay.id, { answers });
       const generated = await generateMaterialCards(essay.id);
       return generated.essay;
@@ -313,7 +373,7 @@ export function ClassroomPrewritingWizard({
       return;
     }
     if (direct) {
-      const saved = await run("正在保存素材卡...", async () =>
+      const saved = await run("save_cards", async () =>
         saveMaterialCards(essay.id, { cards }),
       );
       if (!saved) {
@@ -324,7 +384,7 @@ export function ClassroomPrewritingWizard({
       return;
     }
 
-    const saved = await run("正在搭提纲...", async () => {
+    const saved = await run("outline", async () => {
       await saveMaterialCards(essay.id, { cards });
       const generated = await generateOutline(essay.id);
       return generated.essay;
@@ -341,7 +401,7 @@ export function ClassroomPrewritingWizard({
     if (!essay) {
       return;
     }
-    const saved = await run("正在保存提纲...", async () =>
+    const saved = await run("save_outline", async () =>
       saveOutline(essay.id, { sections, skipped: direct }),
     );
     if (!saved) {
@@ -357,7 +417,7 @@ export function ClassroomPrewritingWizard({
       return;
     }
 
-    const result = await run("AI 教练正在读你的初稿", async () =>
+    const result = await run("first_draft_feedback", async () =>
       submitPrewritingFirstDraft(essay.id, { draft }),
     );
 

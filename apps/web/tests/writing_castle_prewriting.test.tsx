@@ -317,6 +317,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   vi.resetAllMocks();
 });
@@ -342,6 +343,66 @@ async function selectNarrativeScaffold() {
   await userEvent.click(screen.getByRole("button", { name: "写一件事" }));
   expect(await screen.findByText("第 1 步 / 共 4 步：看懂题目")).toBeInTheDocument();
 }
+
+test("writing castle shows staged loading copy during topic analysis", async () => {
+  const topicAnalysis = deferred<{ essay: WritingCastleEssay }>();
+  apiMocks.generateTopicAnalysis.mockReturnValueOnce(topicAnalysis.promise);
+
+  await startClassroomWizard();
+
+  vi.useFakeTimers();
+
+  try {
+    await act(async () => {
+      screen.getByRole("button", { name: "写一件事" }).click();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("status")).toHaveTextContent("正在读题目");
+
+    await act(async () => {
+      vi.advanceTimersByTime(2200);
+    });
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "正在找这类作文的重点",
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(2200);
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("正在整理审题提示");
+
+    await act(async () => {
+      topicAnalysis.resolve({
+        essay: essayState({
+          outline: {
+            ...essayState().outline,
+            topic_analysis: {
+              status: "generated",
+              suggested_focus: "写清楚学会骑车的过程",
+              cards: [
+                {
+                  id: "topic-ask",
+                  kind: "topic_question",
+                  title: "题目在问什么",
+                  body: "写一次真实经历。",
+                  required_points: [],
+                },
+              ],
+            },
+          },
+        }),
+      });
+      await topicAnalysis.promise;
+    });
+    vi.useRealTimers();
+    expect(
+      await screen.findByText("第 1 步 / 共 4 步：看懂题目"),
+    ).toBeInTheDocument();
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 async function continueToQuestions() {
   await userEvent.click(screen.getByRole("button", { name: "继续想素材" }));
