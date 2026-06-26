@@ -412,6 +412,31 @@ export function ClassroomPrewritingWizard({
     setStep("draft");
   }
 
+  function enterDraftWithoutScaffold() {
+    setError("");
+    setPendingMessages([]);
+    setPendingMessageIndex(0);
+    setStep("draft");
+  }
+
+  function returnToTopicEntry() {
+    ignoreActiveResumeRef.current = true;
+    setEssay(null);
+    setTopicText("");
+    setFocus("");
+    setSuggestedFocus("");
+    setAnswers([]);
+    setCards([]);
+    setSections([]);
+    setSupportedTopicTypes([]);
+    setUnsupportedFutureType(null);
+    setDraft("");
+    setError("");
+    setPendingMessages([]);
+    setPendingMessageIndex(0);
+    setStep("topic_entry");
+  }
+
   async function submitDraft() {
     if (!essay) {
       return;
@@ -481,6 +506,26 @@ export function ClassroomPrewritingWizard({
             <p className="mt-3 text-sm font-semibold text-[var(--wen-muted)]">
               这类题目我们还在学习中，可以先选最接近的一种写法，AI 教练会陪你一步一步写。
             </p>
+          ) : null}
+          {unsupportedFutureType ? (
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button
+                className="rounded-lg bg-[var(--wen-orange)] px-4 py-2 font-semibold text-white disabled:opacity-60"
+                type="button"
+                disabled={Boolean(pendingLabel)}
+                onClick={enterDraftWithoutScaffold}
+              >
+                直接写初稿
+              </button>
+              <button
+                className="rounded-lg border border-[var(--wen-border)] bg-white px-4 py-2 font-semibold disabled:opacity-60"
+                type="button"
+                disabled={Boolean(pendingLabel)}
+                onClick={returnToTopicEntry}
+              >
+                重新输入题目
+              </button>
+            </div>
           ) : null}
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {supportedTopicTypes.map((choice) => (

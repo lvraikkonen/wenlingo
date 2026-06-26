@@ -1,5 +1,12 @@
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Suspense } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -451,6 +458,81 @@ test("classroom path requires manual scaffold selection before topic analysis", 
   await waitFor(() => {
     expect(apiMocks.generateTopicAnalysis).toHaveBeenCalledWith("essay-1");
   });
+});
+
+test("unsupported future topic fallback can enter direct draft without scaffold selection", async () => {
+  apiMocks.createClassroomWritingCastleEssay.mockResolvedValueOnce({
+    essay: essayState({
+      title: "推荐一本书",
+      material_card: {
+        ...essayState().material_card,
+        schema_version: "v0.6b.1",
+        scaffold_ref: null,
+      },
+      outline: {
+        ...essayState().outline,
+        schema_version: "v0.6b.1",
+        scaffold: null,
+      },
+    }),
+    supported_topic_types: supportedTopicTypes,
+    unsupported_future_type: "reading_response_recommendation",
+  });
+
+  await startClassroomWizard("推荐一本书");
+
+  expect(
+    screen.getByText(
+      "这类题目我们还在学习中，可以先选最接近的一种写法，AI 教练会陪你一步一步写。",
+    ),
+  ).toBeInTheDocument();
+  const scaffoldSelection = screen.getByText("选择作文类型").closest("section");
+  expect(scaffoldSelection).not.toBeNull();
+  const fallback = within(scaffoldSelection as HTMLElement);
+  expect(fallback.getByRole("button", { name: "写一件事" })).toBeInTheDocument();
+  expect(fallback.getByRole("button", { name: "直接写初稿" })).toBeInTheDocument();
+
+  await userEvent.click(fallback.getByRole("button", { name: "直接写初稿" }));
+
+  expect(await screen.findByLabelText("初稿")).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "提交初稿给 AI 教练" }),
+  ).toBeInTheDocument();
+  expect(apiMocks.selectWritingCastleScaffold).not.toHaveBeenCalled();
+  expect(apiMocks.generateTopicAnalysis).not.toHaveBeenCalled();
+});
+
+test("unsupported future topic fallback can return to topic entry for replacement", async () => {
+  apiMocks.createClassroomWritingCastleEssay.mockResolvedValueOnce({
+    essay: essayState({
+      title: "推荐一本书",
+      material_card: {
+        ...essayState().material_card,
+        schema_version: "v0.6b.1",
+        scaffold_ref: null,
+      },
+      outline: {
+        ...essayState().outline,
+        schema_version: "v0.6b.1",
+        scaffold: null,
+      },
+    }),
+    supported_topic_types: supportedTopicTypes,
+    unsupported_future_type: "reading_response_recommendation",
+  });
+
+  await startClassroomWizard("推荐一本书");
+  const scaffoldSelection = screen.getByText("选择作文类型").closest("section");
+  expect(scaffoldSelection).not.toBeNull();
+  await userEvent.click(
+    within(scaffoldSelection as HTMLElement).getByRole("button", {
+      name: "重新输入题目",
+    }),
+  );
+
+  expect(await screen.findByLabelText("老师作文题目")).toHaveValue("");
+  expect(screen.queryByText("选择作文类型")).not.toBeInTheDocument();
+  expect(screen.queryByText("这类题目我们还在学习中")).not.toBeInTheDocument();
 });
 
 test("classroom writing castle path reaches first draft feedback", async () => {
