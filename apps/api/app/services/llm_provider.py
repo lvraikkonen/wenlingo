@@ -124,7 +124,7 @@ class MockLLMProvider:
                 model=self.model_name,
             )
         if task_name == "material_questions":
-            payload = fallback_material_questions().model_dump()
+            payload = fallback_material_questions(payload.get("scaffold")).model_dump()
             return LLMProviderResponse(
                 parsed_json=payload,
                 raw_response=json.dumps(payload, ensure_ascii=False),
@@ -132,7 +132,10 @@ class MockLLMProvider:
                 model=self.model_name,
             )
         if task_name == "material_card_generation":
-            payload = fallback_material_cards(payload.get("answers", [])).model_dump()
+            payload = fallback_material_cards(
+                payload.get("answers", []),
+                scaffold=payload.get("scaffold"),
+            ).model_dump()
             return LLMProviderResponse(
                 parsed_json=payload,
                 raw_response=json.dumps(payload, ensure_ascii=False),
@@ -140,7 +143,10 @@ class MockLLMProvider:
                 model=self.model_name,
             )
         if task_name == "outline_generation":
-            payload = fallback_outline(payload.get("cards", [])).model_dump()
+            payload = fallback_outline(
+                payload.get("cards", []),
+                scaffold=payload.get("scaffold"),
+            ).model_dump()
             return LLMProviderResponse(
                 parsed_json=payload,
                 raw_response=json.dumps(payload, ensure_ascii=False),

@@ -16,6 +16,7 @@ from app.services.writing_castle_state import (
     init_material_card_state,
     init_outline_state,
     merge_material_answers,
+    merge_material_cards,
     merge_topic_focus,
     next_status_after_materials,
     next_status_after_outline,
@@ -242,7 +243,7 @@ def test_source_reference_validation_requires_sources_for_non_placeholder_story_
         answers=[{"id": "answer-1", "question_id": "q1", "text": "真实回答", "skipped": False}],
     )
 
-    with pytest.raises(ValueError, match="non-placeholder material cards require source_answer_ids"):
+    with pytest.raises(ValueError, match="non-placeholder material cards require source refs"):
         validate_card_sources(
             material,
             [
@@ -254,6 +255,34 @@ def test_source_reference_validation_requires_sources_for_non_placeholder_story_
                 }
             ],
         )
+
+
+def test_merge_material_cards_accepts_source_refs_only_non_placeholder_cards():
+    material = merge_material_answers(
+        init_material_card_state(),
+        answers=[{"id": "answer-1", "question_id": "q1", "text": "我变成了一朵云。", "skipped": False}],
+    )
+
+    updated = merge_material_cards(
+        material,
+        [
+            {
+                "id": "card-magic-setting",
+                "category": "magic_setting",
+                "text": "我变成了一朵云。",
+                "source_answer_ids": [],
+                "source_refs": [{"source_type": "imagined_setting", "answer_id": "answer-1"}],
+                "order": 1,
+                "deleted": False,
+                "child_edited": False,
+                "placeholder": False,
+            }
+        ],
+    )
+
+    assert updated["cards"][0]["source_refs"] == [
+        {"source_type": "imagined_setting", "answer_id": "answer-1"}
+    ]
 
 
 def test_source_reference_validation_allows_empty_placeholder_cards_without_sources():

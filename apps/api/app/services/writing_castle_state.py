@@ -254,9 +254,15 @@ def validate_card_sources(
     }
     for card in cards:
         source_answer_ids = card.get("source_answer_ids", [])
-        if not card.get("placeholder") and not source_answer_ids:
-            raise ValueError("non-placeholder material cards require source_answer_ids")
-        if card.get("placeholder") and card.get("text", "").strip() and not source_answer_ids:
+        source_refs = card.get("source_refs", [])
+        if not card.get("placeholder") and not source_answer_ids and not source_refs:
+            raise ValueError("non-placeholder material cards require source refs")
+        if (
+            card.get("placeholder")
+            and card.get("text", "").strip()
+            and not source_answer_ids
+            and not source_refs
+        ):
             raise ValueError("placeholder material cards without sources cannot contain story content")
     unknown = sorted(
         {

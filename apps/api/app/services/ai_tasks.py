@@ -286,13 +286,29 @@ def _validate_outline_source_ids(
         )
 
 
+def _scaffold_slot_ids(scaffold: dict, key: str) -> set[str]:
+    entries = scaffold.get(key, [])
+    if not isinstance(entries, list):
+        raise LLMTaskValidationError(f"malformed scaffold {key}")
+
+    slot_ids: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise LLMTaskValidationError(f"malformed scaffold {key}")
+        slot_id = _payload_source_id(entry.get("id"))
+        if slot_id is None:
+            raise LLMTaskValidationError(f"malformed scaffold {key}")
+        slot_ids.add(slot_id)
+    return slot_ids
+
+
 def _validate_material_card_template_slots(
     output: MaterialCardsResult,
     scaffold: dict | None,
 ) -> None:
     if not scaffold:
         return
-    allowed = {slot["id"] for slot in scaffold.get("material_slots", [])}
+    allowed = _scaffold_slot_ids(scaffold, "material_slots")
     unknown = sorted({card.category for card in output.cards if card.category not in allowed})
     if unknown:
         raise LLMTaskValidationError(
@@ -306,7 +322,7 @@ def _validate_outline_template_slots(
 ) -> None:
     if not scaffold:
         return
-    allowed = {section["id"] for section in scaffold.get("outline_sections", [])}
+    allowed = _scaffold_slot_ids(scaffold, "outline_sections")
     unknown = sorted({section.slot for section in output.sections if section.slot not in allowed})
     if unknown:
         raise LLMTaskValidationError(

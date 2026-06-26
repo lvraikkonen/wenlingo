@@ -481,6 +481,63 @@ async def test_writing_castle_mock_provider_returns_prewriting_contracts():
     assert outline.output.sections[0].slot == "cause"
 
 
+@pytest.mark.asyncio
+async def test_mock_provider_uses_scaffold_for_material_card_generation():
+    from app.services.ai_routing import TaskFinalStatus
+    from app.services.ai_tasks import material_card_generation
+    from app.services.writing_castle_scaffold import resolve_scaffold_snapshot
+    from app.api.deps import AITaskRunner
+    from app.core.config import Settings
+
+    runner = AITaskRunner(settings=Settings(llm_provider="mock"))
+    scaffold = resolve_scaffold_snapshot("generic_narrative", "learned_skill", "manual")
+
+    result = await material_card_generation(
+        runner,
+        answers=[
+            {"id": "answer-1", "question_id": "q-skill-name", "text": "我学会了骑车。", "skipped": False}
+        ],
+        session=None,
+        student_id="student-1",
+        scaffold=scaffold,
+    )
+
+    assert result.status == TaskFinalStatus.PRIMARY_SUCCESS
+    assert result.output.cards[0].category == "skill_name"
+
+
+@pytest.mark.asyncio
+async def test_mock_provider_uses_scaffold_for_material_questions_and_outline():
+    from app.services.llm_provider import MockLLMProvider
+    from app.services.writing_castle_scaffold import resolve_scaffold_snapshot
+
+    provider = MockLLMProvider()
+    scaffold = resolve_scaffold_snapshot("generic_narrative", "learned_skill", "manual")
+
+    questions = await provider.complete_json(
+        "material_questions",
+        {"scaffold": scaffold},
+    )
+    outline = await provider.complete_json(
+        "outline_generation",
+        {
+            "scaffold": scaffold,
+            "cards": [
+                {
+                    "id": "card-skill-name",
+                    "category": "skill_name",
+                    "text": "我学会了骑车。",
+                    "deleted": False,
+                    "placeholder": False,
+                }
+            ],
+        },
+    )
+
+    assert questions.parsed_json["questions"][0]["id"] == "q-skill_name"
+    assert outline.parsed_json["sections"][0]["slot"] == "opening_context"
+
+
 def test_convert_ghostwriting_request_returns_coaching_message():
     result = convert_ghostwriting_request("帮我写一篇推荐一个好地方的作文")
 
@@ -860,6 +917,24 @@ async def test_material_card_generation_rejects_skipped_and_blank_answer_sources
 
 
 @pytest.mark.asyncio
+async def test_material_card_generation_rejects_malformed_scaffold_material_slots():
+    runner = RecordingRunner(material_cards_output())
+
+    await material_card_generation(
+        runner=runner,
+        answers=[
+            {"id": "answer-1", "question_id": "q1", "text": "我学会了骑车。", "skipped": False}
+        ],
+        scaffold={"material_slots": [{"label": "缺少 id"}, None]},
+    )
+
+    validate_output = runner.calls[0]["validate_output"]
+
+    with pytest.raises(LLMTaskValidationError, match="malformed scaffold material_slots"):
+        validate_output(material_cards_output())
+
+
+@pytest.mark.asyncio
 async def test_outline_generation_validates_source_card_ids():
     runner = RecordingRunner(outline_output())
 
@@ -934,6 +1009,31 @@ async def test_outline_generation_validates_source_card_ids():
 
     with pytest.raises(LLMTaskValidationError, match="unknown source_card_ids"):
         validate_output(invalid_output)
+
+
+@pytest.mark.asyncio
+async def test_outline_generation_rejects_malformed_scaffold_outline_sections():
+    runner = RecordingRunner(outline_output())
+
+    await outline_generation(
+        runner=runner,
+        cards=[
+            {
+                "id": "card-event",
+                "category": "event",
+                "text": "我学会了骑车。",
+                "source_answer_ids": ["answer-1"],
+                "deleted": False,
+                "placeholder": False,
+            }
+        ],
+        scaffold={"outline_sections": [{"label": "缺少 id"}, None]},
+    )
+
+    validate_output = runner.calls[0]["validate_output"]
+
+    with pytest.raises(LLMTaskValidationError, match="malformed scaffold outline_sections"):
+        validate_output(outline_output())
 
 
 def test_writing_castle_fallbacks_preserve_exact_source_ids():
