@@ -23,6 +23,26 @@ def _source_id(value: Any) -> str | None:
     return source_id
 
 
+def _valid_scaffold_entries(scaffold: dict[str, Any] | None, key: str) -> list[dict[str, Any]]:
+    if not isinstance(scaffold, dict):
+        return []
+    entries = scaffold.get(key) or []
+    if not isinstance(entries, list):
+        return []
+
+    valid_entries = []
+    saw_malformed = False
+    for entry in entries:
+        if not isinstance(entry, dict) or _source_id(entry.get("id")) is None:
+            saw_malformed = True
+            continue
+        valid_entries.append(entry)
+
+    if valid_entries and saw_malformed:
+        raise ValueError(f"malformed scaffold {key}")
+    return valid_entries
+
+
 def fallback_topic_analysis(topic_text: str) -> WritingTopicAnalysis:
     topic = _clean_text(topic_text, 24) or "这件事"
     return WritingTopicAnalysis(
@@ -188,7 +208,7 @@ def _legacy_fallback_material_questions() -> MaterialQuestionsResult:
 
 
 def fallback_material_questions(scaffold: dict[str, Any] | None = None) -> MaterialQuestionsResult:
-    slots = (scaffold or {}).get("material_slots") or []
+    slots = _valid_scaffold_entries(scaffold, "material_slots")
     if not slots:
         return _legacy_fallback_material_questions()
     return MaterialQuestionsResult(
@@ -243,7 +263,7 @@ def fallback_material_cards(
     answers: list[dict],
     scaffold: dict[str, Any] | None = None,
 ) -> MaterialCardsResult:
-    slots = (scaffold or {}).get("material_slots") or []
+    slots = _valid_scaffold_entries(scaffold, "material_slots")
     if not slots:
         return _legacy_fallback_material_cards(answers)
 
@@ -319,7 +339,7 @@ def fallback_outline(
     cards: list[dict],
     scaffold: dict[str, Any] | None = None,
 ) -> WritingOutlineResult:
-    sections = (scaffold or {}).get("outline_sections") or []
+    sections = _valid_scaffold_entries(scaffold, "outline_sections")
     if not sections:
         return _legacy_fallback_outline(cards)
 

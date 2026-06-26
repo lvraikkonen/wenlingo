@@ -22,7 +22,11 @@ from app.services.llm_contracts import (
     WritingOutlineResult,
 )
 from app.services.llm_provider import MockLLMProvider, response_contract_for_task
-from app.services.writing_castle_ai import fallback_material_cards, fallback_outline
+from app.services.writing_castle_ai import (
+    fallback_material_cards,
+    fallback_material_questions,
+    fallback_outline,
+)
 
 
 def test_essay_feedback_rejects_more_than_one_revision_task():
@@ -1064,6 +1068,61 @@ def test_writing_castle_fallbacks_preserve_exact_source_ids():
 
     assert cards.cards[0].source_answer_ids == [opaque_answer_id]
     assert outline.sections[0].source_card_ids == [opaque_card_id]
+
+
+def test_fallback_material_questions_uses_legacy_when_scaffold_slots_unusable():
+    result = fallback_material_questions({"material_slots": [None]})
+
+    assert result.questions[0].id == "q1"
+    assert result.questions[0].text == "这件事是怎么开始的？"
+
+
+def test_fallback_material_cards_uses_legacy_when_scaffold_slots_unusable():
+    result = fallback_material_cards(
+        [{"id": "answer-1", "text": "我学会了骑车。", "skipped": False}],
+        scaffold={"material_slots": [None]},
+    )
+
+    assert result.cards[0].category == "event"
+    assert result.cards[0].source_answer_ids == ["answer-1"]
+
+
+def test_fallback_outline_uses_legacy_when_scaffold_sections_unusable():
+    result = fallback_outline(
+        [
+            {
+                "id": "card-event",
+                "category": "event",
+                "text": "我学会了骑车。",
+                "deleted": False,
+                "placeholder": False,
+            }
+        ],
+        scaffold={"outline_sections": [None]},
+    )
+
+    assert result.sections[0].slot == "cause"
+    assert result.sections[0].source_card_ids == ["card-event"]
+
+
+@pytest.mark.asyncio
+async def test_material_card_generation_uses_deterministic_fallback_for_unusable_scaffold_slots():
+    from app.api.deps import AITaskRunner
+    from app.core.config import Settings
+    from app.services.ai_routing import TaskFinalStatus
+
+    runner = AITaskRunner(settings=Settings(llm_provider="mock"))
+
+    result = await material_card_generation(
+        runner,
+        answers=[
+            {"id": "answer-1", "question_id": "q1", "text": "我学会了骑车。", "skipped": False}
+        ],
+        scaffold={"material_slots": [None]},
+    )
+
+    assert result.status == TaskFinalStatus.DETERMINISTIC_FALLBACK_USED
+    assert result.output.cards[0].category == "event"
 
 
 @pytest.mark.asyncio
