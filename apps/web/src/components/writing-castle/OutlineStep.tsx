@@ -9,8 +9,12 @@ const sectionLabels: Record<LegacyOutlineSlot, string> = {
   reflection: "感受",
 };
 
-function sectionLabel(section: WritingOutlineSection): string {
+function sectionLabel(
+  section: WritingOutlineSection,
+  scaffoldSectionLabels: Record<string, string>,
+): string {
   return (
+    scaffoldSectionLabels[section.slot] ||
     sectionLabels[section.slot as LegacyOutlineSlot] ||
     section.heading ||
     section.slot
@@ -19,11 +23,13 @@ function sectionLabel(section: WritingOutlineSection): string {
 
 export function OutlineStep({
   sections,
+  sectionLabels,
   onSectionsChange,
   onContinue,
   onDirectWrite,
 }: {
   sections: WritingOutlineSection[];
+  sectionLabels: Record<string, string>;
   onSectionsChange: (sections: WritingOutlineSection[]) => void;
   onContinue: () => void;
   onDirectWrite: () => void;
@@ -46,7 +52,7 @@ export function OutlineStep({
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
         {sections.map((section) => (
           <label key={section.id} className="block font-semibold">
-            {sectionLabel(section)}
+            {sectionLabel(section, sectionLabels)}
             <textarea
               className="mt-2 w-full rounded-lg border border-[var(--wen-border)] px-3 py-2 font-normal"
               value={section.note}

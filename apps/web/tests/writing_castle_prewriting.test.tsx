@@ -474,6 +474,7 @@ test("material cards keep rendered order during repeated moves", async () => {
   const { rerender } = render(
     <MaterialCardsStep
       cards={cardState}
+      slotLabels={{}}
       onCardsChange={handleCardsChange}
       onContinue={() => undefined}
       onDirectWrite={() => undefined}
@@ -485,6 +486,7 @@ test("material cards keep rendered order during repeated moves", async () => {
   rerender(
     <MaterialCardsStep
       cards={afterFirstMove}
+      slotLabels={{}}
       onCardsChange={handleCardsChange}
       onContinue={() => undefined}
       onDirectWrite={() => undefined}
@@ -528,6 +530,7 @@ test("dynamic scaffold slot ids keep visible fallback labels", () => {
   const cardRender = render(
     <MaterialCardsStep
       cards={cards}
+      slotLabels={{}}
       onCardsChange={handleCardsChange}
       onContinue={() => undefined}
       onDirectWrite={() => undefined}
@@ -540,6 +543,7 @@ test("dynamic scaffold slot ids keep visible fallback labels", () => {
   const outlineRender = render(
     <OutlineStep
       sections={sections}
+      sectionLabels={{}}
       onSectionsChange={handleSectionsChange}
       onContinue={() => undefined}
       onDirectWrite={() => undefined}
@@ -561,6 +565,88 @@ test("dynamic scaffold slot ids keep visible fallback labels", () => {
 
   expect(screen.getByText("person_subject：")).toBeInTheDocument();
   expect(screen.getByText("开头印象：")).toBeInTheDocument();
+});
+
+test("material cards render scaffold slot labels over legacy category labels", () => {
+  const cards: MaterialCardSlot[] = [
+    {
+      id: "card-person",
+      category: "person_subject",
+      text: "我的同桌。",
+      source_answer_ids: [],
+      order: 1,
+      deleted: false,
+      child_edited: false,
+      placeholder: false,
+    },
+  ];
+
+  render(
+    <MaterialCardsStep
+      cards={cards}
+      slotLabels={{ person_subject: "写谁" }}
+      onCardsChange={() => undefined}
+      onContinue={() => undefined}
+      onDirectWrite={() => undefined}
+    />,
+  );
+
+  expect(screen.getByLabelText("写谁")).toBeInTheDocument();
+  expect(screen.queryByLabelText("事件")).not.toBeInTheDocument();
+});
+
+test("outline sections render scaffold section labels over legacy slot labels", () => {
+  const sections = [
+    {
+      id: "section-event",
+      slot: "typical_event",
+      heading: "写一件能看出特点的事",
+      note: "他主动留下来打扫教室。",
+      source_card_ids: [],
+      child_edited: false,
+      placeholder: false,
+    },
+  ];
+
+  render(
+    <OutlineStep
+      sections={sections}
+      sectionLabels={{ typical_event: "典型事例" }}
+      onSectionsChange={() => undefined}
+      onContinue={() => undefined}
+      onDirectWrite={() => undefined}
+    />,
+  );
+
+  expect(screen.getByLabelText("典型事例")).toBeInTheDocument();
+  expect(screen.queryByLabelText("经过")).not.toBeInTheDocument();
+});
+
+test("legacy outline slots keep canonical labels before custom headings", () => {
+  const sections = [
+    {
+      id: "section-process",
+      slot: "process",
+      heading: "自定义经过标题",
+      note: "练习的时候摔了一跤。",
+      source_card_ids: [],
+      child_edited: false,
+      placeholder: false,
+    },
+  ];
+
+  render(
+    <OutlineStep
+      sections={sections}
+      sectionLabels={{}}
+      onSectionsChange={() => undefined}
+      onContinue={() => undefined}
+      onDirectWrite={() => undefined}
+    />,
+  );
+
+  expect(screen.getByLabelText("经过")).toBeInTheDocument();
+  expect(screen.queryByLabelText("自定义经过标题")).not.toBeInTheDocument();
 });
 
 test("active v0.6b essay without scaffold resumes at scaffold selection", async () => {

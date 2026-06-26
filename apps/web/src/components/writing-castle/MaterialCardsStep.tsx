@@ -11,17 +11,22 @@ const cardLabels: Record<LegacyMaterialCardCategory, string> = {
   feeling_takeaway: "心情收获",
 };
 
-function cardLabel(category: MaterialCardSlot["category"]): string {
-  return cardLabels[category as LegacyMaterialCardCategory] ?? category;
+function cardLabel(
+  category: MaterialCardSlot["category"],
+  slotLabels: Record<string, string>,
+): string {
+  return slotLabels[category] ?? cardLabels[category as LegacyMaterialCardCategory] ?? category;
 }
 
 export function MaterialCardsStep({
   cards,
+  slotLabels,
   onCardsChange,
   onContinue,
   onDirectWrite,
 }: {
   cards: MaterialCardSlot[];
+  slotLabels: Record<string, string>;
   onCardsChange: (cards: MaterialCardSlot[]) => void;
   onContinue: () => void;
   onDirectWrite: () => void;
@@ -92,7 +97,7 @@ export function MaterialCardsStep({
             className="rounded-lg border border-[var(--wen-border)] p-4"
           >
             <label className="block font-semibold">
-              {cardLabel(card.category)}
+              {cardLabel(card.category, slotLabels)}
               <textarea
                 className="mt-2 w-full rounded-lg border border-[var(--wen-border)] px-3 py-2 font-normal"
                 value={card.text}

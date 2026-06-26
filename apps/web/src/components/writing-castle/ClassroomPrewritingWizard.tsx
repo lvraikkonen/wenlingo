@@ -399,6 +399,19 @@ export function ClassroomPrewritingWizard({
     return null;
   }
 
+  const slotLabels = Object.fromEntries(
+    essay.outline.scaffold?.material_slots.map((slot) => [
+      slot.id,
+      slot.label,
+    ]) ?? [],
+  );
+  const sectionLabels = Object.fromEntries(
+    essay.outline.scaffold?.outline_sections.map((section) => [
+      section.id,
+      section.label ?? section.heading,
+    ]) ?? [],
+  );
+
   return (
     <>
       {step === "scaffold_selection" ? (
@@ -445,6 +458,7 @@ export function ClassroomPrewritingWizard({
       {step === "cards" ? (
         <MaterialCardsStep
           cards={cards}
+          slotLabels={slotLabels}
           onCardsChange={setCards}
           onContinue={() => continueFromCards(false)}
           onDirectWrite={() => continueFromCards(true)}
@@ -453,6 +467,7 @@ export function ClassroomPrewritingWizard({
       {step === "outline" ? (
         <OutlineStep
           sections={sections}
+          sectionLabels={sectionLabels}
           onSectionsChange={setSections}
           onContinue={() => continueFromOutline(false)}
           onDirectWrite={() => continueFromOutline(true)}
