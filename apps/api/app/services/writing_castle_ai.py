@@ -53,7 +53,115 @@ def fallback_topic_analysis(topic_text: str) -> WritingTopicAnalysis:
     )
 
 
-def fallback_material_questions() -> MaterialQuestionsResult:
+def _usable_answers(answers: list[dict]) -> list[tuple[dict, str]]:
+    usable_answers = []
+    for answer in answers:
+        source_id = _source_id(answer.get("id"))
+        if (
+            answer.get("skipped")
+            or source_id is None
+            or not _clean_text(answer.get("text"), 120)
+        ):
+            continue
+        usable_answers.append((answer, source_id))
+    return usable_answers
+
+
+def _usable_cards(cards: list[dict]) -> list[tuple[dict, str]]:
+    usable_cards = []
+    for card in cards:
+        source_id = _source_id(card.get("id"))
+        if (
+            card.get("deleted")
+            or card.get("placeholder")
+            or source_id is None
+            or not _clean_text(card.get("text"), 80)
+        ):
+            continue
+        usable_cards.append((card, source_id))
+    return usable_cards
+
+
+def _source_refs_for_answer(answer: dict, scaffold: dict[str, Any], slot: dict[str, Any]) -> list[dict[str, Any]]:
+    existing_refs = answer.get("source_refs")
+    if isinstance(existing_refs, list):
+        return [ref for ref in existing_refs[:3] if isinstance(ref, dict)]
+
+    answer_id = _source_id(answer.get("id"))
+    if answer_id is None:
+        return []
+
+    cleaned_text = _clean_text(answer.get("text"), 120)
+    topic_type = scaffold.get("topic_type")
+    if topic_type == "imaginative_story":
+        return [{"source_type": "imagined_setting", "answer_id": answer_id}]
+    if topic_type == "expository_introduction":
+        return [
+            {
+                "source_type": "child_confirmed",
+                "confirmation_id": answer_id,
+                "confirmed_text": cleaned_text,
+            }
+        ]
+    if topic_type == "person_portrait":
+        return [{"source_type": "observation", "answer_id": answer_id}]
+    return [{"source_type": "real_experience", "answer_id": answer_id}]
+
+
+def _card_from_slot(
+    slot: dict[str, Any],
+    answer_source: tuple[dict, str] | None,
+    order: int,
+    scaffold: dict[str, Any],
+) -> dict:
+    slot_id = str(slot.get("id") or f"slot-{order}")
+    if answer_source is None:
+        return {
+            "id": f"card-{slot_id}",
+            "category": slot_id,
+            "text": "",
+            "source_answer_ids": [],
+            "source_refs": [],
+            "placeholder": True,
+        }
+    answer, source_id = answer_source
+    return {
+        "id": f"card-{slot_id}",
+        "category": slot_id,
+        "text": _clean_text(answer.get("text"), 120),
+        "source_answer_ids": [source_id],
+        "source_refs": _source_refs_for_answer(answer, scaffold, slot),
+        "placeholder": False,
+    }
+
+
+def _section_from_scaffold(
+    section: dict[str, Any],
+    card_source: tuple[dict, str] | None,
+) -> dict:
+    section_id = str(section.get("id") or "section")
+    heading = _clean_text(section.get("heading") or section.get("label") or "段落", 12)
+    if section.get("content_kind") == "structural" or card_source is None:
+        return {
+            "id": f"outline-{section_id}",
+            "slot": section_id,
+            "heading": heading,
+            "note": "",
+            "source_card_ids": [],
+            "placeholder": True,
+        }
+    card, source_id = card_source
+    return {
+        "id": f"outline-{section_id}",
+        "slot": section_id,
+        "heading": heading,
+        "note": _clean_text(card.get("text"), 80),
+        "source_card_ids": [source_id],
+        "placeholder": False,
+    }
+
+
+def _legacy_fallback_material_questions() -> MaterialQuestionsResult:
     return MaterialQuestionsResult(
         questions=[
             {
@@ -79,18 +187,27 @@ def fallback_material_questions() -> MaterialQuestionsResult:
     )
 
 
-def fallback_material_cards(answers: list[dict]) -> MaterialCardsResult:
-    usable_answers = []
-    for answer in answers:
-        source_id = _source_id(answer.get("id"))
-        if (
-            answer.get("skipped")
-            or source_id is None
-            or not _clean_text(answer.get("text"), 120)
-        ):
-            continue
-        usable_answers.append((answer, source_id))
+def fallback_material_questions(scaffold: dict[str, Any] | None = None) -> MaterialQuestionsResult:
+    slots = (scaffold or {}).get("material_slots") or []
+    if not slots:
+        return _legacy_fallback_material_questions()
+    return MaterialQuestionsResult(
+        questions=[
+            {
+                "id": f"q-{slot['id']}",
+                "text": f"{_clean_text(slot.get('label'), 48)}可以怎么写？",
+                "hint": "写孩子自己知道、观察到或确认的内容。",
+                "order": order,
+            }
+            for order, slot in enumerate(slots[:3], start=1)
+            if slot.get("id")
+        ],
+        encouragement="先把自己的素材说清楚。",
+    )
 
+
+def _legacy_fallback_material_cards(answers: list[dict]) -> MaterialCardsResult:
+    usable_answers = _usable_answers(answers)
     slots = [
         ("card-event", "event"),
         ("card-detail", "detail"),
@@ -122,7 +239,31 @@ def fallback_material_cards(answers: list[dict]) -> MaterialCardsResult:
     return MaterialCardsResult(cards=cards, encouragement="先把真实素材收好。")
 
 
-def fallback_outline(cards: list[dict]) -> WritingOutlineResult:
+def fallback_material_cards(
+    answers: list[dict],
+    scaffold: dict[str, Any] | None = None,
+) -> MaterialCardsResult:
+    slots = (scaffold or {}).get("material_slots") or []
+    if not slots:
+        return _legacy_fallback_material_cards(answers)
+
+    usable_answers = _usable_answers(answers)
+    return MaterialCardsResult(
+        cards=[
+            _card_from_slot(
+                slot,
+                usable_answers[index] if index < len(usable_answers) else None,
+                index + 1,
+                scaffold or {},
+            )
+            for index, slot in enumerate(slots[:8])
+            if slot.get("id")
+        ],
+        encouragement="先把自己的素材收好。",
+    )
+
+
+def _legacy_fallback_outline(cards: list[dict]) -> WritingOutlineResult:
     valid_cards_by_category = {}
     for card in cards:
         category = card.get("category")
@@ -170,5 +311,31 @@ def fallback_outline(cards: list[dict]) -> WritingOutlineResult:
             section("outline-result", "result", "结果", None),
             section("outline-reflection", "reflection", "感受", "feeling_takeaway"),
         ],
+        tip="每一段只抓一个真实重点。",
+    )
+
+
+def fallback_outline(
+    cards: list[dict],
+    scaffold: dict[str, Any] | None = None,
+) -> WritingOutlineResult:
+    sections = (scaffold or {}).get("outline_sections") or []
+    if not sections:
+        return _legacy_fallback_outline(cards)
+
+    usable_cards = _usable_cards(cards)
+    content_card_index = 0
+    outline_sections = []
+    for section in sections[:6]:
+        if not section.get("id"):
+            continue
+        card_source = None
+        if section.get("content_kind") != "structural" and content_card_index < len(usable_cards):
+            card_source = usable_cards[content_card_index]
+            content_card_index += 1
+        outline_sections.append(_section_from_scaffold(section, card_source))
+
+    return WritingOutlineResult(
+        sections=outline_sections,
         tip="每一段只抓一个真实重点。",
     )

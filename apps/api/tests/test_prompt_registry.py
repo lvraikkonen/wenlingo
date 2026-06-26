@@ -29,6 +29,14 @@ EXPECTED_PROMPT_VERSIONS = {
     "material_card_generation": "v0.6a-2026-06-20",
     "outline_generation": "v0.6a-2026-06-20",
 }
+EXPECTED_PROMPT_VERSIONS.update(
+    {
+        "writing_topic_analysis": "v0.6b-2026-06-25",
+        "material_questions": "v0.6b-2026-06-25",
+        "material_card_generation": "v0.6b-2026-06-25",
+        "outline_generation": "v0.6b-2026-06-25",
+    }
+)
 
 
 def test_registered_prompt_keys_load_successfully():
@@ -88,7 +96,7 @@ def test_writing_castle_prompts_are_registered_with_contracts():
     for prompt_key, contract_name in expected.items():
         prompt = get_prompt(prompt_key)
         assert prompt.prompt_key == prompt_key
-        assert prompt.version == "v0.6a-2026-06-20"
+        assert prompt.version == EXPECTED_PROMPT_VERSIONS[prompt_key]
         assert contract_name in prompt.response_contract
         assert "Do not write full essay paragraphs" in prompt.response_contract
 

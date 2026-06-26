@@ -1,4 +1,4 @@
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
@@ -9,8 +9,8 @@ ChallengeSkill = Literal["expand_sentence", "action_expression", "feeling"]
 ChallengeFocus = Literal["扩句", "动作描写", "心理感受"]
 ChallengeGrade = Literal["三年级", "四年级", "五年级", "六年级"]
 TopicCardKind = Literal["topic_question", "must_include", "shine_point"]
-MaterialCardCategory = Literal["event", "detail", "feeling_takeaway"]
-OutlineSlot = Literal["cause", "process", "result", "reflection"]
+MaterialCardCategory = NonBlankStr
+OutlineSlot = NonBlankStr
 DifficultyLabel = Literal[
     "三年级基础",
     "三年级进阶",
@@ -124,13 +124,14 @@ class MaterialCardSlot(BaseModel):
     category: MaterialCardCategory
     text: str = Field(default="", max_length=120)
     source_answer_ids: list[NonBlankStr] = Field(default_factory=list, max_length=3)
+    source_refs: list[dict[str, Any]] = Field(default_factory=list, max_length=3)
     placeholder: bool = False
 
     @model_validator(mode="after")
     def require_source_for_non_placeholder(self) -> "MaterialCardSlot":
-        if not self.placeholder and not self.source_answer_ids:
-            raise ValueError("non-placeholder material cards require source_answer_ids")
-        if self.placeholder and self.text and not self.source_answer_ids:
+        if not self.placeholder and not self.source_answer_ids and not self.source_refs:
+            raise ValueError("non-placeholder material cards require source refs")
+        if self.placeholder and self.text and not self.source_answer_ids and not self.source_refs:
             raise ValueError("placeholder material cards without sources cannot contain story content")
         return self
 
@@ -138,7 +139,7 @@ class MaterialCardSlot(BaseModel):
 class MaterialCardsResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    cards: list[MaterialCardSlot] = Field(min_length=3, max_length=3)
+    cards: list[MaterialCardSlot] = Field(min_length=1, max_length=8)
     encouragement: NonBlankStr = Field(max_length=40)
 
 
@@ -162,7 +163,7 @@ class WritingOutlineSection(BaseModel):
 class WritingOutlineResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    sections: list[WritingOutlineSection] = Field(min_length=4, max_length=4)
+    sections: list[WritingOutlineSection] = Field(min_length=1, max_length=6)
     tip: NonBlankStr = Field(max_length=60)
 
 

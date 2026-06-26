@@ -442,7 +442,7 @@ async def generate_topic_analysis(
 ):
     essay = require_essay_for_auth_mode(session, settings, context, essay_id)
     _prewriting_open(essay)
-    _resolved_scaffold_or_legacy(essay)
+    scaffold = _resolved_scaffold_or_legacy(essay)
     student, _ability = _student_and_ability(session, essay.student_id)
     outline = normalize_outline_state(essay.outline)
     topic_analysis = outline["topic_analysis"]
@@ -458,6 +458,7 @@ async def generate_topic_analysis(
         essay.title,
         session=session,
         student_id=essay.student_id,
+        scaffold=scaffold,
     )
     topic_analysis = result.output.model_dump()
     essay.outline = merge_topic_analysis(outline, topic_analysis["cards"])
@@ -517,7 +518,7 @@ async def generate_material_questions(
 ):
     essay = require_essay_for_auth_mode(session, settings, context, essay_id)
     _prewriting_open(essay)
-    _resolved_scaffold_or_legacy(essay)
+    scaffold = _resolved_scaffold_or_legacy(essay)
     student, _ability = _student_and_ability(session, essay.student_id)
     material = normalize_material_state(essay.material_card)
     questions_status = material["step_state"].get("questions_status")
@@ -536,6 +537,7 @@ async def generate_material_questions(
         outline["child_topic_focus"].get("text", ""),
         session=session,
         student_id=essay.student_id,
+        scaffold=scaffold,
     )
     essay.material_card = merge_material_questions(
         material,
@@ -598,7 +600,7 @@ async def generate_material_cards(
 ):
     essay = require_essay_for_auth_mode(session, settings, context, essay_id)
     _prewriting_open(essay)
-    _resolved_scaffold_or_legacy(essay)
+    scaffold = _resolved_scaffold_or_legacy(essay)
     student, _ability = _student_and_ability(session, essay.student_id)
     material = normalize_material_state(essay.material_card)
     cards_status = material["step_state"].get("cards_status")
@@ -613,6 +615,7 @@ async def generate_material_cards(
         material["answers"],
         session=session,
         student_id=essay.student_id,
+        scaffold=scaffold,
     )
     cards = []
     for order, card in enumerate(result.output.cards, start=1):
@@ -684,7 +687,7 @@ async def generate_outline(
 ):
     essay = require_essay_for_auth_mode(session, settings, context, essay_id)
     _prewriting_open(essay)
-    _resolved_scaffold_or_legacy(essay)
+    scaffold = _resolved_scaffold_or_legacy(essay)
     student, _ability = _student_and_ability(session, essay.student_id)
     outline = normalize_outline_state(essay.outline)
     outline_status = outline["step_state"].get("outline_status")
@@ -700,6 +703,7 @@ async def generate_outline(
         material["cards"],
         session=session,
         student_id=essay.student_id,
+        scaffold=scaffold,
     )
     sections = [
         {**section.model_dump(), "child_edited": False}

@@ -97,28 +97,29 @@ def test_writing_castle_prewriting_prompt_contracts_define_exact_json_shapes():
             '"id":"q2"',
             '"id":"q3"',
             '"encouragement"',
+            "payload.scaffold.material_slots",
             "Do not include any keys not shown",
         ],
         "material_card_generation": [
             "Return only this exact JSON object",
             '"cards"',
-            '"category":"event"',
-            '"category":"detail"',
-            '"category":"feeling_takeaway"',
+            '"category":"<material_slot_id>"',
             '"source_answer_ids"',
+            '"source_refs"',
             '"placeholder"',
+            "Use payload.scaffold.material_slots[*].id as material card category values",
+            "Do not create category or slot values that are absent from payload.scaffold",
             "Use source_answer_ids only from payload.answers[*].id",
             "Do not include any keys not shown",
         ],
         "outline_generation": [
             "Return only this exact JSON object",
             '"sections"',
-            '"slot":"cause"',
-            '"slot":"process"',
-            '"slot":"result"',
-            '"slot":"reflection"',
+            '"slot":"<outline_section_id>"',
             '"source_card_ids"',
             '"placeholder"',
+            "Use payload.scaffold.outline_sections[*].id as outline section slot values",
+            "Do not create category or slot values that are absent from payload.scaffold",
             "Use source_card_ids only from payload.cards[*].id",
             "Do not include any keys not shown",
         ],
@@ -130,11 +131,11 @@ def test_writing_castle_prewriting_prompt_contracts_define_exact_json_shapes():
             assert snippet in contract
 
 
-def test_material_cards_require_source_answer_ids_for_non_placeholder_cards():
+def test_material_cards_require_source_refs_for_non_placeholder_cards():
     from pydantic import ValidationError
     from app.services.llm_contracts import MaterialCardsResult
 
-    with pytest.raises(ValidationError, match="non-placeholder material cards require source_answer_ids"):
+    with pytest.raises(ValidationError, match="non-placeholder material cards require source refs"):
         MaterialCardsResult(
             cards=[
                 {
@@ -161,6 +162,83 @@ def test_material_cards_require_source_answer_ids_for_non_placeholder_cards():
             ],
             encouragement="先保留真实素材。",
         )
+
+
+def test_material_cards_accept_template_slot_ids():
+    from app.services.llm_contracts import MaterialCardsResult
+
+    result = MaterialCardsResult(
+        cards=[
+            {
+                "id": "card-person-subject",
+                "category": "person_subject",
+                "text": "我想写我的语文老师。",
+                "source_answer_ids": ["answer-1"],
+                "placeholder": False,
+            }
+        ],
+        encouragement="先把人物素材收好。",
+    )
+
+    assert result.cards[0].category == "person_subject"
+
+
+def test_material_cards_accept_v06b_source_refs():
+    from app.services.llm_contracts import MaterialCardsResult
+
+    result = MaterialCardsResult(
+        cards=[
+            {
+                "id": "card-setting",
+                "category": "magic_setting",
+                "text": "我变成了一朵云。",
+                "source_answer_ids": ["answer-1"],
+                "source_refs": [{"source_type": "imagined_setting", "answer_id": "answer-1"}],
+                "placeholder": False,
+            }
+        ],
+        encouragement="先确认想象设定。",
+    )
+
+    assert result.cards[0].source_refs[0]["source_type"] == "imagined_setting"
+
+
+def test_imaginative_story_fallback_cards_use_imagined_setting_source_ref():
+    from app.services.writing_castle_ai import fallback_material_cards
+    from app.services.writing_castle_scaffold import resolve_scaffold_snapshot
+
+    scaffold = resolve_scaffold_snapshot("imaginative_story", None, "manual")
+    result = fallback_material_cards(
+        [{"id": "answer-1", "text": "我变成了一朵云。", "skipped": False}],
+        scaffold=scaffold,
+    )
+
+    assert result.cards[0].source_refs == [
+        {"source_type": "imagined_setting", "answer_id": "answer-1"}
+    ]
+
+
+def test_expository_factual_fallback_cards_use_child_confirmed_source_ref():
+    from app.services.writing_castle_ai import fallback_material_cards
+    from app.services.writing_castle_scaffold import resolve_scaffold_snapshot
+
+    scaffold = resolve_scaffold_snapshot("expository_introduction", None, "manual")
+    result = fallback_material_cards(
+        [
+            {"id": "answer-1", "text": "我要介绍大熊猫。", "skipped": False},
+            {"id": "answer-2", "text": "大熊猫主要吃竹子。", "skipped": False},
+        ],
+        scaffold=scaffold,
+    )
+
+    factual_card = next(card for card in result.cards if card.category == "known_information")
+    assert factual_card.source_refs == [
+        {
+            "source_type": "child_confirmed",
+            "confirmation_id": "answer-2",
+            "confirmed_text": "大熊猫主要吃竹子。",
+        }
+    ]
 
 
 def test_writing_outline_requires_source_card_ids_for_story_specific_sections():
@@ -205,6 +283,34 @@ def test_writing_outline_requires_source_card_ids_for_story_specific_sections():
             ],
             tip="每段只抓一个重点。",
         )
+
+
+def test_outline_accepts_template_section_ids():
+    from app.services.llm_contracts import WritingOutlineResult
+
+    result = WritingOutlineResult(
+        sections=[
+            {
+                "id": "outline-opening-impression",
+                "slot": "opening_impression",
+                "heading": "开头",
+                "note": "",
+                "source_card_ids": [],
+                "placeholder": True,
+            },
+            {
+                "id": "outline-trait-detail",
+                "slot": "trait_detail",
+                "heading": "特点",
+                "note": "老师说话很幽默。",
+                "source_card_ids": ["card-trait"],
+                "placeholder": False,
+            },
+        ],
+        tip="用事例证明特点。",
+    )
+
+    assert result.sections[1].slot == "trait_detail"
 
 
 @pytest.mark.parametrize(

@@ -2,7 +2,7 @@ import html
 import re
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Callable, Generic, TypeVar
+from typing import Any, Callable, Generic, TypeVar
 
 from pydantic import BaseModel, ValidationError
 from sqlmodel import Session
@@ -286,6 +286,34 @@ def _validate_outline_source_ids(
         )
 
 
+def _validate_material_card_template_slots(
+    output: MaterialCardsResult,
+    scaffold: dict | None,
+) -> None:
+    if not scaffold:
+        return
+    allowed = {slot["id"] for slot in scaffold.get("material_slots", [])}
+    unknown = sorted({card.category for card in output.cards if card.category not in allowed})
+    if unknown:
+        raise LLMTaskValidationError(
+            "unknown scaffold material slot ids: " + ", ".join(unknown)
+        )
+
+
+def _validate_outline_template_slots(
+    output: WritingOutlineResult,
+    scaffold: dict | None,
+) -> None:
+    if not scaffold:
+        return
+    allowed = {section["id"] for section in scaffold.get("outline_sections", [])}
+    unknown = sorted({section.slot for section in output.sections if section.slot not in allowed})
+    if unknown:
+        raise LLMTaskValidationError(
+            "unknown scaffold outline section ids: " + ", ".join(unknown)
+        )
+
+
 def estimate_llm_cost(
     prompt_tokens: int,
     completion_tokens: int,
@@ -535,6 +563,7 @@ async def writing_topic_analysis(
     topic_text: str,
     session: Session | None = None,
     student_id: str | None = None,
+    scaffold: dict[str, Any] | None = None,
 ) -> LLMTaskResult[WritingTopicAnalysis]:
     prompt = get_prompt("writing_topic_analysis")
     return await runner.run(
@@ -543,7 +572,10 @@ async def writing_topic_analysis(
         task_type=TaskType.essay,
         task_name=prompt.prompt_key,
         prompt_key=prompt.prompt_key,
-        payload={"topic_text": _wrap_student_payload("teacher_topic", topic_text)},
+        payload={
+            "topic_text": _wrap_student_payload("teacher_topic", topic_text),
+            "scaffold": scaffold or {},
+        },
         output_schema=WritingTopicAnalysis,
         deterministic_fallback_factory=lambda _context: fallback_topic_analysis(topic_text),
         input_summary=f"写作城堡题目分析；题目长度：{len(topic_text)}",
@@ -557,6 +589,7 @@ async def material_questions(
     confirmed_focus: str,
     session: Session | None = None,
     student_id: str | None = None,
+    scaffold: dict[str, Any] | None = None,
 ) -> LLMTaskResult[MaterialQuestionsResult]:
     prompt = get_prompt("material_questions")
     return await runner.run(
@@ -568,9 +601,10 @@ async def material_questions(
         payload={
             "topic_text": _wrap_student_payload("teacher_topic", topic_text),
             "confirmed_focus": _wrap_student_payload("confirmed_focus", confirmed_focus),
+            "scaffold": scaffold or {},
         },
         output_schema=MaterialQuestionsResult,
-        deterministic_fallback_factory=lambda _context: fallback_material_questions(),
+        deterministic_fallback_factory=lambda _context: fallback_material_questions(scaffold),
         input_summary=(
             f"写作城堡素材问题；题目长度：{len(topic_text)}；"
             f"焦点长度：{len(confirmed_focus)}"
@@ -584,24 +618,30 @@ async def material_card_generation(
     answers: list[dict],
     session: Session | None = None,
     student_id: str | None = None,
+    scaffold: dict[str, Any] | None = None,
 ) -> LLMTaskResult[MaterialCardsResult]:
     prompt = get_prompt("material_card_generation")
     valid_source_ids = _valid_answer_source_ids(answers)
+
+    def validate_output(output: MaterialCardsResult) -> None:
+        _validate_material_card_source_ids(output, valid_source_ids)
+        _validate_material_card_template_slots(output, scaffold)
+
     return await runner.run(
         session=session,
         student_id=student_id,
         task_type=TaskType.essay,
         task_name=prompt.prompt_key,
         prompt_key=prompt.prompt_key,
-        payload={"answers": answers},
+        payload={"answers": answers, "scaffold": scaffold or {}},
         output_schema=MaterialCardsResult,
-        deterministic_fallback_factory=lambda _context: fallback_material_cards(answers),
+        deterministic_fallback_factory=lambda _context: fallback_material_cards(
+            answers,
+            scaffold=scaffold,
+        ),
         input_summary=f"写作城堡素材卡片；回答数：{len(answers)}",
         prompt_version=prompt.version,
-        validate_output=lambda output: _validate_material_card_source_ids(
-            output,
-            valid_source_ids,
-        ),
+        validate_output=validate_output,
     )
 
 
@@ -610,24 +650,30 @@ async def outline_generation(
     cards: list[dict],
     session: Session | None = None,
     student_id: str | None = None,
+    scaffold: dict[str, Any] | None = None,
 ) -> LLMTaskResult[WritingOutlineResult]:
     prompt = get_prompt("outline_generation")
     valid_source_ids = _valid_card_source_ids(cards)
+
+    def validate_output(output: WritingOutlineResult) -> None:
+        _validate_outline_source_ids(output, valid_source_ids)
+        _validate_outline_template_slots(output, scaffold)
+
     return await runner.run(
         session=session,
         student_id=student_id,
         task_type=TaskType.essay,
         task_name=prompt.prompt_key,
         prompt_key=prompt.prompt_key,
-        payload={"cards": cards},
+        payload={"cards": cards, "scaffold": scaffold or {}},
         output_schema=WritingOutlineResult,
-        deterministic_fallback_factory=lambda _context: fallback_outline(cards),
+        deterministic_fallback_factory=lambda _context: fallback_outline(
+            cards,
+            scaffold=scaffold,
+        ),
         input_summary=f"写作城堡提纲生成；素材卡数：{len(cards)}",
         prompt_version=prompt.version,
-        validate_output=lambda output: _validate_outline_source_ids(
-            output,
-            valid_source_ids,
-        ),
+        validate_output=validate_output,
     )
 
 

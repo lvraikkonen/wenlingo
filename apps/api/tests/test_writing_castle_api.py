@@ -717,11 +717,10 @@ def test_child_edited_placeholder_outline_section_can_be_confirmed(session, clie
     outline = client.post(f"/api/essays/{essay_id}/outline", json={})
     assert outline.status_code == 200
     sections = outline.json()["outline"]["sections"]
-    assert any(
-        section["slot"] == "result"
-        and section["placeholder"] is True
-        and section["source_card_ids"] == []
+    placeholder_slot = next(
+        section["slot"]
         for section in sections
+        if section["placeholder"] is True and section["source_card_ids"] == []
     )
 
     edited_sections = [
@@ -732,7 +731,7 @@ def test_child_edited_placeholder_outline_section_can_be_confirmed(session, clie
             "placeholder": False,
             "source_card_ids": [],
         }
-        if section["slot"] == "result"
+        if section["slot"] == placeholder_slot
         else section
         for section in sections
     ]
@@ -747,7 +746,7 @@ def test_child_edited_placeholder_outline_section_can_be_confirmed(session, clie
     assert payload["essay"]["status"] == OUTLINE_READY_STATUS
     assert payload["outline"]["step_state"]["outline_status"] == "confirmed"
     edited_result = next(
-        section for section in payload["outline"]["sections"] if section["slot"] == "result"
+        section for section in payload["outline"]["sections"] if section["slot"] == placeholder_slot
     )
     assert edited_result["note"] == "最后我能自己骑过小区空地。"
     assert edited_result["child_edited"] is True
@@ -755,7 +754,7 @@ def test_child_edited_placeholder_outline_section_can_be_confirmed(session, clie
 
     saved = session.get(Essay, essay_id)
     saved_result = next(
-        section for section in saved.outline["sections"] if section["slot"] == "result"
+        section for section in saved.outline["sections"] if section["slot"] == placeholder_slot
     )
     assert saved_result["note"] == "最后我能自己骑过小区空地。"
 
@@ -800,6 +799,11 @@ def test_child_edited_outline_with_malformed_source_card_ids_returns_400(session
     outline = client.post(f"/api/essays/{essay_id}/outline", json={})
     assert outline.status_code == 200
     sections = outline.json()["outline"]["sections"]
+    placeholder_slot = next(
+        section["slot"]
+        for section in sections
+        if section["placeholder"] is True and section["source_card_ids"] == []
+    )
 
     edited_sections = [
         {
@@ -809,7 +813,7 @@ def test_child_edited_outline_with_malformed_source_card_ids_returns_400(session
             "placeholder": False,
             "source_card_ids": None,
         }
-        if section["slot"] == "result"
+        if section["slot"] == placeholder_slot
         else section
         for section in sections
     ]
@@ -858,14 +862,15 @@ def test_untouched_outline_with_malformed_source_card_ids_returns_400(session, c
     outline = client.post(f"/api/essays/{essay_id}/outline", json={})
     assert outline.status_code == 200
     sections = outline.json()["outline"]["sections"]
-    assert any(
-        section["slot"] == "result" and section["placeholder"] is True
+    placeholder_slot = next(
+        section["slot"]
         for section in sections
+        if section["placeholder"] is True
     )
 
     edited_sections = [
         {**section, "source_card_ids": None}
-        if section["slot"] == "result"
+        if section["slot"] == placeholder_slot
         else section
         for section in sections
     ]
@@ -914,14 +919,15 @@ def test_outline_with_malformed_source_card_id_value_returns_400(session, client
     outline = client.post(f"/api/essays/{essay_id}/outline", json={})
     assert outline.status_code == 200
     sections = outline.json()["outline"]["sections"]
-    assert any(
-        section["slot"] == "result" and section["placeholder"] is True
+    placeholder_slot = next(
+        section["slot"]
         for section in sections
+        if section["placeholder"] is True
     )
 
     edited_sections = [
         {**section, "source_card_ids": [["nested"]]}
-        if section["slot"] == "result"
+        if section["slot"] == placeholder_slot
         else section
         for section in sections
     ]
@@ -970,10 +976,15 @@ def test_outline_with_malformed_note_returns_400(session, client):
     outline = client.post(f"/api/essays/{essay_id}/outline", json={})
     assert outline.status_code == 200
     sections = outline.json()["outline"]["sections"]
+    placeholder_slot = next(
+        section["slot"]
+        for section in sections
+        if section["placeholder"] is True
+    )
 
     edited_sections = [
         {**section, "note": ["bad"], "placeholder": False}
-        if section["slot"] == "result"
+        if section["slot"] == placeholder_slot
         else section
         for section in sections
     ]
