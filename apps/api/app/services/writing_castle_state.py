@@ -120,6 +120,25 @@ def _scaffold_ref(snapshot: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _validate_scaffold_slot_list(snapshot: dict[str, Any], key: str) -> None:
+    entries = snapshot.get(key)
+    if entries is None:
+        return
+    if not isinstance(entries, list):
+        raise ValueError(f"malformed scaffold {key}")
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError(f"malformed scaffold {key}")
+        slot_id = entry.get("id")
+        if slot_id is None or not str(slot_id).strip():
+            raise ValueError(f"malformed scaffold {key}")
+
+
+def _validate_scaffold_slot_shape(snapshot: dict[str, Any]) -> None:
+    _validate_scaffold_slot_list(snapshot, "material_slots")
+    _validate_scaffold_slot_list(snapshot, "outline_sections")
+
+
 def attach_scaffold_snapshot(
     material: dict[str, Any],
     outline: dict[str, Any],
@@ -159,6 +178,7 @@ def resolve_essay_scaffold(essay: Any) -> dict[str, Any] | None:
     expected = _scaffold_ref(snapshot)
     if ref != expected:
         raise ValueError("scaffold_ref mismatch")
+    _validate_scaffold_slot_shape(snapshot)
     return deepcopy(snapshot)
 
 

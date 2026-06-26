@@ -82,6 +82,34 @@ def test_manual_scaffold_selection_defaults_variant_and_allows_topic_analysis(se
     assert topic.status_code == 200
 
 
+def test_generation_rejects_malformed_persisted_scaffold_with_409(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+    _select_generic_scaffold(client, essay_id)
+
+    essay = session.get(Essay, essay_id)
+    outline = dict(essay.outline)
+    scaffold = dict(outline["scaffold"])
+    scaffold["material_slots"] = [
+        {"id": "skill_name", "label": "学会了什么"},
+        None,
+    ]
+    outline["scaffold"] = scaffold
+    essay.outline = outline
+    session.add(essay)
+    session.commit()
+
+    response = client.post(f"/api/essays/{essay_id}/topic-analysis", json={})
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "malformed scaffold material_slots"
+
+
 def test_creation_surfaces_deterministic_unsupported_future_type(session, client):
     family = create_authenticated_family(session)
     student = family["student"]

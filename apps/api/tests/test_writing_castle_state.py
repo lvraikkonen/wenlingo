@@ -81,6 +81,30 @@ def test_resolve_essay_scaffold_fails_closed_on_ref_mismatch():
         resolve_essay_scaffold(FakeEssay(material, outline))
 
 
+def test_resolve_essay_scaffold_rejects_malformed_material_slots():
+    snapshot = resolve_scaffold_snapshot("generic_narrative", "learned_skill", "manual")
+    material, outline = attach_scaffold_snapshot(init_material_card_state(), init_outline_state(), snapshot)
+    outline["scaffold"]["material_slots"] = [
+        {"id": "skill_name", "label": "学会了什么"},
+        None,
+    ]
+
+    with pytest.raises(ValueError, match="malformed scaffold material_slots"):
+        resolve_essay_scaffold(FakeEssay(material, outline))
+
+
+def test_resolve_essay_scaffold_rejects_malformed_outline_sections():
+    snapshot = resolve_scaffold_snapshot("generic_narrative", "learned_skill", "manual")
+    material, outline = attach_scaffold_snapshot(init_material_card_state(), init_outline_state(), snapshot)
+    outline["scaffold"]["outline_sections"] = [
+        {"id": "opening_context", "heading": "开头"},
+        None,
+    ]
+
+    with pytest.raises(ValueError, match="malformed scaffold outline_sections"):
+        resolve_essay_scaffold(FakeEssay(material, outline))
+
+
 def test_resolve_essay_scaffold_returns_saved_snapshot_not_registry_rebuild():
     snapshot = resolve_scaffold_snapshot("person_portrait", None, "manual")
     snapshot["display_name_child"] = "保存时的写人标签"
