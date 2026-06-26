@@ -17,6 +17,7 @@ import {
   saveMaterialCards,
   saveOutline,
   saveTopicFocus,
+  selectWritingCastleScaffold,
   submitPrewritingFirstDraft,
 } from "../src/lib/api";
 import type { DashboardResponse } from "../src/lib/types";
@@ -310,6 +311,29 @@ describe("api client", () => {
       "/api/admin/alpha/overview",
       expect.objectContaining({
         headers: { "X-Alpha-Admin-Token": "secret" },
+      }),
+    );
+  });
+
+  test("selectWritingCastleScaffold patches scaffold selection", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ essay: { id: "essay-1" }, scaffold: {} }),
+    );
+    const payload = {
+      topic_type: "person_portrait",
+      override_reason: "manual_choice",
+    } satisfies Parameters<typeof selectWritingCastleScaffold>[1];
+
+    await selectWritingCastleScaffold("essay-1", payload);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/essays/essay-1/scaffold-selection",
+      expect.objectContaining({
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        credentials: "include",
+        cache: "no-store",
       }),
     );
   });

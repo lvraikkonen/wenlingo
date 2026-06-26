@@ -4,15 +4,19 @@ import userEvent from "@testing-library/user-event";
 import { Suspense } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import EssayPage from "../src/app/children/[studentId]/essay/page";
+import { FirstDraftStep } from "../src/components/writing-castle/FirstDraftStep";
 import { MaterialCardsStep } from "../src/components/writing-castle/MaterialCardsStep";
+import { OutlineStep } from "../src/components/writing-castle/OutlineStep";
 import type {
   ActiveWritingCastleEssayResponse,
   MaterialCardSlot,
+  WritingCastleEssay,
 } from "../src/lib/types";
 
 const apiMocks = vi.hoisted(() => ({
   getActiveClassroomWritingCastleEssay: vi.fn(),
   createClassroomWritingCastleEssay: vi.fn(),
+  selectWritingCastleScaffold: vi.fn(),
   generateTopicAnalysis: vi.fn(),
   saveTopicFocus: vi.fn(),
   generateMaterialQuestions: vi.fn(),
@@ -26,8 +30,8 @@ const apiMocks = vi.hoisted(() => ({
   submitEssayRevision: vi.fn(),
 }));
 
-function essayState(overrides = {}) {
-  return {
+function essayState(overrides: Partial<WritingCastleEssay> = {}): WritingCastleEssay {
+  const base: WritingCastleEssay = {
     id: "essay-1",
     student_id: "student-1",
     title: "我学会了骑车",
@@ -54,9 +58,33 @@ function essayState(overrides = {}) {
       sections: [],
       step_state: { outline_status: "not_started" },
     },
-    ...overrides,
   };
+
+  return { ...base, ...overrides };
 }
+
+const supportedTopicTypes = [
+  {
+    topic_type: "generic_narrative",
+    display_name_child: "写一件事",
+    display_name_parent: "记叙一件事",
+  },
+  {
+    topic_type: "person_portrait",
+    display_name_child: "写一个人",
+    display_name_parent: "人物描写",
+  },
+  {
+    topic_type: "imaginative_story",
+    display_name_child: "编一个想象故事",
+    display_name_parent: "想象作文",
+  },
+  {
+    topic_type: "expository_introduction",
+    display_name_child: "介绍一种事物",
+    display_name_parent: "说明介绍",
+  },
+];
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -73,6 +101,7 @@ vi.mock("../src/lib/api", () => ({
   getActiveClassroomWritingCastleEssay:
     apiMocks.getActiveClassroomWritingCastleEssay,
   createClassroomWritingCastleEssay: apiMocks.createClassroomWritingCastleEssay,
+  selectWritingCastleScaffold: apiMocks.selectWritingCastleScaffold,
   generateTopicAnalysis: apiMocks.generateTopicAnalysis,
   saveTopicFocus: apiMocks.saveTopicFocus,
   generateMaterialQuestions: apiMocks.generateMaterialQuestions,
@@ -92,6 +121,23 @@ beforeEach(() => {
   });
   apiMocks.createClassroomWritingCastleEssay.mockResolvedValue({
     essay: essayState(),
+    supported_topic_types: supportedTopicTypes,
+  });
+  apiMocks.selectWritingCastleScaffold.mockResolvedValue({
+    essay: essayState(),
+    scaffold: {
+      schema_version: "v0.6b.1",
+      topic_type: "generic_narrative",
+      topic_variant: "default",
+      scaffold_template_version: "v0.6b.1",
+      resolved_at: "2026-06-25T00:00:00Z",
+      selection_source: "manual",
+      display_name_child: "写一件事",
+      display_name_parent: "记叙一件事",
+      material_slots: [],
+      outline_sections: [],
+      source_policy: {},
+    },
   });
   apiMocks.generateTopicAnalysis.mockResolvedValue({
     essay: essayState({
@@ -275,7 +321,7 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
-async function startClassroomWizard() {
+async function startClassroomWizard(topic = "我学会了骑车") {
   await act(async () => {
     render(
       <Suspense fallback={null}>
@@ -287,8 +333,13 @@ async function startClassroomWizard() {
   await userEvent.click(
     await screen.findByRole("button", { name: "课内同步作文" }),
   );
-  await userEvent.type(screen.getByLabelText("老师作文题目"), "我学会了骑车");
+  await userEvent.type(screen.getByLabelText("老师作文题目"), topic);
   await userEvent.click(screen.getByRole("button", { name: "开始审题" }));
+  expect(await screen.findByText("选择作文类型")).toBeInTheDocument();
+}
+
+async function selectNarrativeScaffold() {
+  await userEvent.click(screen.getByRole("button", { name: "写一件事" }));
   expect(await screen.findByText("第 1 步 / 共 4 步：看懂题目")).toBeInTheDocument();
 }
 
@@ -319,8 +370,31 @@ async function continueToOutline() {
   ).toBeInTheDocument();
 }
 
+test("classroom path requires manual scaffold selection before topic analysis", async () => {
+  await startClassroomWizard("我的自画像");
+
+  expect(screen.getByText("写一个人")).toBeInTheDocument();
+  expect(apiMocks.generateTopicAnalysis).not.toHaveBeenCalled();
+
+  await userEvent.click(screen.getByRole("button", { name: "写一个人" }));
+
+  await waitFor(() => {
+    expect(apiMocks.selectWritingCastleScaffold).toHaveBeenCalledWith(
+      "essay-1",
+      {
+        topic_type: "person_portrait",
+        override_reason: "manual_choice",
+      },
+    );
+  });
+  await waitFor(() => {
+    expect(apiMocks.generateTopicAnalysis).toHaveBeenCalledWith("essay-1");
+  });
+});
+
 test("classroom writing castle path reaches first draft feedback", async () => {
   await startClassroomWizard();
+  await selectNarrativeScaffold();
   expect(await screen.findByText("题目在问什么")).toBeInTheDocument();
 
   await userEvent.type(
@@ -425,8 +499,112 @@ test("material cards keep rendered order during repeated moves", async () => {
   expect(afterSecondMove.find((card) => card.id === "card-detail")?.order).toBe(3);
 });
 
+test("dynamic scaffold slot ids keep visible fallback labels", () => {
+  const cards: MaterialCardSlot[] = [
+    {
+      id: "card-person",
+      category: "person_subject",
+      text: "我的同桌。",
+      source_answer_ids: [],
+      order: 1,
+      deleted: false,
+      child_edited: false,
+      placeholder: false,
+    },
+  ];
+  const sections = [
+    {
+      id: "section-opening",
+      slot: "opening_context",
+      heading: "开头印象",
+      note: "先写他给我的第一印象。",
+      source_card_ids: ["card-person"],
+      child_edited: false,
+      placeholder: false,
+    },
+  ];
+  const handleCardsChange = vi.fn();
+  const handleSectionsChange = vi.fn();
+  const cardRender = render(
+    <MaterialCardsStep
+      cards={cards}
+      onCardsChange={handleCardsChange}
+      onContinue={() => undefined}
+      onDirectWrite={() => undefined}
+    />,
+  );
+
+  expect(screen.getByLabelText("person_subject")).toBeInTheDocument();
+  cardRender.unmount();
+
+  const outlineRender = render(
+    <OutlineStep
+      sections={sections}
+      onSectionsChange={handleSectionsChange}
+      onContinue={() => undefined}
+      onDirectWrite={() => undefined}
+    />,
+  );
+
+  expect(screen.getByLabelText("开头印象")).toBeInTheDocument();
+  outlineRender.unmount();
+
+  render(
+    <FirstDraftStep
+      cards={cards}
+      sections={sections}
+      draft=""
+      onDraftChange={() => undefined}
+      onSubmit={() => undefined}
+    />,
+  );
+
+  expect(screen.getByText("person_subject：")).toBeInTheDocument();
+  expect(screen.getByText("开头印象：")).toBeInTheDocument();
+});
+
+test("active v0.6b essay without scaffold resumes at scaffold selection", async () => {
+  apiMocks.getActiveClassroomWritingCastleEssay.mockResolvedValue({
+    essay: essayState({
+      material_card: {
+        ...essayState().material_card,
+        schema_version: "v0.6b.1",
+        scaffold_ref: null,
+      },
+      outline: {
+        ...essayState().outline,
+        schema_version: "v0.6b.1",
+        scaffold: null,
+      },
+    }),
+  });
+
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "student-1" })} />
+      </Suspense>,
+    );
+  });
+
+  expect(await screen.findByText("选择作文类型")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "写一个人" }));
+
+  await waitFor(() => {
+    expect(apiMocks.selectWritingCastleScaffold).toHaveBeenCalledWith(
+      "essay-1",
+      {
+        topic_type: "person_portrait",
+        override_reason: "manual_choice",
+      },
+    );
+  });
+  expect(apiMocks.generateTopicAnalysis).toHaveBeenCalledWith("essay-1");
+});
+
 test("unchanged suggested focus is saved as adopted from AI", async () => {
   await startClassroomWizard();
+  await selectNarrativeScaffold();
 
   await userEvent.click(screen.getByRole("button", { name: "继续想素材" }));
 
@@ -441,6 +619,7 @@ test("unchanged suggested focus is saved as adopted from AI", async () => {
 
 test("direct writing from questions saves current answers before draft", async () => {
   await startClassroomWizard();
+  await selectNarrativeScaffold();
   await continueToQuestions();
   await userEvent.type(
     screen.getByLabelText("你想写哪件真实发生的事？"),
@@ -467,6 +646,7 @@ test("direct writing from questions saves current answers before draft", async (
 test("direct writing from questions stays put when save fails", async () => {
   apiMocks.saveMaterialAnswers.mockRejectedValueOnce(new Error("save failed"));
   await startClassroomWizard();
+  await selectNarrativeScaffold();
   await continueToQuestions();
 
   await userEvent.click(screen.getByRole("button", { name: "我想直接开始写" }));
@@ -480,6 +660,7 @@ test("direct writing from questions stays put when save fails", async () => {
 
 test("direct writing from cards saves current cards before draft", async () => {
   await startClassroomWizard();
+  await selectNarrativeScaffold();
   await continueToCards();
   await userEvent.clear(screen.getByLabelText("事件"));
   await userEvent.type(screen.getByLabelText("事件"), "我学会了骑车，还摔了一跤。");
@@ -502,6 +683,7 @@ test("direct writing from cards saves current cards before draft", async () => {
 
 test("direct writing from outline saves skipped outline before draft", async () => {
   await startClassroomWizard();
+  await selectNarrativeScaffold();
   await continueToOutline();
   await userEvent.type(screen.getByLabelText("起因"), "爸爸扶着后座。");
 
@@ -532,6 +714,7 @@ test("first draft submit is disabled while feedback request is pending", async (
   );
   apiMocks.submitPrewritingFirstDraft.mockReturnValueOnce(pendingDraft);
   await startClassroomWizard();
+  await selectNarrativeScaffold();
   await continueToOutline();
   await userEvent.click(screen.getByRole("button", { name: "确认提纲，开始写" }));
   await userEvent.type(
@@ -593,6 +776,7 @@ test("edited outline confirmation enters draft with persisted outline reference"
   }));
 
   await startClassroomWizard();
+  await selectNarrativeScaffold();
   await continueToOutline();
   await userEvent.type(screen.getByLabelText("结果"), localResultNote);
   await userEvent.click(screen.getByRole("button", { name: "确认提纲，开始写" }));

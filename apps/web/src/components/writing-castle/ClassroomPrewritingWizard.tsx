@@ -12,12 +12,16 @@ import {
   saveMaterialCards,
   saveOutline,
   saveTopicFocus,
+  selectWritingCastleScaffold,
   submitPrewritingFirstDraft,
   type EssayResponse,
 } from "../../lib/api";
 import type {
+  FutureTopicType,
   MaterialAnswer,
   MaterialCardSlot,
+  TopicType,
+  TopicTypeChoice,
   WritingCastleEssay,
   WritingOutlineSection,
 } from "../../lib/types";
@@ -29,12 +33,36 @@ import { TopicAnalysisStep } from "./TopicAnalysisStep";
 
 type Step =
   | "topic_entry"
+  | "scaffold_selection"
   | "topic_analysis"
   | "questions"
   | "cards"
   | "outline"
   | "draft"
   | "feedback";
+
+const DEFAULT_SUPPORTED_TOPIC_TYPES: TopicTypeChoice[] = [
+  {
+    topic_type: "generic_narrative",
+    display_name_child: "写一件事",
+    display_name_parent: "记叙一件事",
+  },
+  {
+    topic_type: "person_portrait",
+    display_name_child: "写一个人",
+    display_name_parent: "人物描写",
+  },
+  {
+    topic_type: "imaginative_story",
+    display_name_child: "编一个想象故事",
+    display_name_parent: "想象作文",
+  },
+  {
+    topic_type: "expository_introduction",
+    display_name_child: "介绍一种事物",
+    display_name_parent: "说明介绍",
+  },
+];
 
 function answersFromEssay(essay: WritingCastleEssay): MaterialAnswer[] {
   if (essay.material_card.answers.length > 0) {
@@ -65,6 +93,12 @@ function stepFromEssay(essay: WritingCastleEssay): Step {
   if (essay.material_card.questions.length > 0) {
     return "questions";
   }
+  if (
+    essay.outline.schema_version === "v0.6b.1" &&
+    !essay.outline.scaffold
+  ) {
+    return "scaffold_selection";
+  }
   if (essay.outline.topic_analysis.status === "generated") {
     return "topic_analysis";
   }
@@ -86,6 +120,11 @@ export function ClassroomPrewritingWizard({
   const [answers, setAnswers] = useState<MaterialAnswer[]>([]);
   const [cards, setCards] = useState<MaterialCardSlot[]>([]);
   const [sections, setSections] = useState<WritingOutlineSection[]>([]);
+  const [supportedTopicTypes, setSupportedTopicTypes] = useState<TopicTypeChoice[]>(
+    [],
+  );
+  const [unsupportedFutureType, setUnsupportedFutureType] =
+    useState<FutureTopicType | null>(null);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const [pendingLabel, setPendingLabel] = useState("");
@@ -112,7 +151,20 @@ export function ClassroomPrewritingWizard({
         setAnswers(answersFromEssay(activeEssay));
         setCards(activeEssay.material_card.cards);
         setSections(activeEssay.outline.sections);
-        setStep(stepFromEssay(activeEssay));
+        const nextStep = stepFromEssay(activeEssay);
+        if (nextStep === "scaffold_selection") {
+          setSupportedTopicTypes(
+            response.supported_topic_types?.length
+              ? response.supported_topic_types
+              : DEFAULT_SUPPORTED_TOPIC_TYPES,
+          );
+        }
+        setUnsupportedFutureType(
+          response.unsupported_future_type ??
+            activeEssay.outline.scaffold?.unsupported_future_type ??
+            null,
+        );
+        setStep(nextStep);
       } catch {
         if (isMounted && !ignoreActiveResumeRef.current) {
           setError("");
@@ -145,11 +197,43 @@ export function ClassroomPrewritingWizard({
 
   async function start() {
     ignoreActiveResumeRef.current = true;
-    const started = await run("正在看题目...", async () => {
-      const created = await createClassroomWritingCastleEssay(studentId, {
+    const started = await run("正在准备作文类型...", async () =>
+      createClassroomWritingCastleEssay(studentId, {
         topic_text: topicText,
+      }),
+    );
+
+    if (started) {
+      setEssay(started.essay);
+      setSupportedTopicTypes(
+        started.supported_topic_types.length > 0
+          ? started.supported_topic_types
+          : DEFAULT_SUPPORTED_TOPIC_TYPES,
+      );
+      setUnsupportedFutureType(started.unsupported_future_type ?? null);
+      setSuggestedFocus("");
+      setFocus("");
+      setAnswers(answersFromEssay(started.essay));
+      setCards(started.essay.material_card.cards);
+      setSections(started.essay.outline.sections);
+      setStep("scaffold_selection");
+    }
+  }
+
+  async function selectScaffold(topicType: TopicType) {
+    if (!essay) {
+      return;
+    }
+
+    const started = await run("正在看题目...", async () => {
+      const saved = await selectWritingCastleScaffold(essay.id, {
+        topic_type: topicType,
+        override_reason: "manual_choice",
+        ...(unsupportedFutureType
+          ? { unsupported_future_type: unsupportedFutureType }
+          : {}),
       });
-      const analyzed = await generateTopicAnalysis(created.essay.id);
+      const analyzed = await generateTopicAnalysis(saved.essay.id);
       return analyzed.essay;
     });
 
@@ -317,6 +401,29 @@ export function ClassroomPrewritingWizard({
 
   return (
     <>
+      {step === "scaffold_selection" ? (
+        <section className="rounded-lg border border-[var(--wen-border)] bg-white p-6 shadow-sm">
+          <h2 className="text-xl font-bold">选择作文类型</h2>
+          {unsupportedFutureType ? (
+            <p className="mt-3 text-sm font-semibold text-[var(--wen-muted)]">
+              这类题目我们还在学习中，可以先选最接近的一种写法，AI 教练会陪你一步一步写。
+            </p>
+          ) : null}
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {supportedTopicTypes.map((choice) => (
+              <button
+                key={choice.topic_type}
+                className="rounded-lg border border-[var(--wen-border)] bg-[var(--wen-bg)] p-4 text-left font-semibold disabled:opacity-60"
+                type="button"
+                disabled={Boolean(pendingLabel)}
+                onClick={() => selectScaffold(choice.topic_type)}
+              >
+                {choice.display_name_child}
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
       {step === "topic_analysis" ? (
         <TopicAnalysisStep
           cards={essay.outline.topic_analysis.cards}

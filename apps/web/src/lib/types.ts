@@ -171,6 +171,75 @@ export type TopicAnalysisCard = {
   required_points: string[];
 };
 
+export type TopicType =
+  | "generic_narrative"
+  | "person_portrait"
+  | "imaginative_story"
+  | "expository_introduction";
+
+export type FutureTopicType =
+  | "place_scenery"
+  | "animal_object_observation"
+  | "practical_writing"
+  | "story_adaptation"
+  | "story_summary"
+  | "reading_response_recommendation"
+  | "central_idea_reflection"
+  | "picture_prompt_story";
+
+export type TopicVariant = string;
+
+export type ScaffoldSelectionSource = "ai_suggested" | "manual" | "fallback";
+
+export type MaterialSlotSpec = {
+  id: string;
+  label: string;
+  content_kind: string;
+};
+
+export type OutlineSectionSpec = {
+  id: string;
+  heading: string;
+  label: string;
+  content_kind: string;
+};
+
+export type WritingCastleScaffoldState = {
+  schema_version: "v0.6b.1";
+  topic_type: TopicType;
+  topic_variant: TopicVariant;
+  scaffold_template_version: string;
+  resolved_at: string;
+  selection_source: ScaffoldSelectionSource;
+  display_name_child: string;
+  display_name_parent: string;
+  material_slots: MaterialSlotSpec[];
+  outline_sections: OutlineSectionSpec[];
+  source_policy: Record<string, unknown>;
+  unsupported_future_type?: FutureTopicType | null;
+  unsupported_override?: boolean;
+};
+
+export type TopicTypeChoice = {
+  topic_type: TopicType;
+  display_name_child: string;
+  display_name_parent: string;
+};
+
+export type ScaffoldSelectionRequest = {
+  topic_type: TopicType;
+  topic_variant?: TopicVariant;
+  accepted_suggestion_id?: string;
+  override_reason?: "manual_choice" | "suggestion_accepted" | "fallback_selected";
+  unsupported_future_type?: FutureTopicType;
+};
+
+export type ScaffoldRef = {
+  topic_type: TopicType;
+  topic_variant: TopicVariant;
+  scaffold_template_version: string;
+};
+
 export type MaterialAnswer = {
   id: string;
   question_id: string;
@@ -178,9 +247,11 @@ export type MaterialAnswer = {
   skipped: boolean;
 };
 
+export type LegacyMaterialCardCategory = "event" | "detail" | "feeling_takeaway";
+
 export type MaterialCardSlot = {
   id: string;
-  category: "event" | "detail" | "feeling_takeaway";
+  category: LegacyMaterialCardCategory | (string & {});
   text: string;
   source_answer_ids: string[];
   order: number;
@@ -189,9 +260,11 @@ export type MaterialCardSlot = {
   placeholder: boolean;
 };
 
+export type LegacyOutlineSlot = "cause" | "process" | "result" | "reflection";
+
 export type WritingOutlineSection = {
   id: string;
-  slot: "cause" | "process" | "result" | "reflection";
+  slot: LegacyOutlineSlot | (string & {});
   heading: string;
   note: string;
   source_card_ids: string[];
@@ -217,7 +290,8 @@ export type WritingCastleEssay = {
     | "revision_requested"
     | "settled";
   material_card: {
-    schema_version: "v0.6a.1";
+    schema_version: "v0.6a.1" | "v0.6b.1";
+    scaffold_ref?: ScaffoldRef | null;
     questions: Array<{ id: string; text: string; hint: string; order: number }>;
     answers: MaterialAnswer[];
     cards: MaterialCardSlot[];
@@ -227,7 +301,8 @@ export type WritingCastleEssay = {
     };
   };
   outline: {
-    schema_version: "v0.6a.1";
+    schema_version: "v0.6a.1" | "v0.6b.1";
+    scaffold?: WritingCastleScaffoldState | null;
     topic_analysis: WritingCastleTopicAnalysis;
     child_topic_focus: {
       text: string;
@@ -244,8 +319,15 @@ export type WritingCastleEssayResponse = {
   essay: WritingCastleEssay;
 };
 
+export type CreateClassroomEssayResponse = WritingCastleEssayResponse & {
+  supported_topic_types: TopicTypeChoice[];
+  unsupported_future_type?: FutureTopicType | null;
+};
+
 export type ActiveWritingCastleEssayResponse = {
   essay: WritingCastleEssay | null;
+  supported_topic_types?: TopicTypeChoice[];
+  unsupported_future_type?: FutureTopicType | null;
 };
 
 export type WritingCastleTopicAnalysisResponse = WritingCastleEssayResponse & {

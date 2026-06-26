@@ -1,12 +1,20 @@
 "use client";
 
-import type { MaterialCardSlot, WritingOutlineSection } from "../../lib/types";
+import type {
+  LegacyMaterialCardCategory,
+  MaterialCardSlot,
+  WritingOutlineSection,
+} from "../../lib/types";
 
-const cardLabels: Record<MaterialCardSlot["category"], string> = {
+const cardLabels: Record<LegacyMaterialCardCategory, string> = {
   event: "事件",
   detail: "细节",
   feeling_takeaway: "心情收获",
 };
+
+function cardLabel(category: MaterialCardSlot["category"]): string {
+  return cardLabels[category as LegacyMaterialCardCategory] ?? category;
+}
 
 export function FirstDraftStep({
   cards,
@@ -40,7 +48,7 @@ export function FirstDraftStep({
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
                 {visibleCards.map((card) => (
                   <li key={card.id}>
-                    <span className="font-semibold">{cardLabels[card.category]}：</span>
+                    <span className="font-semibold">{cardLabel(card.category)}：</span>
                     {card.text}
                   </li>
                 ))}

@@ -1,13 +1,21 @@
 "use client";
 
-import type { WritingOutlineSection } from "../../lib/types";
+import type { LegacyOutlineSlot, WritingOutlineSection } from "../../lib/types";
 
-const sectionLabels: Record<WritingOutlineSection["slot"], string> = {
+const sectionLabels: Record<LegacyOutlineSlot, string> = {
   cause: "起因",
   process: "经过",
   result: "结果",
   reflection: "感受",
 };
+
+function sectionLabel(section: WritingOutlineSection): string {
+  return (
+    sectionLabels[section.slot as LegacyOutlineSlot] ||
+    section.heading ||
+    section.slot
+  );
+}
 
 export function OutlineStep({
   sections,
@@ -38,7 +46,7 @@ export function OutlineStep({
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
         {sections.map((section) => (
           <label key={section.id} className="block font-semibold">
-            {sectionLabels[section.slot]}
+            {sectionLabel(section)}
             <textarea
               className="mt-2 w-full rounded-lg border border-[var(--wen-border)] px-3 py-2 font-normal"
               value={section.note}

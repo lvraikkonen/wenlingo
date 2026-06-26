@@ -1,12 +1,19 @@
 "use client";
 
-import type { MaterialCardSlot } from "../../lib/types";
+import type {
+  LegacyMaterialCardCategory,
+  MaterialCardSlot,
+} from "../../lib/types";
 
-const cardLabels: Record<MaterialCardSlot["category"], string> = {
+const cardLabels: Record<LegacyMaterialCardCategory, string> = {
   event: "事件",
   detail: "细节",
   feeling_takeaway: "心情收获",
 };
+
+function cardLabel(category: MaterialCardSlot["category"]): string {
+  return cardLabels[category as LegacyMaterialCardCategory] ?? category;
+}
 
 export function MaterialCardsStep({
   cards,
@@ -85,7 +92,7 @@ export function MaterialCardsStep({
             className="rounded-lg border border-[var(--wen-border)] p-4"
           >
             <label className="block font-semibold">
-              {cardLabels[card.category]}
+              {cardLabel(card.category)}
               <textarea
                 className="mt-2 w-full rounded-lg border border-[var(--wen-border)] px-3 py-2 font-normal"
                 value={card.text}

@@ -17,6 +17,7 @@ import type {
   AdminAlphaSessionRevokeResponse,
   AdminAlphaSessionsRevokeAllResponse,
   AdminAlphaTestAccountDeleteResponse,
+  CreateClassroomEssayResponse,
   DashboardResponse,
   FeedbackReactionTargetType,
   FeedbackReactionValue,
@@ -24,9 +25,11 @@ import type {
   MaterialCardSlot,
   ParentSummaryUsefulness,
   SavedFeedbackReaction,
+  ScaffoldSelectionRequest,
   SentenceChallengeCompletionResponse,
   SentenceChallengeResponse,
   WritingCastleEssayResponse,
+  WritingCastleScaffoldState,
   WritingCastleTopicAnalysisResponse,
   WritingOutlineSection,
 } from "./types";
@@ -258,11 +261,25 @@ export function createEssay(
 export function createClassroomWritingCastleEssay(
   studentId: string,
   payload: { topic_text: string },
-): Promise<WritingCastleEssayResponse> {
-  return requestJson<WritingCastleEssayResponse>(
+): Promise<CreateClassroomEssayResponse> {
+  return requestJson<CreateClassroomEssayResponse>(
     `/api/students/${studentId}/writing-castle/classroom`,
     {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function selectWritingCastleScaffold(
+  essayId: string,
+  payload: ScaffoldSelectionRequest,
+): Promise<WritingCastleEssayResponse & { scaffold: WritingCastleScaffoldState }> {
+  return requestJson<WritingCastleEssayResponse & { scaffold: WritingCastleScaffoldState }>(
+    `/api/essays/${essayId}/scaffold-selection`,
+    {
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     },
