@@ -95,44 +95,47 @@ test("classroom writing castle reaches first draft feedback", async ({
 
   await enterWritingCastle(page);
   await page.getByRole("button", { name: "课内同步作文" }).click();
-  await page.getByLabel("老师作文题目").fill("我学会了骑车");
+  await page.getByLabel("老师作文题目").fill("我的“自画像”");
   await page.getByRole("button", { name: "开始审题" }).click();
 
+  await expect(page.getByText("选择作文类型")).toBeVisible();
+  await page.getByRole("button", { name: "写一个人" }).click();
   await expect(page.getByText("第 1 步 / 共 4 步：看懂题目")).toBeVisible({
     timeout: 15_000,
   });
-  await page.getByLabel("我觉得这题最重要的是").fill("写清楚学会骑车的过程");
+  await page.getByLabel("我觉得这题最重要的是").fill("写清楚自己的样子和特点");
   await page.getByRole("button", { name: "继续想素材" }).click();
 
   await expect(page.getByText("第 2 步 / 共 4 步：想一想素材")).toBeVisible({
     timeout: 15_000,
   });
   await page
-    .getByLabel("这件事是怎么开始的？")
-    .fill("爸爸在小区空地扶着我练骑车。");
+    .getByLabel("写谁可以怎么写？")
+    .fill("我要写我自己，四年级，喜欢画画。");
   await page.getByRole("button", { name: "整理素材卡" }).click();
 
   await expect(page.getByText("第 3 步 / 共 4 步：整理素材卡")).toBeVisible({
     timeout: 15_000,
   });
+  await page.getByLabel("写谁").fill("我自己，短头发，喜欢观察别人。");
   await page.getByRole("button", { name: "生成提纲" }).click();
 
   await expect(page.getByText("第 4 步 / 共 4 步：搭一个提纲")).toBeVisible({
     timeout: 15_000,
   });
-  await page.getByLabel("结果").fill("最后我能自己骑过小区空地。");
+  await page.getByLabel("写感受或评价").fill("我觉得这样的自己很认真，也想更勇敢。");
   await page.getByRole("button", { name: "确认提纲，开始写" }).click();
   await expect(page.getByText("提纲提醒")).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText(/最后我能自己骑过小区空地/)).toBeVisible();
+  await expect(page.getByText(/我觉得这样的自己很认真/)).toBeVisible();
 
   await page.reload();
   await expect(page.getByText("提纲提醒")).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText(/最后我能自己骑过小区空地/)).toBeVisible();
+  await expect(page.getByText(/我觉得这样的自己很认真/)).toBeVisible();
 
   await page
     .getByLabel("初稿")
     .fill(
-      "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。爸爸扶着后座陪我练，我摔倒后又站起来。后来我能自己骑一小段，心里特别开心。",
+      "我的自画像里有一个爱观察的我。我留着短头发，平时喜欢画画，也喜欢把看到的小细节记下来。遇到困难时我会先想一想，再认真完成。我希望自己以后更勇敢。",
     );
   await page.getByRole("button", { name: "提交初稿给 AI 教练" }).click();
 
