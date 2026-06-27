@@ -2,7 +2,9 @@ from app.prompts.registry import PromptSpec, register_prompt
 from app.prompts.system import PRIMARY_COACH_SYSTEM_PROMPT
 
 
-VERSION = "v0.6b-2026-06-25"
+WRITING_CASTLE_VERSION = "v0.6b-2026-06-25"
+WRITING_TOPIC_ANALYSIS_VERSION = "v0.6b.1-2026-06-27"
+MATERIAL_QUESTIONS_VERSION = "v0.6b.1-2026-06-27"
 MATERIAL_CARD_VERSION = "v0.6b.1-2026-06-27"
 NO_GHOSTWRITE = (
     "Do not write full essay paragraphs. Do not invent people, events, dialogue, "
@@ -12,7 +14,7 @@ NO_GHOSTWRITE = (
 WRITING_TOPIC_ANALYSIS_PROMPT = register_prompt(
     PromptSpec(
         prompt_key="writing_topic_analysis",
-        version=VERSION,
+        version=WRITING_TOPIC_ANALYSIS_VERSION,
         system_prompt_key="wenlingo_primary_coach",
         system_prompt=PRIMARY_COACH_SYSTEM_PROMPT,
         response_contract=(
@@ -26,6 +28,12 @@ WRITING_TOPIC_ANALYSIS_PROMPT = register_prompt(
             "be exactly topic_question, must_include, shine_point. title <= 16 "
             "chars, body <= 80 chars, suggested_focus <= 80 chars. "
             "required_points is an array of 0-3 short strings. "
+            "If payload.scaffold.topic_type is expository_introduction, do not add external facts, "
+            "numbers, habits, labels, or background claims that are absent from payload.topic_text "
+            "or child/source input. You may restate factual phrases already present in payload.topic_text "
+            "as assignment requirements, but do not expand them into new facts. For 国宝大熊猫, "
+            "do not add facts such as 吃竹子, 活化石, 800万年, or 保护动物 unless those words "
+            "are already present in the topic or child/source material. "
             "Response model: WritingTopicAnalysis. "
             "Do not include any keys not shown. " + NO_GHOSTWRITE
         ),
@@ -35,7 +43,7 @@ WRITING_TOPIC_ANALYSIS_PROMPT = register_prompt(
 MATERIAL_QUESTIONS_PROMPT = register_prompt(
     PromptSpec(
         prompt_key="material_questions",
-        version=VERSION,
+        version=MATERIAL_QUESTIONS_VERSION,
         system_prompt_key="wenlingo_primary_coach",
         system_prompt=PRIMARY_COACH_SYSTEM_PROMPT,
         response_contract=(
@@ -47,6 +55,11 @@ MATERIAL_QUESTIONS_PROMPT = register_prompt(
             "that order. Ask about the first three payload.scaffold.material_slots "
             "when scaffold slots are present. "
             "text <= 60 chars, hint <= 80 chars, encouragement <= 40 chars. "
+            "If payload.scaffold.topic_type is person_portrait, ask from the child's point of view. "
+            "Use 你, 自己, and child-observation wording. For self-portrait / 我的自画像, guide the "
+            "child to answer as 我 and do not use 这个人, 他, or 她 as the question subject. "
+            "For non-self portraits such as teacher, family, or classmate topics, ask what the child "
+            "observed, remembered, or chose; 他/她 may appear only inside a child-observation question. "
             "Response model: MaterialQuestionsResult. "
             "Do not include any keys not shown. " + NO_GHOSTWRITE
         ),
@@ -85,7 +98,7 @@ MATERIAL_CARD_GENERATION_PROMPT = register_prompt(
 OUTLINE_GENERATION_PROMPT = register_prompt(
     PromptSpec(
         prompt_key="outline_generation",
-        version=VERSION,
+        version=WRITING_CASTLE_VERSION,
         system_prompt_key="wenlingo_primary_coach",
         system_prompt=PRIMARY_COACH_SYSTEM_PROMPT,
         response_contract=(

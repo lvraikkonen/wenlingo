@@ -31,8 +31,8 @@ EXPECTED_PROMPT_VERSIONS = {
 }
 EXPECTED_PROMPT_VERSIONS.update(
     {
-        "writing_topic_analysis": "v0.6b-2026-06-25",
-        "material_questions": "v0.6b-2026-06-25",
+        "writing_topic_analysis": "v0.6b.1-2026-06-27",
+        "material_questions": "v0.6b.1-2026-06-27",
         "material_card_generation": "v0.6b.1-2026-06-27",
         "outline_generation": "v0.6b-2026-06-25",
     }
@@ -99,6 +99,29 @@ def test_writing_castle_prompts_are_registered_with_contracts():
         assert prompt.version == EXPECTED_PROMPT_VERSIONS[prompt_key]
         assert contract_name in prompt.response_contract
         assert "Do not write full essay paragraphs" in prompt.response_contract
+
+
+def test_expository_topic_analysis_contract_sets_fact_boundary():
+    contract = get_prompt("writing_topic_analysis").response_contract
+
+    assert "payload.scaffold.topic_type is expository_introduction" in contract
+    assert "do not add external facts" in contract
+    assert "numbers, habits, labels, or background claims" in contract
+    assert "factual phrases already present in payload.topic_text" in contract
+    for forbidden_example in ["吃竹子", "活化石", "800万年", "保护动物"]:
+        assert forbidden_example in contract
+
+
+def test_person_portrait_material_questions_contract_sets_child_view():
+    contract = get_prompt("material_questions").response_contract
+
+    assert "payload.scaffold.topic_type is person_portrait" in contract
+    assert "ask from the child's point of view" in contract
+    assert "你" in contract
+    assert "自己" in contract
+    assert "我的自画像" in contract
+    assert "这个人" in contract
+    assert "For non-self portraits" in contract
 
 
 def test_unknown_prompt_key_raises_key_error():

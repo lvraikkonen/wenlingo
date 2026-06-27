@@ -135,6 +135,42 @@ def test_writing_castle_prewriting_prompt_contracts_define_exact_json_shapes():
             assert snippet in contract
 
 
+def test_writing_topic_analysis_contract_hardens_expository_fact_boundary():
+    contract = response_contract_for_task("writing_topic_analysis")
+
+    required_snippets = [
+        "payload.scaffold.topic_type is expository_introduction",
+        "do not add external facts",
+        "numbers, habits, labels, or background claims",
+        "factual phrases already present in payload.topic_text",
+        "do not expand them into new facts",
+        "吃竹子",
+        "活化石",
+        "800万年",
+        "保护动物",
+    ]
+    for snippet in required_snippets:
+        assert snippet in contract
+
+
+def test_material_questions_contract_uses_child_view_for_person_portrait():
+    contract = response_contract_for_task("material_questions")
+
+    required_snippets = [
+        "payload.scaffold.topic_type is person_portrait",
+        "ask from the child's point of view",
+        "我的自画像",
+        "你",
+        "自己",
+        "For self-portrait",
+        "do not use 这个人, 他, or 她 as the question subject",
+        "For non-self portraits",
+        "child-observation question",
+    ]
+    for snippet in required_snippets:
+        assert snippet in contract
+
+
 def test_material_cards_require_source_refs_for_non_placeholder_cards():
     from pydantic import ValidationError
     from app.services.llm_contracts import MaterialCardsResult
