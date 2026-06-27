@@ -348,3 +348,21 @@ def test_cleanup_execute_rolls_back_entire_run_on_unexpected_error(session, monk
 
     assert session.get(StudentProfile, first_child.id) is not None
     assert session.get(StudentProfile, second_child.id) is not None
+
+
+def test_cleanup_qa_child_profiles_cli_defaults_to_dry_run():
+    from app.ops.cleanup_qa_child_profiles import _parse_args
+
+    args = _parse_args([])
+
+    assert args.execute is False
+    assert args.confirm == ""
+
+
+def test_cleanup_qa_child_profiles_cli_accepts_execute_confirmation():
+    from app.ops.cleanup_qa_child_profiles import _parse_args
+
+    args = _parse_args(["--execute", "--confirm", "DELETE QA CHILD PROFILES"])
+
+    assert args.execute is True
+    assert args.confirm == "DELETE QA CHILD PROFILES"
