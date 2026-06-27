@@ -12,12 +12,16 @@ const cardLabels: Record<LegacyMaterialCardCategory, string> = {
   feeling_takeaway: "心情收获",
 };
 
-function cardLabel(category: MaterialCardSlot["category"]): string {
-  return cardLabels[category as LegacyMaterialCardCategory] ?? category;
+function cardLabel(
+  category: MaterialCardSlot["category"],
+  slotLabels: Record<string, string>,
+): string {
+  return slotLabels[category] ?? cardLabels[category as LegacyMaterialCardCategory] ?? category;
 }
 
 export function FirstDraftStep({
   cards,
+  slotLabels = {},
   sections,
   draft,
   onDraftChange,
@@ -25,6 +29,7 @@ export function FirstDraftStep({
   isPending = false,
 }: {
   cards: MaterialCardSlot[];
+  slotLabels?: Record<string, string>;
   sections: WritingOutlineSection[];
   draft: string;
   onDraftChange: (draft: string) => void;
@@ -48,7 +53,9 @@ export function FirstDraftStep({
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
                 {visibleCards.map((card) => (
                   <li key={card.id}>
-                    <span className="font-semibold">{cardLabel(card.category)}：</span>
+                    <span className="font-semibold">
+                      {cardLabel(card.category, slotLabels)}：
+                    </span>
                     {card.text}
                   </li>
                 ))}

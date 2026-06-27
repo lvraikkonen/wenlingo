@@ -581,6 +581,7 @@ export function ClassroomPrewritingWizard({
       {step === "draft" ? (
         <FirstDraftStep
           cards={cards}
+          slotLabels={slotLabels}
           sections={sections}
           draft={draft}
           onDraftChange={setDraft}

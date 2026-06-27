@@ -222,6 +222,28 @@ def test_imaginative_story_fallback_cards_use_imagined_setting_source_ref():
     ]
 
 
+def test_fallback_cards_synthesize_source_refs_when_answer_refs_are_empty():
+    from app.services.writing_castle_ai import fallback_material_cards
+    from app.services.writing_castle_scaffold import resolve_scaffold_snapshot
+
+    scaffold = resolve_scaffold_snapshot("person_portrait", None, "manual")
+    result = fallback_material_cards(
+        [
+            {
+                "id": "answer-1",
+                "text": "写我自己，一个四年级学生。",
+                "skipped": False,
+                "source_refs": [],
+            }
+        ],
+        scaffold=scaffold,
+    )
+
+    assert result.cards[0].source_refs == [
+        {"source_type": "observation", "answer_id": "answer-1"}
+    ]
+
+
 def test_expository_factual_fallback_cards_use_child_confirmed_source_ref():
     from app.services.writing_castle_ai import fallback_material_cards
     from app.services.writing_castle_scaffold import resolve_scaffold_snapshot

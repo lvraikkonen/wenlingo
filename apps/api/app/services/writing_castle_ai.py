@@ -105,7 +105,9 @@ def _usable_cards(cards: list[dict]) -> list[tuple[dict, str]]:
 def _source_refs_for_answer(answer: dict, scaffold: dict[str, Any], slot: dict[str, Any]) -> list[dict[str, Any]]:
     existing_refs = answer.get("source_refs")
     if isinstance(existing_refs, list):
-        return [ref for ref in existing_refs[:3] if isinstance(ref, dict)]
+        reusable_refs = [ref for ref in existing_refs[:3] if isinstance(ref, dict)]
+        if reusable_refs:
+            return reusable_refs
 
     answer_id = _source_id(answer.get("id"))
     if answer_id is None:

@@ -738,6 +738,35 @@ test("material cards render scaffold slot labels over legacy category labels", (
   expect(screen.queryByLabelText("事件")).not.toBeInTheDocument();
 });
 
+test("first draft material reminders render scaffold slot labels", () => {
+  const cards: MaterialCardSlot[] = [
+    {
+      id: "card-person",
+      category: "person_subject",
+      text: "写我自己，一个四年级学生。",
+      source_answer_ids: [],
+      order: 1,
+      deleted: false,
+      child_edited: false,
+      placeholder: false,
+    },
+  ];
+
+  render(
+    <FirstDraftStep
+      cards={cards}
+      slotLabels={{ person_subject: "写谁" }}
+      sections={[]}
+      draft=""
+      onDraftChange={() => undefined}
+      onSubmit={() => undefined}
+    />,
+  );
+
+  expect(screen.getByText("写谁：")).toBeInTheDocument();
+  expect(screen.queryByText("person_subject：")).not.toBeInTheDocument();
+});
+
 test("outline sections render scaffold section labels over legacy slot labels", () => {
   const sections = [
     {
@@ -1036,10 +1065,42 @@ test("active outline-ready classroom essay resumes in draft step", async () => {
       status: "outline_ready",
       material_card: {
         ...essayState().material_card,
-        cards: [],
+        schema_version: "v0.6b.1",
+        cards: [
+          {
+            id: "card-person",
+            category: "person_subject",
+            text: "写我自己，一个四年级学生。",
+            source_answer_ids: ["answer-person"],
+            order: 1,
+            deleted: false,
+            child_edited: false,
+            placeholder: false,
+          },
+        ],
       },
       outline: {
         ...essayState().outline,
+        schema_version: "v0.6b.1",
+        scaffold: {
+          schema_version: "v0.6b.1",
+          topic_type: "person_portrait",
+          topic_variant: "self_portrait",
+          scaffold_template_version: "v0.6b.1",
+          resolved_at: "2026-06-25T00:00:00Z",
+          selection_source: "manual",
+          display_name_child: "写一个人",
+          display_name_parent: "人物描写",
+          material_slots: [
+            {
+              id: "person_subject",
+              label: "写谁",
+              content_kind: "subject",
+            },
+          ],
+          outline_sections: [],
+          source_policy: {},
+        },
         sections: [
           {
             id: "outline-result",
@@ -1065,6 +1126,8 @@ test("active outline-ready classroom essay resumes in draft step", async () => {
   });
 
   expect(await screen.findByLabelText("初稿")).toBeInTheDocument();
+  expect(screen.getByText("写谁：")).toBeInTheDocument();
+  expect(screen.queryByText("person_subject：")).not.toBeInTheDocument();
   expect(screen.getByText("提纲提醒")).toBeInTheDocument();
   expect(screen.getByText(/最后我能自己骑过小区空地/)).toBeInTheDocument();
 });

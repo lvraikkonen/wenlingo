@@ -547,6 +547,48 @@ def test_classroom_prewriting_happy_path_reaches_first_draft_feedback(session, c
     }
 
 
+def test_material_card_generation_synthesizes_refs_when_saved_answer_refs_are_empty(
+    session,
+    client,
+):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我的自画像"},
+    )
+    essay_id = start.json()["essay"]["id"]
+    selected = client.patch(
+        f"/api/essays/{essay_id}/scaffold-selection",
+        json={"topic_type": "person_portrait", "override_reason": "manual_choice"},
+    )
+    assert selected.status_code == 200
+    answers = client.patch(
+        f"/api/essays/{essay_id}/material-answers",
+        json={
+            "answers": [
+                {
+                    "id": "answer-1",
+                    "question_id": "q-person",
+                    "text": "写我自己，一个四年级学生。",
+                    "skipped": False,
+                    "source_refs": [],
+                }
+            ]
+        },
+    )
+    assert answers.status_code == 200
+
+    cards = client.post(f"/api/essays/{essay_id}/material-cards", json={})
+
+    assert cards.status_code == 200
+    first_card = cards.json()["material_card"]["cards"][0]
+    assert first_card["category"] == "person_subject"
+    assert first_card["source_refs"] == [
+        {"source_type": "observation", "answer_id": "answer-1"}
+    ]
+
+
 def test_active_classroom_writing_castle_essay_returns_latest_open_outline(session, client):
     family = create_authenticated_family(session)
     student = family["student"]
