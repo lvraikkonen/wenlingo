@@ -172,6 +172,37 @@ export function ClassroomPrewritingWizard({
   const ignoreActiveResumeRef = useRef(false);
   const pendingLabel = pendingMessages[pendingMessageIndex] ?? "";
 
+  function applyActiveEssayState(response: {
+    essay: WritingCastleEssay;
+    supported_topic_types?: TopicTypeChoice[];
+    unsupported_future_type?: FutureTopicType | null;
+  }) {
+    const activeEssay = response.essay;
+    setEssay(activeEssay);
+    setTopicText(activeEssay.title);
+    const nextSuggestedFocus =
+      activeEssay.outline.topic_analysis.suggested_focus ?? "";
+    setSuggestedFocus(nextSuggestedFocus);
+    setFocus(activeEssay.outline.child_topic_focus.text || nextSuggestedFocus);
+    setAnswers(answersFromEssay(activeEssay));
+    setCards(activeEssay.material_card.cards);
+    setSections(activeEssay.outline.sections);
+    const nextStep = stepFromEssay(activeEssay);
+    if (nextStep === "scaffold_selection") {
+      setSupportedTopicTypes(
+        response.supported_topic_types?.length
+          ? response.supported_topic_types
+          : DEFAULT_SUPPORTED_TOPIC_TYPES,
+      );
+    }
+    setUnsupportedFutureType(
+      response.unsupported_future_type ??
+        activeEssay.outline.scaffold?.unsupported_future_type ??
+        null,
+    );
+    setStep(nextStep);
+  }
+
   useEffect(() => {
     let isMounted = true;
 
@@ -181,32 +212,7 @@ export function ClassroomPrewritingWizard({
         if (!isMounted || ignoreActiveResumeRef.current || !response.essay) {
           return;
         }
-        const activeEssay = response.essay;
-        setEssay(activeEssay);
-        setTopicText(activeEssay.title);
-        const nextSuggestedFocus =
-          activeEssay.outline.topic_analysis.suggested_focus ?? "";
-        setSuggestedFocus(nextSuggestedFocus);
-        setFocus(
-          activeEssay.outline.child_topic_focus.text || nextSuggestedFocus,
-        );
-        setAnswers(answersFromEssay(activeEssay));
-        setCards(activeEssay.material_card.cards);
-        setSections(activeEssay.outline.sections);
-        const nextStep = stepFromEssay(activeEssay);
-        if (nextStep === "scaffold_selection") {
-          setSupportedTopicTypes(
-            response.supported_topic_types?.length
-              ? response.supported_topic_types
-              : DEFAULT_SUPPORTED_TOPIC_TYPES,
-          );
-        }
-        setUnsupportedFutureType(
-          response.unsupported_future_type ??
-            activeEssay.outline.scaffold?.unsupported_future_type ??
-            null,
-        );
-        setStep(nextStep);
+        applyActiveEssayState(response);
       } catch {
         if (isMounted && !ignoreActiveResumeRef.current) {
           setError("");
@@ -240,6 +246,7 @@ export function ClassroomPrewritingWizard({
   async function run<T>(
     loadingKey: LoadingKey,
     action: () => Promise<T>,
+    recover?: () => Promise<T | null>,
   ): Promise<T | null> {
     setPendingMessages([...loadingMessages(loadingKey)]);
     setPendingMessageIndex(0);
@@ -247,12 +254,37 @@ export function ClassroomPrewritingWizard({
     try {
       return await action();
     } catch {
+      if (recover) {
+        try {
+          const recovered = await recover();
+          if (recovered) {
+            return recovered;
+          }
+        } catch {
+          // Keep the original user-facing retry path when recovery cannot read progress.
+        }
+      }
       setError("这一步没有保存成功，可以重试，也可以先继续写。");
       return null;
     } finally {
       setPendingMessages([]);
       setPendingMessageIndex(0);
     }
+  }
+
+  async function recoverActiveEssay(
+    expectedEssayId: string,
+    isRecovered: (activeEssay: WritingCastleEssay) => boolean,
+  ): Promise<WritingCastleEssay | null> {
+    const response = await getActiveClassroomWritingCastleEssay(studentId);
+    if (!response.essay || response.essay.id !== expectedEssayId) {
+      return null;
+    }
+    if (!isRecovered(response.essay)) {
+      return null;
+    }
+    applyActiveEssayState(response);
+    return response.essay;
   }
 
   async function start() {
@@ -359,7 +391,12 @@ export function ClassroomPrewritingWizard({
       await saveMaterialAnswers(essay.id, { answers });
       const generated = await generateMaterialCards(essay.id);
       return generated.essay;
-    });
+    }, () =>
+      recoverActiveEssay(
+        essay.id,
+        (activeEssay) => activeEssay.material_card.cards.length > 0,
+      ),
+    );
 
     if (saved) {
       setEssay(saved);
