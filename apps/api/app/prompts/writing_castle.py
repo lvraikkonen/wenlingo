@@ -3,6 +3,7 @@ from app.prompts.system import PRIMARY_COACH_SYSTEM_PROMPT
 
 
 VERSION = "v0.6b-2026-06-25"
+MATERIAL_CARD_VERSION = "v0.6b.1-2026-06-27"
 NO_GHOSTWRITE = (
     "Do not write full essay paragraphs. Do not invent people, events, dialogue, "
     "feelings, or lessons. Use only child-provided or explicitly confirmed material."
@@ -55,7 +56,7 @@ MATERIAL_QUESTIONS_PROMPT = register_prompt(
 MATERIAL_CARD_GENERATION_PROMPT = register_prompt(
     PromptSpec(
         prompt_key="material_card_generation",
-        version=VERSION,
+        version=MATERIAL_CARD_VERSION,
         system_prompt_key="wenlingo_primary_coach",
         system_prompt=PRIMARY_COACH_SYSTEM_PROMPT,
         response_contract=(
@@ -70,7 +71,9 @@ MATERIAL_CARD_GENERATION_PROMPT = register_prompt(
             "Do not create category or slot values that are absent from payload.scaffold. "
             "Use source_answer_ids only from "
             "payload.answers[*].id. Every non-placeholder card must have non-empty "
-            "text and at least one source_answer_ids or source_refs item. Empty or skipped child "
+            "text, at least one source_answer_ids item, and at least one source_refs item. "
+            "Each source_refs item that uses child answer content must include answer_id from "
+            "payload.answers[*].id. Empty or skipped child "
             "answers must become placeholder cards with empty text and empty "
             "source_answer_ids and source_refs. text <= 120 chars, encouragement <= 40 chars. "
             "Response model: MaterialCardsResult. "

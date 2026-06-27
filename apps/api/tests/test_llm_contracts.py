@@ -985,6 +985,45 @@ async def test_material_card_generation_accepts_valid_source_ref_answer_id():
 
 
 @pytest.mark.asyncio
+async def test_material_card_generation_rejects_v06b_cards_without_source_refs():
+    from app.services.writing_castle_scaffold import resolve_scaffold_snapshot
+
+    runner = RecordingRunner(material_cards_output())
+    scaffold = resolve_scaffold_snapshot("generic_narrative", None, "manual")
+
+    await material_card_generation(
+        runner=runner,
+        answers=[
+            {
+                "id": "answer-1",
+                "question_id": "q-event_main",
+                "text": "第一次参加接力赛，交棒时差点掉棒。",
+                "skipped": False,
+            }
+        ],
+        scaffold=scaffold,
+    )
+
+    validate_output = runner.calls[0]["validate_output"]
+    invalid_output = MaterialCardsResult(
+        cards=[
+            {
+                "id": "card-event-main",
+                "category": "event_main",
+                "text": "第一次参加接力赛，交棒时差点掉棒。",
+                "source_answer_ids": ["answer-1"],
+                "source_refs": [],
+                "placeholder": False,
+            }
+        ],
+        encouragement="先把真实素材收好。",
+    )
+
+    with pytest.raises(LLMTaskValidationError, match="source_refs"):
+        validate_output(invalid_output)
+
+
+@pytest.mark.asyncio
 async def test_material_card_generation_rejects_model_self_certified_child_confirmed_ref():
     runner = RecordingRunner(material_cards_output())
 

@@ -337,6 +337,17 @@ def _validate_material_card_source_refs(
                     )
 
 
+def _validate_v06b_material_card_source_refs(
+    output: MaterialCardsResult,
+    scaffold: dict | None,
+) -> None:
+    if not scaffold or scaffold.get("schema_version") != "v0.6b.1":
+        return
+    for card in output.cards:
+        if not card.placeholder and not card.source_refs:
+            raise LLMTaskValidationError("v0.6b material cards require source_refs")
+
+
 def _validate_outline_source_ids(
     output: WritingOutlineResult,
     valid_source_ids: set[str],
@@ -710,6 +721,7 @@ async def material_card_generation(
     known_reading_material_refs = _known_reading_material_refs(answers)
 
     def validate_output(output: MaterialCardsResult) -> None:
+        _validate_v06b_material_card_source_refs(output, scaffold)
         _validate_material_card_source_ids(output, valid_source_ids)
         _validate_material_card_source_refs(
             output,

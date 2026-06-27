@@ -33,7 +33,7 @@ EXPECTED_PROMPT_VERSIONS.update(
     {
         "writing_topic_analysis": "v0.6b-2026-06-25",
         "material_questions": "v0.6b-2026-06-25",
-        "material_card_generation": "v0.6b-2026-06-25",
+        "material_card_generation": "v0.6b.1-2026-06-27",
         "outline_generation": "v0.6b-2026-06-25",
     }
 )
