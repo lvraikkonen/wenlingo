@@ -55,12 +55,13 @@ def test_outline_generation_uses_extended_timeout_budget():
     assert config.max_total_latency_seconds == 45
 
 
-def test_material_card_generation_uses_extended_timeout_budget():
+def test_material_card_generation_stays_within_request_timeout_budget():
     config = resolve_task_config("material_card_generation")
 
-    assert config.primary_timeout_seconds == 20
-    assert config.fallback_timeout_seconds == 20
-    assert config.max_total_latency_seconds == 40
+    assert config.primary_timeout_seconds == 12
+    assert config.fallback_timeout_seconds == 10
+    assert config.max_total_latency_seconds == 22
+    assert config.primary_timeout_seconds + config.fallback_timeout_seconds <= 25
 
 
 def test_unknown_task_fails_closed():
