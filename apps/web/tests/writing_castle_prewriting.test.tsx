@@ -957,6 +957,47 @@ test("material card generation recovers when active essay already advanced", asy
   expect(apiMocks.getActiveClassroomWritingCastleEssay).toHaveBeenCalledTimes(2);
 });
 
+test("material card generation continues when saved answers can be recovered", async () => {
+  const recoveredAnswers = essayState({
+    status: "materials_ready",
+    material_card: {
+      ...essayState().material_card,
+      answers: [
+        {
+          id: "answer-q-event",
+          question_id: "q-event",
+          text: "我学会了骑车。",
+          skipped: false,
+        },
+      ],
+      step_state: {
+        questions_status: "answered",
+        cards_status: "not_started",
+      },
+    },
+  });
+  apiMocks.getActiveClassroomWritingCastleEssay
+    .mockResolvedValueOnce({ essay: null })
+    .mockResolvedValueOnce({ essay: recoveredAnswers });
+  apiMocks.saveMaterialAnswers.mockRejectedValueOnce(new Error("response lost"));
+
+  await startClassroomWizard();
+  await selectNarrativeScaffold();
+  await continueToQuestions();
+  await userEvent.type(
+    screen.getByLabelText("你想写哪件真实发生的事？"),
+    "我学会了骑车。",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "整理素材卡" }));
+
+  expect(
+    await screen.findByText("第 3 步 / 共 4 步：整理素材卡"),
+  ).toBeInTheDocument();
+  expect(screen.getByLabelText("事件")).toHaveValue("我学会了骑车。");
+  expect(apiMocks.generateMaterialCards).toHaveBeenCalledWith("essay-1");
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
 test("direct writing from cards saves current cards before draft", async () => {
   await startClassroomWizard();
   await selectNarrativeScaffold();

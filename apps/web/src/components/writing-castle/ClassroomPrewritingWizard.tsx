@@ -287,6 +287,45 @@ export function ClassroomPrewritingWizard({
     return response.essay;
   }
 
+  function materialAnswersMatch(
+    activeEssay: WritingCastleEssay,
+    expectedAnswers: MaterialAnswer[],
+  ): boolean {
+    const activeByQuestionId = new Map(
+      activeEssay.material_card.answers.map((answer) => [
+        answer.question_id,
+        answer,
+      ]),
+    );
+    return expectedAnswers.every((expectedAnswer) => {
+      const activeAnswer = activeByQuestionId.get(expectedAnswer.question_id);
+      if (!activeAnswer && expectedAnswer.text.trim().length === 0) {
+        return true;
+      }
+      return (
+        activeAnswer &&
+        activeAnswer.text === expectedAnswer.text &&
+        activeAnswer.skipped === expectedAnswer.skipped
+      );
+    });
+  }
+
+  async function saveMaterialAnswersWithRecovery(
+    essayId: string,
+    nextAnswers: MaterialAnswer[],
+  ): Promise<void> {
+    try {
+      await saveMaterialAnswers(essayId, { answers: nextAnswers });
+    } catch (error) {
+      const recovered = await recoverActiveEssay(essayId, (activeEssay) =>
+        materialAnswersMatch(activeEssay, nextAnswers),
+      );
+      if (!recovered) {
+        throw error;
+      }
+    }
+  }
+
   async function start() {
     ignoreActiveResumeRef.current = true;
     const started = await run("start_classroom", async () =>
@@ -388,7 +427,7 @@ export function ClassroomPrewritingWizard({
     }
 
     const saved = await run("material_cards", async () => {
-      await saveMaterialAnswers(essay.id, { answers });
+      await saveMaterialAnswersWithRecovery(essay.id, answers);
       const generated = await generateMaterialCards(essay.id);
       return generated.essay;
     }, () =>
