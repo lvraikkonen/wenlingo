@@ -155,8 +155,17 @@ def count_rows(session, model) -> int:
     return len(session.exec(select(model)).all())
 
 
+def rows_for_student(session, model, student_id: str):
+    return session.exec(select(model).where(model.student_id == student_id)).all()
+
+
+def rows_for_essay(session, model, essay_id: str):
+    return session.exec(select(model).where(model.essay_id == essay_id)).all()
+
+
 def test_v06b_qa_child_name_matcher_is_narrow():
     assert is_v06b_qa_child_name("QA v0.6b") is True
+    assert is_v06b_qa_child_name("  QA   v0.6b  ") is True
     assert is_v06b_qa_child_name("QA06b-Happy2") is True
     assert is_v06b_qa_child_name("QA06b-N1") is True
     assert is_v06b_qa_child_name("QA v0.6c") is False
@@ -182,10 +191,10 @@ def test_preview_matches_only_v06b_qa_children(session):
 
 def test_cleanup_execute_deletes_matched_child_data_and_keeps_parent_scoped_rows(session):
     account, parent = seed_parent(session)
-    qa_child, qa_essay, _qa_sentence, qa_llm_log = seed_child_graph(
+    qa_child, qa_essay, qa_sentence, qa_llm_log = seed_child_graph(
         session, parent, child_id="qa-child", name="QA v0.6b"
     )
-    regular_child, _regular_essay, _regular_sentence, _regular_llm_log = seed_child_graph(
+    regular_child, regular_essay, _regular_sentence, regular_llm_log = seed_child_graph(
         session, parent, child_id="real-child", name="小星"
     )
 
@@ -198,22 +207,33 @@ def test_cleanup_execute_deletes_matched_child_data_and_keeps_parent_scoped_rows
     assert result.deleted_count == 1
     assert result.children[0].student_id == qa_child.id
     assert result.children[0].record_counts["StudentProfile"] == 1
+    assert rows_for_student(session, Assessment, qa_child.id) == []
+    assert rows_for_essay(session, EssayVersion, qa_essay.id) == []
+    assert rows_for_student(session, Essay, qa_child.id) == []
+    assert rows_for_student(session, SentenceTraining, qa_child.id) == []
+    assert rows_for_student(session, ReadingSession, qa_child.id) == []
+    assert rows_for_student(session, GameEvent, qa_child.id) == []
+    assert rows_for_student(session, Report, qa_child.id) == []
+    assert rows_for_student(session, AbilityHistory, qa_child.id) == []
+    assert rows_for_student(session, AbilityProfile, qa_child.id) == []
+    assert rows_for_student(session, DailyTaskLimitCounter, qa_child.id) == []
+    assert rows_for_student(session, LLMCallLog, qa_child.id) == []
+    assert rows_for_student(session, FeedbackReaction, qa_child.id) == []
+    assert rows_for_student(session, ParentFeedback, qa_child.id) == []
+    assert rows_for_student(session, ProductEvent, qa_child.id) == []
     assert session.get(StudentProfile, qa_child.id) is None
     assert session.get(Essay, qa_essay.id) is None
+    assert session.get(SentenceTraining, qa_sentence.id) is None
     assert session.get(LLMCallLog, qa_llm_log.id) is None
     assert session.get(StudentProfile, regular_child.id) is not None
+    assert session.get(Essay, regular_essay.id) is not None
+    assert session.get(LLMCallLog, regular_llm_log.id) is not None
     assert session.get(ParentAccount, account.id) is not None
     assert session.get(ParentUser, parent.id) is not None
-    qa_events = session.exec(
-        select(ProductEvent).where(ProductEvent.student_id == qa_child.id)
-    ).all()
-    regular_child_events = session.exec(
-        select(ProductEvent).where(ProductEvent.student_id == regular_child.id)
-    ).all()
+    regular_child_events = rows_for_student(session, ProductEvent, regular_child.id)
     parent_level_events = session.exec(
         select(ProductEvent).where(ProductEvent.student_id.is_(None))
     ).all()
-    assert qa_events == []
     assert len(regular_child_events) == 1
     assert len(parent_level_events) == 2
     assert count_rows(session, ProductEvent) == 3
