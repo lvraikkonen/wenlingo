@@ -394,6 +394,60 @@ def test_alpha_summary_includes_writing_castle_process_summary(session, client):
     }
 
 
+def test_alpha_summary_allows_unselected_writing_castle_scaffold(session, client):
+    parent = create_alpha_parent(client, session)
+    child = create_alpha_child(client, parent["id"])
+    student_id = child["id"]
+
+    start = client.post(
+        f"/api/students/{student_id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    assert start.status_code == 201
+
+    response = client.get(
+        f"/api/alpha/parents/{parent['id']}/children/{student_id}/summary"
+    )
+
+    assert response.status_code == 200
+    summary = response.json()["writing_castle_summary"]
+    assert summary["topic"] == "我学会了骑车"
+    assert summary["selected_topic_type"] == ""
+    assert summary["selected_topic_type_parent"] == ""
+    assert summary["selection_source"] == ""
+
+
+def test_alpha_summary_rejects_writing_castle_scaffold_ref_mismatch(session, client):
+    parent = create_alpha_parent(client, session)
+    child = create_alpha_child(client, parent["id"])
+    student_id = child["id"]
+
+    start = client.post(
+        f"/api/students/{student_id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    assert start.status_code == 201
+    essay_id = start.json()["essay"]["id"]
+    selected = client.patch(
+        f"/api/essays/{essay_id}/scaffold-selection",
+        json={"topic_type": "generic_narrative", "topic_variant": "learned_skill"},
+    )
+    assert selected.status_code == 200
+    saved = session.get(Essay, essay_id)
+    material = dict(saved.material_card)
+    material["scaffold_ref"] = {}
+    saved.material_card = material
+    session.add(saved)
+    session.commit()
+
+    response = client.get(
+        f"/api/alpha/parents/{parent['id']}/children/{student_id}/summary"
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "scaffold_ref mismatch"
+
+
 def test_alpha_summary_tolerates_malformed_writing_castle_json(session, client):
     parent = create_alpha_parent(client, session)
     child = create_alpha_child(client, parent["id"])

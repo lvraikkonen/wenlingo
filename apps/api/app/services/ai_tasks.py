@@ -254,6 +254,26 @@ def _valid_answer_source_ids(answers: list[dict]) -> set[str]:
     return source_ids
 
 
+def _known_reading_material_refs(answers: list[dict]) -> set[str]:
+    refs = set()
+    for answer in answers:
+        if answer.get("skipped"):
+            continue
+        if not str(answer.get("text") or "").strip():
+            continue
+        source_refs = answer.get("source_refs")
+        if not isinstance(source_refs, list):
+            continue
+        for source_ref in source_refs:
+            if not isinstance(source_ref, dict):
+                continue
+            source_type = str(source_ref.get("source_type") or "").strip()
+            reading_material_ref = _payload_source_id(source_ref.get("reading_material_ref"))
+            if source_type == "reading_material" and reading_material_ref is not None:
+                refs.add(reading_material_ref)
+    return refs
+
+
 def _valid_card_source_ids(cards: list[dict]) -> set[str]:
     source_ids = set()
     for card in cards:
@@ -281,6 +301,40 @@ def _validate_material_card_source_ids(
         raise LLMTaskValidationError(
             "unknown source_answer_ids: " + ", ".join(unknown_source_ids)
         )
+
+
+def _validate_material_card_source_refs(
+    output: MaterialCardsResult,
+    valid_source_ids: set[str],
+    known_reading_material_refs: set[str],
+) -> None:
+    for card in output.cards:
+        for source_ref in card.source_refs:
+            source_type = str(source_ref.get("source_type") or "").strip()
+            if source_type == "child_confirmed":
+                raise LLMTaskValidationError(
+                    "model output cannot create child_confirmed source_refs"
+                )
+
+            if "answer_id" in source_ref:
+                answer_id = _payload_source_id(source_ref.get("answer_id"))
+                if answer_id is None or answer_id not in valid_source_ids:
+                    raise LLMTaskValidationError(
+                        "unknown source_ref answer_id: "
+                        + (answer_id if answer_id is not None else "<blank>")
+                    )
+
+            if source_type == "reading_material":
+                reading_material_ref = _payload_source_id(
+                    source_ref.get("reading_material_ref")
+                )
+                if (
+                    reading_material_ref is None
+                    or reading_material_ref not in known_reading_material_refs
+                ):
+                    raise LLMTaskValidationError(
+                        "unknown reading_material source_ref"
+                    )
 
 
 def _validate_outline_source_ids(
@@ -653,9 +707,15 @@ async def material_card_generation(
 ) -> LLMTaskResult[MaterialCardsResult]:
     prompt = get_prompt("material_card_generation")
     valid_source_ids = _valid_answer_source_ids(answers)
+    known_reading_material_refs = _known_reading_material_refs(answers)
 
     def validate_output(output: MaterialCardsResult) -> None:
         _validate_material_card_source_ids(output, valid_source_ids)
+        _validate_material_card_source_refs(
+            output,
+            valid_source_ids,
+            known_reading_material_refs,
+        )
         _validate_material_card_template_slots(output, scaffold)
 
     return await runner.run(

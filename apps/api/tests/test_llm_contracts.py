@@ -921,6 +921,178 @@ async def test_material_card_generation_rejects_skipped_and_blank_answer_sources
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("source_ref_answer_id", ["missing", "answer-skipped", "answer-blank", "   "])
+async def test_material_card_generation_rejects_source_ref_answer_ids_missing_skipped_or_blank(
+    source_ref_answer_id,
+):
+    runner = RecordingRunner(material_cards_output())
+
+    await material_card_generation(
+        runner=runner,
+        answers=[
+            {"id": "answer-skipped", "question_id": "q1", "text": "我不想回答。", "skipped": True},
+            {"id": "answer-blank", "question_id": "q2", "text": "   ", "skipped": False},
+            {"id": "answer-valid", "question_id": "q3", "text": "我变成了一朵云。", "skipped": False},
+        ],
+    )
+
+    validate_output = runner.calls[0]["validate_output"]
+    invalid_output = MaterialCardsResult(
+        cards=[
+            {
+                "id": "card-setting",
+                "category": "magic_setting",
+                "text": "我变成了一朵云。",
+                "source_refs": [
+                    {"source_type": "imagined_setting", "answer_id": source_ref_answer_id}
+                ],
+                "placeholder": False,
+            }
+        ],
+        encouragement="先确认想象设定。",
+    )
+
+    with pytest.raises(LLMTaskValidationError, match="unknown source_ref answer_id"):
+        validate_output(invalid_output)
+
+
+@pytest.mark.asyncio
+async def test_material_card_generation_accepts_valid_source_ref_answer_id():
+    runner = RecordingRunner(material_cards_output())
+
+    await material_card_generation(
+        runner=runner,
+        answers=[
+            {"id": "answer-1", "question_id": "q1", "text": "我变成了一朵云。", "skipped": False}
+        ],
+    )
+
+    validate_output = runner.calls[0]["validate_output"]
+    valid_output = MaterialCardsResult(
+        cards=[
+            {
+                "id": "card-setting",
+                "category": "magic_setting",
+                "text": "我变成了一朵云。",
+                "source_refs": [{"source_type": "imagined_setting", "answer_id": "answer-1"}],
+                "placeholder": False,
+            }
+        ],
+        encouragement="先确认想象设定。",
+    )
+
+    validate_output(valid_output)
+
+
+@pytest.mark.asyncio
+async def test_material_card_generation_rejects_model_self_certified_child_confirmed_ref():
+    runner = RecordingRunner(material_cards_output())
+
+    await material_card_generation(
+        runner=runner,
+        answers=[
+            {"id": "answer-1", "question_id": "q1", "text": "大熊猫吃竹子。", "skipped": False}
+        ],
+    )
+
+    validate_output = runner.calls[0]["validate_output"]
+    invalid_output = MaterialCardsResult(
+        cards=[
+            {
+                "id": "card-known-information",
+                "category": "known_information",
+                "text": "大熊猫吃竹子。",
+                "source_refs": [
+                    {
+                        "source_type": "child_confirmed",
+                        "confirmation_id": "fake-confirmation",
+                        "confirmed_text": "大熊猫吃竹子。",
+                    }
+                ],
+                "placeholder": False,
+            }
+        ],
+        encouragement="先确认真实信息。",
+    )
+
+    with pytest.raises(LLMTaskValidationError, match="child_confirmed"):
+        validate_output(invalid_output)
+
+
+@pytest.mark.asyncio
+async def test_material_card_generation_rejects_unproven_reading_material_ref():
+    runner = RecordingRunner(material_cards_output())
+
+    await material_card_generation(
+        runner=runner,
+        answers=[
+            {"id": "answer-1", "question_id": "q1", "text": "大熊猫吃竹子。", "skipped": False}
+        ],
+    )
+
+    validate_output = runner.calls[0]["validate_output"]
+    invalid_output = MaterialCardsResult(
+        cards=[
+            {
+                "id": "card-known-information",
+                "category": "known_information",
+                "text": "大熊猫吃竹子。",
+                "source_refs": [
+                    {
+                        "source_type": "reading_material",
+                        "reading_material_ref": "fake-reading-material",
+                    }
+                ],
+                "placeholder": False,
+            }
+        ],
+        encouragement="先确认真实信息。",
+    )
+
+    with pytest.raises(LLMTaskValidationError, match="reading_material"):
+        validate_output(invalid_output)
+
+
+@pytest.mark.asyncio
+async def test_expository_material_card_generation_rejects_fake_factual_source_ref():
+    from app.services.writing_castle_scaffold import resolve_scaffold_snapshot
+
+    runner = RecordingRunner(material_cards_output())
+    scaffold = resolve_scaffold_snapshot("expository_introduction", None, "manual")
+
+    await material_card_generation(
+        runner=runner,
+        answers=[
+            {"id": "answer-1", "question_id": "q1", "text": "我想介绍大熊猫。", "skipped": False}
+        ],
+        scaffold=scaffold,
+    )
+
+    validate_output = runner.calls[0]["validate_output"]
+    invalid_output = MaterialCardsResult(
+        cards=[
+            {
+                "id": "card-known-information",
+                "category": "known_information",
+                "text": "大熊猫主要吃竹子。",
+                "source_refs": [
+                    {
+                        "source_type": "reading_material",
+                        "reading_material_ref": "fake-panda-reading",
+                        "quote_or_summary": "大熊猫主要吃竹子。",
+                    }
+                ],
+                "placeholder": False,
+            }
+        ],
+        encouragement="先确认说明资料。",
+    )
+
+    with pytest.raises(LLMTaskValidationError, match="reading_material"):
+        validate_output(invalid_output)
+
+
+@pytest.mark.asyncio
 async def test_material_card_generation_rejects_malformed_scaffold_material_slots():
     runner = RecordingRunner(material_cards_output())
 

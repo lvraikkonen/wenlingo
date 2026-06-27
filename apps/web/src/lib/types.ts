@@ -334,8 +334,24 @@ export type WritingCastleTopicAnalysisResponse = WritingCastleEssayResponse & {
   topic_analysis: WritingCastleTopicAnalysis;
 };
 
+export type WritingCastleSummaryMaterialSourceCategory =
+  | "real_experience"
+  | "imagined_setting"
+  | "topic_requirement"
+  | "observation"
+  | "reading_material"
+  | "child_confirmed";
+
+export type WritingCastleSummarySelectionSource = ScaffoldSelectionSource | "";
+
 export type WritingCastleProcessSummary = {
   topic: string;
+  selected_topic_type?: string | null;
+  selected_topic_type_parent?: string | null;
+  selection_source?: WritingCastleSummarySelectionSource | null;
+  material_source_categories?: WritingCastleSummaryMaterialSourceCategory[] | null;
+  unsupported_future_type_overridden?: boolean | null;
+  copy_ready_ai_body_generated?: boolean | null;
   topic_analysis_used: boolean;
   topic_focus_confirmed: boolean;
   topic_focus_edited: boolean;

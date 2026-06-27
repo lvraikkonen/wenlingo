@@ -39,7 +39,11 @@ from app.domain.models import (
     StudentProfile,
 )
 from app.services.auth_security import mask_email, mask_phone
-from app.services.writing_castle_state import LEGACY_SCHEMA_VERSION, SCHEMA_VERSION
+from app.services.writing_castle_state import (
+    LEGACY_SCHEMA_VERSION,
+    SCHEMA_VERSION,
+    resolve_essay_scaffold,
+)
 
 router = APIRouter(prefix="/api/alpha", tags=["alpha"])
 LOGGER = logging.getLogger(__name__)
@@ -510,7 +514,7 @@ def _writing_castle_summary(session: Session, student_id: str) -> dict[str, Any]
         for card in _json_object_list(material.get("cards"))
         if not card.get("deleted") and not card.get("placeholder")
     ]
-    scaffold = _json_object(outline.get("scaffold"))
+    scaffold = _summary_scaffold(essay, material, outline)
     source_categories = sorted(
         {
             ref.get("source_type")
@@ -570,6 +574,24 @@ def _json_object(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
     return {}
+
+
+def _summary_scaffold(
+    essay: Essay,
+    material: dict[str, Any],
+    outline: dict[str, Any],
+) -> dict[str, Any]:
+    if (
+        material.get("schema_version") == SCHEMA_VERSION
+        and outline.get("schema_version") == SCHEMA_VERSION
+    ):
+        if material.get("scaffold_ref") is None and outline.get("scaffold") is None:
+            return {}
+        try:
+            return resolve_essay_scaffold(essay) or {}
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _json_object(outline.get("scaffold"))
 
 
 def _json_object_list(value: Any) -> list[dict[str, Any]]:

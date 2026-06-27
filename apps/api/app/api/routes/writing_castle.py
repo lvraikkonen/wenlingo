@@ -408,6 +408,16 @@ async def get_active_classroom_writing_castle_essay(
         .order_by(Essay.created_at.desc())
     ).all()
     essay = next((candidate for candidate in essays if _is_writing_castle_essay(candidate)), None)
+    if (
+        essay
+        and essay.material_card.get("schema_version") == SCHEMA_VERSION
+        and essay.outline.get("schema_version") == SCHEMA_VERSION
+        and (
+            essay.material_card.get("scaffold_ref") is not None
+            or essay.outline.get("scaffold") is not None
+        )
+    ):
+        _resolved_scaffold_or_legacy(essay)
     return {"essay": _essay_payload(essay) if essay else None}
 
 

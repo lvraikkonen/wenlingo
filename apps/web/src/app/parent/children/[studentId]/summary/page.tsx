@@ -10,10 +10,33 @@ import {
   recordAlphaEvent,
 } from "../../../../../lib/api";
 import { getStoredAlphaSessionId } from "../../../../../lib/alphaSession";
-import type { AlphaChildSummary } from "../../../../../lib/types";
+import type {
+  AlphaChildSummary,
+  ScaffoldSelectionSource,
+} from "../../../../../lib/types";
 
 type SummaryPageProps = {
   params: Promise<{ studentId: string }>;
+};
+
+type WritingCastleSummary = NonNullable<AlphaChildSummary["writing_castle_summary"]>;
+
+const selectionSourceLabels: Record<ScaffoldSelectionSource, string> = {
+  manual: "孩子手动选择",
+  ai_suggested: "AI 建议后确认",
+  fallback: "孩子选择相近类型",
+};
+
+const materialSourceCategoryLabels: Record<
+  NonNullable<WritingCastleSummary["material_source_categories"]>[number],
+  string
+> = {
+  real_experience: "真实经历",
+  imagined_setting: "想象设定",
+  topic_requirement: "题目要求",
+  observation: "观察记录",
+  reading_material: "阅读资料",
+  child_confirmed: "孩子确认",
 };
 
 export default function ParentChildSummaryPage({ params }: SummaryPageProps) {
@@ -73,6 +96,21 @@ function ParentChildSummaryPageContent({ studentId }: { studentId: string }) {
   const hasSentencePractice =
     (data?.practice_counts.sentence_trainings ?? 0) > 0 ||
     Boolean(data?.sentence_training_summary);
+  const writingCastleSummary = data?.writing_castle_summary;
+  const topicTypeLabel = writingCastleSummary?.selected_topic_type
+    ? writingCastleSummary.selected_topic_type_parent &&
+      writingCastleSummary.selected_topic_type_parent !==
+        writingCastleSummary.selected_topic_type
+      ? `${writingCastleSummary.selected_topic_type}（${writingCastleSummary.selected_topic_type_parent}）`
+      : writingCastleSummary.selected_topic_type
+    : "";
+  const selectionSourceLabel = writingCastleSummary?.selection_source
+    ? selectionSourceLabels[writingCastleSummary.selection_source]
+    : "";
+  const materialSourceLabel = writingCastleSummary?.material_source_categories
+    ?.map((category) => materialSourceCategoryLabels[category])
+    .filter(Boolean)
+    .join("、");
 
   return (
     <main className="min-h-screen px-5 py-8 sm:px-8">
@@ -187,6 +225,33 @@ function ParentChildSummaryPageContent({ studentId }: { studentId: string }) {
                       <p className="rounded-lg bg-[var(--wen-bg)] px-4 py-3 font-semibold">
                         题目：{data.writing_castle_summary.topic}
                       </p>
+                      {topicTypeLabel ? (
+                        <p className="rounded-lg bg-[var(--wen-bg)] px-4 py-3 font-semibold">
+                          作文类型：{topicTypeLabel}
+                        </p>
+                      ) : null}
+                      {selectionSourceLabel ? (
+                        <p className="rounded-lg bg-[var(--wen-bg)] px-4 py-3 font-semibold">
+                          选择方式：{selectionSourceLabel}
+                        </p>
+                      ) : null}
+                      {materialSourceLabel ? (
+                        <p className="rounded-lg bg-[var(--wen-bg)] px-4 py-3 font-semibold">
+                          素材来源：{materialSourceLabel}
+                        </p>
+                      ) : null}
+                      {data.writing_castle_summary
+                        .unsupported_future_type_overridden ? (
+                        <p className="rounded-lg bg-[var(--wen-bg)] px-4 py-3 font-semibold">
+                          题型覆盖：孩子选择了相近的已支持类型
+                        </p>
+                      ) : null}
+                      {data.writing_castle_summary.copy_ready_ai_body_generated ===
+                      false ? (
+                        <p className="rounded-lg bg-[var(--wen-bg)] px-4 py-3 font-semibold">
+                          AI 正文：没有生成可直接照抄的作文正文
+                        </p>
+                      ) : null}
                       <p className="rounded-lg bg-[var(--wen-bg)] px-4 py-3 font-semibold">
                         审题：
                         {data.writing_castle_summary.topic_analysis_used

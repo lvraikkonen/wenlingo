@@ -556,8 +556,9 @@ def test_active_classroom_writing_castle_essay_returns_latest_open_outline(sessi
         json={"topic_text": "我学会了骑车"},
     )
     essay_id = start.json()["essay"]["id"]
+    selected = _select_generic_scaffold(client, essay_id)
     edited_outline = {
-        **start.json()["essay"]["outline"],
+        **selected.json()["essay"]["outline"],
         "sections": [
             {
                 "id": "outline-result",
@@ -585,6 +586,50 @@ def test_active_classroom_writing_castle_essay_returns_latest_open_outline(sessi
     payload = response.json()
     assert payload["essay"]["id"] == essay_id
     assert payload["essay"]["outline"]["sections"][0]["note"] == "最后我能自己骑过小区空地。"
+
+
+def test_active_classroom_writing_castle_essay_allows_unselected_scaffold(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    assert start.status_code == 201
+    essay_id = start.json()["essay"]["id"]
+
+    response = client.get(
+        f"/api/students/{student.id}/writing-castle/classroom/active",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["essay"]["id"] == essay_id
+
+
+def test_active_classroom_writing_castle_essay_rejects_scaffold_ref_mismatch(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+    _select_generic_scaffold(client, essay_id)
+    saved = session.get(Essay, essay_id)
+    material = dict(saved.material_card)
+    material["scaffold_ref"] = {}
+    saved.material_card = material
+    session.add(saved)
+    session.commit()
+
+    response = client.get(
+        f"/api/students/{student.id}/writing-castle/classroom/active",
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "scaffold_ref mismatch"
 
 
 def test_generation_endpoints_are_idempotent_and_do_not_overwrite_child_edits(session, client):
