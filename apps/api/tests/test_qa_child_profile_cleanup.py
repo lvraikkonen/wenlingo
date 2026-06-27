@@ -204,7 +204,19 @@ def test_cleanup_execute_deletes_matched_child_data_and_keeps_parent_scoped_rows
     assert session.get(StudentProfile, regular_child.id) is not None
     assert session.get(ParentAccount, account.id) is not None
     assert session.get(ParentUser, parent.id) is not None
-    assert count_rows(session, ProductEvent) == 2
+    qa_events = session.exec(
+        select(ProductEvent).where(ProductEvent.student_id == qa_child.id)
+    ).all()
+    regular_child_events = session.exec(
+        select(ProductEvent).where(ProductEvent.student_id == regular_child.id)
+    ).all()
+    parent_level_events = session.exec(
+        select(ProductEvent).where(ProductEvent.student_id.is_(None))
+    ).all()
+    assert qa_events == []
+    assert len(regular_child_events) == 1
+    assert len(parent_level_events) == 2
+    assert count_rows(session, ProductEvent) == 3
 
 
 def test_cleanup_execute_zero_matches_is_noop(session):

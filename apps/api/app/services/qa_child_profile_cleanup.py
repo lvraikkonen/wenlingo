@@ -275,7 +275,7 @@ def _delete_child_rows(session: Session, row: QAChildProfileCleanupChild) -> Non
     _delete_where(session, LLMCallLog, LLMCallLog.student_id, student_id)
     _delete_where(session, FeedbackReaction, FeedbackReaction.student_id, student_id)
     _delete_where(session, ParentFeedback, ParentFeedback.student_id, student_id)
-    _delete_product_events_for_parent_children(session, row.parent_id)
+    _delete_where(session, ProductEvent, ProductEvent.student_id, student_id)
 
     child = session.get(StudentProfile, student_id)
     if child is not None:
@@ -298,14 +298,3 @@ def _delete_where_in(session: Session, model, field, values: set[str]) -> int:
         session.delete(row)
     return len(rows)
 
-
-def _delete_product_events_for_parent_children(session: Session, parent_id: str) -> int:
-    rows = session.exec(
-        select(ProductEvent).where(
-            ProductEvent.parent_id == parent_id,
-            ProductEvent.student_id.is_not(None),
-        )
-    ).all()
-    for row in rows:
-        session.delete(row)
-    return len(rows)
