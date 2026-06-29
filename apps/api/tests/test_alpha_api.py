@@ -375,6 +375,9 @@ def test_alpha_summary_includes_writing_castle_process_summary(session, client):
     payload = response.json()
     assert payload["writing_castle_summary"] == {
         "topic": "我学会了骑车",
+        "topic_origin": "teacher_provided",
+        "topic_origin_label": "老师布置题目",
+        "selected_topic_idea": None,
         "selected_topic_type": "写一个人",
         "selected_topic_type_parent": "写人类：特点 + 事例",
         "selection_source": "manual",
@@ -415,6 +418,52 @@ def test_alpha_summary_allows_unselected_writing_castle_scaffold(session, client
     assert summary["selected_topic_type"] == ""
     assert summary["selected_topic_type_parent"] == ""
     assert summary["selection_source"] == ""
+
+
+def test_alpha_summary_marks_teacher_provided_topic_origin_for_classroom_path(session, client):
+    parent = create_alpha_parent(client, session)
+    child = create_alpha_child(client, parent["id"])
+    start = client.post(
+        f"/api/students/{child['id']}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+
+    response = client.get(
+        f"/api/alpha/parents/{parent['id']}/children/{child['id']}/summary"
+    )
+
+    assert start.status_code == 201
+    assert response.status_code == 200
+    summary = response.json()["writing_castle_summary"]
+    assert summary["topic_origin"] == "teacher_provided"
+    assert summary["topic_origin_label"] == "老师布置题目"
+
+
+def test_alpha_summary_marks_ai_topic_idea_origin(session, client):
+    parent = create_alpha_parent(client, session)
+    child = create_alpha_child(client, parent["id"])
+    ideas = client.post(
+        f"/api/students/{child['id']}/writing-castle/ai-topic-ideas",
+        json={"interest_text": "足球"},
+    ).json()
+    client.post(
+        f"/api/students/{child['id']}/writing-castle/ai-topic-essay",
+        json={
+            "idea_batch_id": ideas["idea_batch_id"],
+            "selected_idea_id": ideas["ideas"][0]["id"],
+        },
+    )
+
+    response = client.get(
+        f"/api/alpha/parents/{parent['id']}/children/{child['id']}/summary"
+    )
+
+    assert response.status_code == 200
+    summary = response.json()["writing_castle_summary"]
+    assert summary["topic_origin"] == "ai_topic_idea"
+    assert summary["topic_origin_label"] == "AI 出题灵感，孩子选择"
+    assert summary["selected_topic_idea"]["id"] == ideas["ideas"][0]["id"]
+    assert summary["copy_ready_ai_body_generated"] is False
 
 
 def test_alpha_summary_rejects_writing_castle_scaffold_ref_mismatch(session, client):
@@ -474,6 +523,9 @@ def test_alpha_summary_tolerates_malformed_writing_castle_json(session, client):
     assert response.status_code == 200
     assert response.json()["writing_castle_summary"] == {
         "topic": "旧数据题目",
+        "topic_origin": "teacher_provided",
+        "topic_origin_label": "老师布置题目",
+        "selected_topic_idea": None,
         "selected_topic_type": "",
         "selected_topic_type_parent": "",
         "selection_source": "",

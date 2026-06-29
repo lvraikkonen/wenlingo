@@ -548,8 +548,18 @@ def _writing_castle_summary(session: Session, student_id: str) -> dict[str, Any]
             EssayVersion.version_label == "revision",
         )
     ).first()
+    topic_origin = str(outline.get("topic_origin") or "teacher_provided")
+    topic_origin_label = {
+        "teacher_provided": "老师布置题目",
+        "ai_topic_idea": "AI 出题灵感，孩子选择",
+        "direct_draft": "直接写初稿",
+    }.get(topic_origin, "老师布置题目")
     return {
         "topic": essay.title,
+        "topic_origin": topic_origin,
+        "topic_origin_label": topic_origin_label,
+        "selected_topic_idea": _json_object(outline.get("selected_topic_idea"))
+        or None,
         "selected_topic_type": scaffold.get("display_name_child", ""),
         "selected_topic_type_parent": scaffold.get("display_name_parent", ""),
         "selection_source": scaffold.get("selection_source", ""),

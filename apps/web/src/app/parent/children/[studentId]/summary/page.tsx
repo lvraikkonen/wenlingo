@@ -225,6 +225,12 @@ function ParentChildSummaryPageContent({ studentId }: { studentId: string }) {
                       <p className="rounded-lg bg-[var(--wen-bg)] px-4 py-3 font-semibold">
                         题目：{data.writing_castle_summary.topic}
                       </p>
+                      {data.writing_castle_summary.topic_origin_label ? (
+                        <p className="rounded-lg bg-[var(--wen-bg)] px-4 py-3 font-semibold">
+                          题目来源：
+                          {data.writing_castle_summary.topic_origin_label}
+                        </p>
+                      ) : null}
                       {topicTypeLabel ? (
                         <p className="rounded-lg bg-[var(--wen-bg)] px-4 py-3 font-semibold">
                           作文类型：{topicTypeLabel}

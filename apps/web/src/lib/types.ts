@@ -346,6 +346,15 @@ export type WritingCastleSummarySelectionSource = ScaffoldSelectionSource | "";
 
 export type WritingCastleProcessSummary = {
   topic: string;
+  topic_origin?: "teacher_provided" | "ai_topic_idea" | "direct_draft" | "";
+  topic_origin_label?: string | null;
+  selected_topic_idea?: {
+    id: string;
+    title: string;
+    topic_type: TopicType;
+    topic_variant: TopicVariant;
+    child_safe_prompt?: string;
+  } | null;
   selected_topic_type?: string | null;
   selected_topic_type_parent?: string | null;
   selection_source?: WritingCastleSummarySelectionSource | null;

@@ -182,6 +182,56 @@ test("summary page renders writing castle process summary", async () => {
   expect(screen.getByText("初稿：已完成")).toBeInTheDocument();
 });
 
+test("summary page renders ai topic origin and no body generation", async () => {
+  vi.mocked(getMyAlphaChildSummary).mockResolvedValueOnce({
+    parent_id: "parent-1",
+    child,
+    assessment_completed: true,
+    practice_counts: { assessments: 0, sentence_trainings: 0, essays: 1 },
+    ability_changes: [],
+    recent_highlight: "孩子完成了一次作文构思。",
+    sentence_training_summary: null,
+    next_suggestion: "下一次继续练习把素材写具体。",
+    empty_state: null,
+    writing_castle_summary: {
+      topic: "足球场边的小发现",
+      topic_origin: "ai_topic_idea",
+      topic_origin_label: "AI 出题灵感，孩子选择",
+      selected_topic_type: "写景作文",
+      selected_topic_type_parent: "写景类：地点 / 景物 / 体验",
+      selection_source: "ai_suggested",
+      material_source_categories: [],
+      unsupported_future_type_overridden: false,
+      copy_ready_ai_body_generated: false,
+      topic_analysis_used: false,
+      topic_focus_confirmed: false,
+      topic_focus_edited: false,
+      material_questions_answered: 0,
+      material_cards_retained: 0,
+      outline_confirmed: false,
+      outline_edited: false,
+      first_draft_completed: false,
+      revision_completed: false,
+      settlement_completed: false,
+      selected_topic_idea: {
+        id: "idea-1",
+        title: "足球场边的小发现",
+        topic_type: "place_scenery",
+        topic_variant: "default",
+        child_safe_prompt: "选择你熟悉的一处球场边景物来写。",
+      },
+    },
+  });
+
+  await renderSummaryPage();
+
+  expect(await screen.findByText("作文构思过程")).toBeInTheDocument();
+  expect(screen.getByText("题目来源：AI 出题灵感，孩子选择")).toBeInTheDocument();
+  expect(
+    screen.getByText("AI 正文：没有生成可直接照抄的作文正文"),
+  ).toBeInTheDocument();
+});
+
 test("summary page omits empty writing castle selection source", async () => {
   vi.mocked(getMyAlphaChildSummary).mockResolvedValueOnce({
     parent_id: "parent-1",
