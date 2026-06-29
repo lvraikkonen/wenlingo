@@ -76,6 +76,21 @@ def test_schema_version_stays_v06b1_and_template_versions_are_decoupled():
     assert new_snapshot["scaffold_template_version"] == "place_scenery.default.v0.6c"
 
 
+@pytest.mark.parametrize(
+    ("topic_type", "slot_id", "content_kind"),
+    [
+        ("place_scenery", "place_subject", "subject"),
+        ("animal_object_observation", "observation_subject", "subject"),
+        ("story_adaptation", "kept_elements", "source"),
+    ],
+)
+def test_new_scaffold_family_slot_content_kinds_match_spec(topic_type, slot_id, content_kind):
+    snapshot = resolve_scaffold_snapshot(topic_type, None, "manual")
+    slots_by_id = {slot["id"]: slot for slot in snapshot["material_slots"]}
+
+    assert slots_by_id[slot_id]["content_kind"] == content_kind
+
+
 def test_aliases_map_to_variants():
     learned = resolve_scaffold_snapshot(
         topic_type="learned_skill",

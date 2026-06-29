@@ -224,7 +224,7 @@ TEMPLATES: dict[tuple[str, str], dict[str, Any]] = {
         "display_name_child": "写一处景物",
         "display_name_parent": "写景类：地点 / 景色 / 游览 / 推荐",
         "material_slots": [
-            {"id": "place_subject", "label": "写哪里", "content_kind": "content"},
+            {"id": "place_subject", "label": "写哪里", "content_kind": "subject"},
             {"id": "observation_order", "label": "观察顺序", "content_kind": "content"},
             {"id": "key_scene", "label": "最想写的景色", "content_kind": "content"},
             {"id": "sensory_detail", "label": "看到/听到/闻到的细节", "content_kind": "content"},
@@ -247,7 +247,7 @@ TEMPLATES: dict[tuple[str, str], dict[str, Any]] = {
         "display_name_child": "观察一种动物、植物或物品",
         "display_name_parent": "观察类：动物 / 植物 / 物品",
         "material_slots": [
-            {"id": "observation_subject", "label": "观察对象", "content_kind": "content"},
+            {"id": "observation_subject", "label": "观察对象", "content_kind": "subject"},
             {"id": "appearance_detail", "label": "外形特点", "content_kind": "content"},
             {"id": "change_or_habit", "label": "变化或习性", "content_kind": "content"},
             {"id": "sensory_detail", "label": "感官细节", "content_kind": "content"},
@@ -383,7 +383,7 @@ TEMPLATES: dict[tuple[str, str], dict[str, Any]] = {
         "display_name_parent": "故事改编类：续写 / 新编 / 改写",
         "material_slots": [
             {"id": "original_basis", "label": "原故事基础", "content_kind": "source"},
-            {"id": "kept_elements", "label": "保留的人物或设定", "content_kind": "content"},
+            {"id": "kept_elements", "label": "保留的人物或设定", "content_kind": "source"},
             {"id": "change_point", "label": "改变从哪里开始", "content_kind": "content"},
             {"id": "new_event", "label": "新发生的事", "content_kind": "content"},
             {"id": "new_ending", "label": "新的结局", "content_kind": "content"},
