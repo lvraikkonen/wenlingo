@@ -37,6 +37,7 @@ from app.services.writing_castle_ai import (
     fallback_outline,
     fallback_topic_analysis,
 )
+from app.services.writing_castle_sources import validate_slot_level_source_policy
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -346,6 +347,26 @@ def _validate_v06b_material_card_source_refs(
     for card in output.cards:
         if not card.placeholder and not card.source_refs:
             raise LLMTaskValidationError("v0.6b material cards require source_refs")
+
+
+def _validate_material_card_slot_level_source_policy(
+    output: MaterialCardsResult,
+    scaffold: dict | None,
+) -> None:
+    if not scaffold:
+        return
+    topic_type = str(scaffold.get("topic_type") or "")
+    for card in output.cards:
+        if card.placeholder:
+            continue
+        try:
+            validate_slot_level_source_policy(
+                topic_type=topic_type,
+                slot_id=card.category,
+                source_refs=card.source_refs,
+            )
+        except ValueError as exc:
+            raise LLMTaskValidationError(str(exc)) from exc
 
 
 def _validate_outline_source_ids(
@@ -728,6 +749,7 @@ async def material_card_generation(
             valid_source_ids,
             known_reading_material_refs,
         )
+        _validate_material_card_slot_level_source_policy(output, scaffold)
         _validate_material_card_template_slots(output, scaffold)
 
     return await runner.run(

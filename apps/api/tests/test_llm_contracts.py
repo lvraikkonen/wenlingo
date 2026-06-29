@@ -27,6 +27,7 @@ from app.services.writing_castle_ai import (
     fallback_material_questions,
     fallback_outline,
 )
+from app.services.writing_castle_scaffold import resolve_scaffold_snapshot
 
 
 def test_essay_feedback_rejects_more_than_one_revision_task():
@@ -1040,6 +1041,117 @@ async def test_material_card_generation_accepts_valid_source_ref_answer_id():
     )
 
     validate_output(valid_output)
+
+
+@pytest.mark.asyncio
+async def test_practical_writing_content_slots_reject_topic_requirement_only():
+    scaffold = resolve_scaffold_snapshot("practical_writing", "letter", "manual")
+    runner = RecordingRunner(
+        MaterialCardsResult(
+            cards=[
+                {
+                    "id": "card-main-message",
+                    "category": "main_message",
+                    "text": "我想告诉老师我很感谢她。",
+                    "source_answer_ids": ["answer-1"],
+                    "source_refs": [
+                        {
+                            "source_type": "topic_requirement",
+                            "answer_id": "answer-1",
+                            "quote_or_summary": "给老师写一封信",
+                        }
+                    ],
+                    "placeholder": False,
+                }
+            ],
+            encouragement="先确认自己的意思。",
+        )
+    )
+
+    await material_card_generation(
+        runner,
+        answers=[
+            {"id": "answer-1", "question_id": "q-main", "text": "给老师写一封信", "skipped": False}
+        ],
+        scaffold=scaffold,
+    )
+
+    with pytest.raises(LLMTaskValidationError, match="main_message requires child-provided source"):
+        runner.calls[0]["validate_output"](runner.output)
+
+
+@pytest.mark.asyncio
+async def test_practical_writing_structural_slots_allow_topic_requirement():
+    scaffold = resolve_scaffold_snapshot("practical_writing", "letter", "manual")
+    output = MaterialCardsResult(
+        cards=[
+            {
+                "id": "card-recipient",
+                "category": "recipient",
+                "text": "写给老师",
+                "source_answer_ids": ["answer-1"],
+                "source_refs": [
+                    {
+                        "source_type": "topic_requirement",
+                        "answer_id": "answer-1",
+                        "quote_or_summary": "给老师写一封信",
+                    }
+                ],
+                "placeholder": False,
+            }
+        ],
+        encouragement="先确认格式对象。",
+    )
+    runner = RecordingRunner(output)
+
+    await material_card_generation(
+        runner,
+        answers=[
+            {"id": "answer-1", "question_id": "q-format", "text": "给老师写一封信", "skipped": False}
+        ],
+        scaffold=scaffold,
+    )
+
+    runner.calls[0]["validate_output"](output)
+
+
+@pytest.mark.asyncio
+async def test_story_adaptation_new_event_rejects_topic_requirement_only():
+    scaffold = resolve_scaffold_snapshot("story_adaptation", None, "manual")
+    output = MaterialCardsResult(
+        cards=[
+            {
+                "id": "card-new-event",
+                "category": "new_event",
+                "text": "乌鸦又找到一块石头。",
+                "source_answer_ids": ["answer-1"],
+                "source_refs": [
+                    {
+                        "source_type": "topic_requirement",
+                        "answer_id": "answer-1",
+                        "quote_or_summary": "续写故事",
+                    }
+                ],
+                "placeholder": False,
+            }
+        ],
+        encouragement="先确认新情节。",
+    )
+    runner = RecordingRunner(output)
+
+    await material_card_generation(
+        runner,
+        answers=[
+            {"id": "answer-1", "question_id": "q-new", "text": "续写故事", "skipped": False}
+        ],
+        scaffold=scaffold,
+    )
+
+    with pytest.raises(
+        LLMTaskValidationError,
+        match="new_event requires imagined_setting or child confirmation",
+    ):
+        runner.calls[0]["validate_output"](output)
 
 
 @pytest.mark.asyncio

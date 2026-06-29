@@ -7,6 +7,7 @@ from app.services.writing_castle_scaffold import SCHEMA_VERSION as CURRENT_SCHEM
 from app.services.writing_castle_sources import (
     normalize_source_refs,
     validate_expository_fact_sources,
+    validate_slot_level_source_policy,
 )
 
 LEGACY_SCHEMA_VERSION = "v0.6a.1"
@@ -347,6 +348,12 @@ def validate_card_sources(
             and category not in content_kinds
         ):
             raise ValueError(f"unknown material card category: {category}")
+        if not card.get("placeholder") and isinstance(scaffold, dict):
+            validate_slot_level_source_policy(
+                topic_type=str(scaffold.get("topic_type") or ""),
+                slot_id=category,
+                source_refs=refs,
+            )
         if (
             not card.get("placeholder")
             and content_kinds.get(category) == "factual"

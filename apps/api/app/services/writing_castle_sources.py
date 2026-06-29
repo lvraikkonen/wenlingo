@@ -11,6 +11,28 @@ VALID_SOURCE_TYPES = {
     "child_confirmed",
 }
 FACT_SOURCE_TYPES = {"reading_material", "observation", "child_confirmed"}
+PRACTICAL_STRUCTURAL_SLOTS = {
+    "format_type",
+    "audience_or_date",
+    "date_weather",
+    "recipient",
+    "signature_date",
+    "signature_or_date",
+    "proposal_topic",
+}
+PRACTICAL_CONTENT_SLOTS = {
+    "main_message",
+    "reason_or_background",
+    "specific_details",
+    "closing_or_call",
+    "day_event",
+    "key_detail",
+    "feeling_or_discovery",
+    "problem_observed",
+    "specific_suggestions",
+}
+STORY_ADAPTATION_SOURCE_SLOTS = {"original_basis", "kept_elements"}
+STORY_ADAPTATION_CHILD_DECISION_SLOTS = {"change_point", "new_event", "new_ending", "new_meaning"}
 
 
 def _clean(value: Any) -> str:
@@ -29,6 +51,25 @@ def normalize_source_refs(source_refs: list[dict[str, Any]] | None) -> list[dict
             raise ValueError(f"unknown source_type: {source_type}")
         normalized.append({**ref, "source_type": source_type})
     return normalized
+
+
+def source_types(source_refs: list[dict[str, Any]]) -> set[str]:
+    return {ref["source_type"] for ref in normalize_source_refs(source_refs)}
+
+
+def validate_slot_level_source_policy(
+    *,
+    topic_type: str,
+    slot_id: str,
+    source_refs: list[dict[str, Any]],
+) -> None:
+    types = source_types(source_refs)
+    if topic_type == "practical_writing" and slot_id in PRACTICAL_CONTENT_SLOTS:
+        if not types.intersection({"real_experience", "observation", "child_confirmed"}):
+            raise ValueError(f"{slot_id} requires child-provided source")
+    if topic_type == "story_adaptation" and slot_id in STORY_ADAPTATION_CHILD_DECISION_SLOTS:
+        if not types.intersection({"imagined_setting", "child_confirmed"}):
+            raise ValueError(f"{slot_id} requires imagined_setting or child confirmation")
 
 
 def _topic_requirement_explicitly_contains(text: str, ref: dict[str, Any]) -> bool:
