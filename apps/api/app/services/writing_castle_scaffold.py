@@ -435,14 +435,17 @@ def detect_unsupported_future_type(topic_text: str) -> str | None:
 
 
 def supported_topic_type_choices() -> list[dict[str, Any]]:
-    return [
-        {
-            "topic_type": topic_type,
-            "display_name_child": resolve_scaffold_snapshot(topic_type, None, "manual")["display_name_child"],
-            "display_name_parent": resolve_scaffold_snapshot(topic_type, None, "manual")["display_name_parent"],
-        }
-        for topic_type in P0_TOPIC_TYPES
-    ]
+    choices = []
+    for topic_type in P0_TOPIC_TYPES:
+        snapshot = resolve_scaffold_snapshot(topic_type, None, "manual")
+        choices.append(
+            {
+                "topic_type": topic_type,
+                "display_name_child": snapshot["display_name_child"],
+                "display_name_parent": snapshot["display_name_parent"],
+            }
+        )
+    return choices
 
 
 def _resolve_template_key(topic_type: str, topic_variant: str | None) -> tuple[str, str, str]:

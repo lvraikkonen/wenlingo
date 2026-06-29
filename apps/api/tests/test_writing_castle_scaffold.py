@@ -1,10 +1,30 @@
 import pytest
 
+from app.services import writing_castle_scaffold as scaffold_registry
 from app.services.writing_castle_scaffold import (
+    DEFAULT_VARIANTS,
     P0_TOPIC_TYPES,
+    TEMPLATE_VERSION_SUFFIXES,
+    TEMPLATES,
+    VARIANT_ALIASES,
     detect_unsupported_future_type,
     resolve_scaffold_snapshot,
     supported_topic_type_choices,
+)
+
+V06C_CONCRETE_TEMPLATES = (
+    ("place_scenery", None, "place_scenery.default.v0.6c"),
+    ("animal_object_observation", None, "animal_object_observation.default.v0.6c"),
+    (
+        "animal_object_observation",
+        "observation_diary",
+        "animal_object_observation.observation_diary.v0.6c",
+    ),
+    ("practical_writing", None, "practical_writing.default.v0.6c"),
+    ("practical_writing", "diary", "practical_writing.diary.v0.6c"),
+    ("practical_writing", "letter", "practical_writing.letter.v0.6c"),
+    ("practical_writing", "proposal", "practical_writing.proposal.v0.6c"),
+    ("story_adaptation", None, "story_adaptation.default.v0.6c"),
 )
 
 
@@ -139,3 +159,96 @@ def test_unknown_family_is_rejected():
 
 def test_p0_topic_type_constant_matches_choices():
     assert P0_TOPIC_TYPES == tuple(choice["topic_type"] for choice in supported_topic_type_choices())
+
+
+@pytest.mark.parametrize(("topic_type", "variant", "template_version"), V06C_CONCRETE_TEMPLATES)
+def test_v06c_concrete_template_versions_are_exact(topic_type, variant, template_version):
+    snapshot = resolve_scaffold_snapshot(topic_type, variant, "manual")
+
+    assert snapshot["scaffold_template_version"] == template_version
+
+
+@pytest.mark.parametrize(
+    ("variant", "slot_ids", "outline_ids"),
+    [
+        (
+            "diary",
+            ["date_weather", "day_event", "key_detail", "feeling_or_discovery"],
+            ["date_weather", "event_process", "key_detail", "feeling_discovery"],
+        ),
+        (
+            "letter",
+            [
+                "recipient",
+                "main_message",
+                "reason_or_background",
+                "specific_details",
+                "blessing",
+                "signature_date",
+            ],
+            ["salutation", "main_message", "details_or_reasons", "blessing", "signature_date"],
+        ),
+        (
+            "proposal",
+            [
+                "proposal_topic",
+                "problem_observed",
+                "reason_or_background",
+                "specific_suggestions",
+                "closing_or_call",
+                "signature_or_date",
+            ],
+            ["problem", "reason", "suggestions", "call", "signature_date"],
+        ),
+    ],
+)
+def test_practical_writing_true_variant_ids_match_spec(variant, slot_ids, outline_ids):
+    snapshot = resolve_scaffold_snapshot("practical_writing", variant, "manual")
+
+    assert [slot["id"] for slot in snapshot["material_slots"]] == slot_ids
+    assert [section["id"] for section in snapshot["outline_sections"]] == outline_ids
+
+
+@pytest.mark.parametrize(("topic_type", "variant", "_template_version"), V06C_CONCRETE_TEMPLATES)
+def test_v06c_snapshots_include_non_empty_source_policy(topic_type, variant, _template_version):
+    snapshot = resolve_scaffold_snapshot(topic_type, variant, "manual")
+
+    assert snapshot["source_policy"]["allowed"]
+    assert snapshot["source_policy"]["required_for_content"]
+
+
+def test_registry_defaults_exist_for_every_p0_family():
+    assert set(DEFAULT_VARIANTS) == set(P0_TOPIC_TYPES)
+
+
+def test_registry_default_keys_point_at_concrete_templates():
+    assert all((topic_type, variant) in TEMPLATES for topic_type, variant in DEFAULT_VARIANTS.items())
+
+
+def test_registry_template_suffix_keys_point_at_concrete_templates():
+    assert all(key in TEMPLATES for key in TEMPLATE_VERSION_SUFFIXES)
+
+
+def test_registry_alias_targets_resolve():
+    for topic_type, variant in VARIANT_ALIASES:
+        snapshot = resolve_scaffold_snapshot(topic_type, variant, "manual")
+
+        assert (snapshot["topic_type"], snapshot["topic_variant"]) == VARIANT_ALIASES[(topic_type, variant)]
+
+
+def test_supported_topic_type_choices_resolves_each_snapshot_once(monkeypatch):
+    calls = []
+
+    def fake_resolve_scaffold_snapshot(topic_type, topic_variant, selection_source):
+        calls.append((topic_type, topic_variant, selection_source))
+        return {
+            "display_name_child": f"{topic_type}-child",
+            "display_name_parent": f"{topic_type}-parent",
+        }
+
+    monkeypatch.setattr(scaffold_registry, "resolve_scaffold_snapshot", fake_resolve_scaffold_snapshot)
+
+    choices = supported_topic_type_choices()
+
+    assert len(choices) == len(P0_TOPIC_TYPES)
+    assert calls == [(topic_type, None, "manual") for topic_type in P0_TOPIC_TYPES]
