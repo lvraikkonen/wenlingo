@@ -246,6 +246,22 @@ class Essay(SQLModel, table=True):
     created_at: datetime = timestamp_field()
 
 
+class WritingTopicIdeaBatch(SQLModel, table=True):
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    student_id: str = Field(foreign_key="studentprofile.id", index=True)
+    grade_label: str = Field(index=True)
+    interest_input_present: bool = False
+    ideas: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    expires_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False, index=True))
+    consumed_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
+    selected_idea_id: str = Field(default="", index=True)
+    created_essay_id: str | None = Field(default=None, foreign_key="essay.id", index=True)
+    created_at: datetime = timestamp_field()
+
+
 class EssayVersion(SQLModel, table=True):
     __table_args__ = (
         UniqueConstraint("essay_id", "version_label", name="uq_essay_version_label_per_essay"),

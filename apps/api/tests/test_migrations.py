@@ -117,3 +117,18 @@ def test_v05b_ai_sentence_training_has_migration():
     assert "total_tokens" in migration_text
     assert "estimated_cost" in migration_text
     assert "latency_ms" in migration_text
+
+
+def test_v06c_topic_idea_batch_has_migration():
+    migration_path = Path("app/db/migrations/versions/20260629_v06c_topic_idea_batch.py")
+    migration_text = migration_path.read_text(encoding="utf-8")
+
+    assert "20260629_v06c_idea_batch" in migration_text
+    assert 'down_revision = "20260625_v06b_llm_meta"' in migration_text
+    assert "writingtopicideabatch" in migration_text
+    assert "student_id" in migration_text
+    assert "ideas" in migration_text
+    assert "expires_at" in migration_text
+    assert "consumed_at" in migration_text
+    assert "selected_idea_id" in migration_text
+    assert "created_essay_id" in migration_text
