@@ -1,5 +1,6 @@
 import type {
   ActiveWritingCastleEssayResponse,
+  AiTopicIdeasResponse,
   AlphaChildCreateResponse,
   AlphaChildSummary,
   AlphaChildrenResponse,
@@ -291,6 +292,34 @@ export function getActiveClassroomWritingCastleEssay(
 ): Promise<ActiveWritingCastleEssayResponse> {
   return requestJson<ActiveWritingCastleEssayResponse>(
     `/api/students/${studentId}/writing-castle/classroom/active`,
+  );
+}
+
+export function generateAiTopicIdeas(
+  studentId: string,
+  payload: { interest_text: string },
+): Promise<AiTopicIdeasResponse> {
+  return requestJson<AiTopicIdeasResponse>(
+    `/api/students/${studentId}/writing-castle/ai-topic-ideas`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function createAiTopicEssay(
+  studentId: string,
+  payload: { idea_batch_id: string; selected_idea_id: string },
+): Promise<WritingCastleEssayResponse> {
+  return requestJson<WritingCastleEssayResponse>(
+    `/api/students/${studentId}/writing-castle/ai-topic-essay`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
   );
 }
 

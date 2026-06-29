@@ -175,13 +175,13 @@ export type TopicType =
   | "generic_narrative"
   | "person_portrait"
   | "imaginative_story"
-  | "expository_introduction";
-
-export type FutureTopicType =
+  | "expository_introduction"
   | "place_scenery"
   | "animal_object_observation"
   | "practical_writing"
-  | "story_adaptation"
+  | "story_adaptation";
+
+export type FutureTopicType =
   | "story_summary"
   | "reading_response_recommendation"
   | "central_idea_reflection"
@@ -238,6 +238,22 @@ export type ScaffoldRef = {
   topic_type: TopicType;
   topic_variant: TopicVariant;
   scaffold_template_version: string;
+};
+
+export type AiTopicIdea = {
+  id: string;
+  title: string;
+  topic_type: TopicType;
+  topic_variant: TopicVariant;
+  why_it_fits_child_interest: string;
+  practice_focus: string;
+  child_safe_prompt: string;
+};
+
+export type AiTopicIdeasResponse = {
+  idea_batch_id: string;
+  expires_at: string;
+  ideas: AiTopicIdea[];
 };
 
 export type MaterialAnswer = {
@@ -303,6 +319,9 @@ export type WritingCastleEssay = {
   outline: {
     schema_version: "v0.6a.1" | "v0.6b.1";
     scaffold?: WritingCastleScaffoldState | null;
+    topic_origin?: "teacher_provided" | "ai_topic_idea" | "direct_draft" | "";
+    selected_topic_idea?: Partial<AiTopicIdea> | null;
+    topic_requirement?: Record<string, unknown> | null;
     topic_analysis: WritingCastleTopicAnalysis;
     child_topic_focus: {
       text: string;

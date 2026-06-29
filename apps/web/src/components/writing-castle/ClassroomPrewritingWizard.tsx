@@ -145,26 +145,62 @@ function stepFromEssay(essay: WritingCastleEssay): Step {
   return "topic_entry";
 }
 
+function stepFromInitialEssay(essay: WritingCastleEssay): Step {
+  if (
+    essay.outline.scaffold &&
+    essay.outline.topic_analysis.status !== "generated"
+  ) {
+    return "topic_analysis";
+  }
+  return stepFromEssay(essay);
+}
+
 export function ClassroomPrewritingWizard({
   studentId,
   onFeedback,
+  initialEssay = null,
+  skipActiveResume = false,
+  onEssayChange,
 }: {
   studentId: string;
   onFeedback: (result: EssayResponse) => void;
+  initialEssay?: WritingCastleEssay | null;
+  skipActiveResume?: boolean;
+  onEssayChange?: (essay: WritingCastleEssay) => void;
 }) {
-  const [step, setStep] = useState<Step>("topic_entry");
-  const [topicText, setTopicText] = useState("");
-  const [essay, setEssay] = useState<WritingCastleEssay | null>(null);
-  const [focus, setFocus] = useState("");
-  const [suggestedFocus, setSuggestedFocus] = useState("");
-  const [answers, setAnswers] = useState<MaterialAnswer[]>([]);
-  const [cards, setCards] = useState<MaterialCardSlot[]>([]);
-  const [sections, setSections] = useState<WritingOutlineSection[]>([]);
+  const [step, setStep] = useState<Step>(() =>
+    initialEssay ? stepFromInitialEssay(initialEssay) : "topic_entry",
+  );
+  const [topicText, setTopicText] = useState(() => initialEssay?.title ?? "");
+  const [essay, setEssay] = useState<WritingCastleEssay | null>(
+    () => initialEssay,
+  );
+  const [focus, setFocus] = useState(() => {
+    if (!initialEssay) {
+      return "";
+    }
+    const suggested = initialEssay.outline.topic_analysis.suggested_focus ?? "";
+    return initialEssay.outline.child_topic_focus.text || suggested;
+  });
+  const [suggestedFocus, setSuggestedFocus] = useState(
+    () => initialEssay?.outline.topic_analysis.suggested_focus ?? "",
+  );
+  const [answers, setAnswers] = useState<MaterialAnswer[]>(() =>
+    initialEssay ? answersFromEssay(initialEssay) : [],
+  );
+  const [cards, setCards] = useState<MaterialCardSlot[]>(
+    () => initialEssay?.material_card.cards ?? [],
+  );
+  const [sections, setSections] = useState<WritingOutlineSection[]>(
+    () => initialEssay?.outline.sections ?? [],
+  );
   const [supportedTopicTypes, setSupportedTopicTypes] = useState<TopicTypeChoice[]>(
     [],
   );
   const [unsupportedFutureType, setUnsupportedFutureType] =
-    useState<FutureTopicType | null>(null);
+    useState<FutureTopicType | null>(
+      () => initialEssay?.outline.scaffold?.unsupported_future_type ?? null,
+    );
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const [pendingMessages, setPendingMessages] = useState<readonly string[]>([]);
@@ -207,6 +243,9 @@ export function ClassroomPrewritingWizard({
     let isMounted = true;
 
     async function loadActiveEssay() {
+      if (skipActiveResume) {
+        return;
+      }
       try {
         const response = await getActiveClassroomWritingCastleEssay(studentId);
         if (!isMounted || ignoreActiveResumeRef.current || !response.essay) {
@@ -225,7 +264,59 @@ export function ClassroomPrewritingWizard({
     return () => {
       isMounted = false;
     };
-  }, [studentId]);
+  }, [studentId, skipActiveResume]);
+
+  useEffect(() => {
+    if (!initialEssay) {
+      return;
+    }
+
+    let isMounted = true;
+    ignoreActiveResumeRef.current = true;
+    async function startInitialEssayAnalysis() {
+      if (
+        !initialEssay.outline.scaffold ||
+        initialEssay.outline.topic_analysis.status === "generated"
+      ) {
+        return;
+      }
+
+      setPendingMessages([...loadingMessages("topic_analysis")]);
+      setPendingMessageIndex(0);
+      setError("");
+      try {
+        const analyzed = await generateTopicAnalysis(initialEssay.id);
+        onEssayChange?.(analyzed.essay);
+        if (!isMounted) {
+          return;
+        }
+        const nextSuggestedFocus =
+          analyzed.essay.outline.topic_analysis.suggested_focus ?? "";
+        setEssay(analyzed.essay);
+        setSuggestedFocus(nextSuggestedFocus);
+        setFocus(nextSuggestedFocus);
+        setAnswers(answersFromEssay(analyzed.essay));
+        setCards(analyzed.essay.material_card.cards);
+        setSections(analyzed.essay.outline.sections);
+        setStep("topic_analysis");
+      } catch {
+        if (isMounted) {
+          setError("这一步没有保存成功，可以重试，也可以先继续写。");
+        }
+      } finally {
+        if (isMounted) {
+          setPendingMessages([]);
+          setPendingMessageIndex(0);
+        }
+      }
+    }
+
+    void startInitialEssayAnalysis();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [initialEssay, onEssayChange]);
 
   useEffect(() => {
     if (pendingMessages.length <= 1) {

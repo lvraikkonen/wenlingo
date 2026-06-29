@@ -35,6 +35,8 @@ const apiMocks = vi.hoisted(() => ({
   submitPrewritingFirstDraft: vi.fn(),
   createEssay: vi.fn(),
   submitEssayRevision: vi.fn(),
+  generateAiTopicIdeas: vi.fn(),
+  createAiTopicEssay: vi.fn(),
 }));
 
 function essayState(overrides: Partial<WritingCastleEssay> = {}): WritingCastleEssay {
@@ -120,6 +122,8 @@ vi.mock("../src/lib/api", () => ({
   submitPrewritingFirstDraft: apiMocks.submitPrewritingFirstDraft,
   createEssay: apiMocks.createEssay,
   submitEssayRevision: apiMocks.submitEssayRevision,
+  generateAiTopicIdeas: apiMocks.generateAiTopicIdeas,
+  createAiTopicEssay: apiMocks.createAiTopicEssay,
 }));
 
 beforeEach(() => {
@@ -321,6 +325,63 @@ beforeEach(() => {
       ],
     },
   });
+  apiMocks.generateAiTopicIdeas.mockResolvedValue({
+    idea_batch_id: "batch-1",
+    expires_at: "2026-06-29T12:30:00Z",
+    ideas: [
+      {
+        id: "idea-1",
+        title: "足球场边的小发现",
+        topic_type: "place_scenery",
+        topic_variant: "default",
+        why_it_fits_child_interest: "和足球兴趣有关。",
+        practice_focus: "练习写景顺序。",
+        child_safe_prompt: "选择你熟悉的球场边景物来写。",
+      },
+      {
+        id: "idea-2",
+        title: "给足球队的一封信",
+        topic_type: "practical_writing",
+        topic_variant: "letter",
+        why_it_fits_child_interest: "和球队兴趣有关。",
+        practice_focus: "练习书信格式。",
+        child_safe_prompt: "选择一个真实想表达的对象。",
+      },
+      {
+        id: "idea-3",
+        title: "足球变形记",
+        topic_type: "imaginative_story",
+        topic_variant: "default",
+        why_it_fits_child_interest: "和足球想象有关。",
+        practice_focus: "练习想象设定。",
+        child_safe_prompt: "选择一个自己想象的变化。",
+      },
+    ],
+  });
+  apiMocks.createAiTopicEssay.mockResolvedValue({
+    essay: essayState({
+      title: "足球场边的小发现",
+      outline: {
+        ...essayState().outline,
+        schema_version: "v0.6b.1",
+        topic_origin: "ai_topic_idea",
+        selected_topic_idea: { id: "idea-1", title: "足球场边的小发现" },
+        scaffold: {
+          schema_version: "v0.6b.1",
+          topic_type: "place_scenery",
+          topic_variant: "default",
+          scaffold_template_version: "place_scenery.default.v0.6c",
+          resolved_at: "2026-06-29T00:00:00Z",
+          selection_source: "ai_suggested",
+          display_name_child: "写一个地方",
+          display_name_parent: "写景类：地点 / 景物 / 体验",
+          material_slots: [],
+          outline_sections: [],
+          source_policy: {},
+        },
+      },
+    }),
+  });
 });
 
 afterEach(() => {
@@ -350,6 +411,180 @@ async function selectNarrativeScaffold() {
   await userEvent.click(screen.getByRole("button", { name: "写一件事" }));
   expect(await screen.findByText("第 1 步 / 共 4 步：看懂题目")).toBeInTheDocument();
 }
+
+test("writing castle ai topic mode generates three ideas and selects one", async () => {
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "student-1" })} />
+      </Suspense>,
+    );
+  });
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "AI 出题作文" }),
+  );
+  await userEvent.type(screen.getByLabelText("兴趣或想写的方向"), "足球");
+  await userEvent.click(screen.getByRole("button", { name: "生成题目灵感" }));
+
+  const firstIdea = await screen.findByText("足球场边的小发现");
+  expect(firstIdea).toBeInTheDocument();
+  expect(screen.getByText("给足球队的一封信")).toBeInTheDocument();
+  expect(screen.getByText("足球变形记")).toBeInTheDocument();
+
+  const firstIdeaCard = firstIdea.closest("article");
+  expect(firstIdeaCard).not.toBeNull();
+  await userEvent.click(
+    within(firstIdeaCard as HTMLElement).getByRole("button", {
+      name: "选择这个题目",
+    }),
+  );
+
+  expect(apiMocks.generateAiTopicIdeas).toHaveBeenCalledWith("student-1", {
+    interest_text: "足球",
+  });
+  expect(apiMocks.createAiTopicEssay).toHaveBeenCalledWith("student-1", {
+    idea_batch_id: "batch-1",
+    selected_idea_id: "idea-1",
+  });
+  expect(await screen.findByText("第 1 步 / 共 4 步：看懂题目")).toBeInTheDocument();
+});
+
+test("ai topic generation failure shows retry without fallback topic cards", async () => {
+  apiMocks.generateAiTopicIdeas.mockRejectedValueOnce(new Error("boom"));
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "student-1" })} />
+      </Suspense>,
+    );
+  });
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "AI 出题作文" }),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "生成题目灵感" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "题目灵感暂时没有生成成功",
+  );
+  expect(screen.queryByText("推荐一本书")).not.toBeInTheDocument();
+});
+
+test("ai topic mode keeps analyzed essay when switching modes", async () => {
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "student-1" })} />
+      </Suspense>,
+    );
+  });
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "AI 出题作文" }),
+  );
+  await userEvent.type(screen.getByLabelText("兴趣或想写的方向"), "足球");
+  await userEvent.click(screen.getByRole("button", { name: "生成题目灵感" }));
+
+  const firstIdea = await screen.findByText("足球场边的小发现");
+  const firstIdeaCard = firstIdea.closest("article");
+  expect(firstIdeaCard).not.toBeNull();
+  await userEvent.click(
+    within(firstIdeaCard as HTMLElement).getByRole("button", {
+      name: "选择这个题目",
+    }),
+  );
+
+  expect(await screen.findByText("第 1 步 / 共 4 步：看懂题目")).toBeInTheDocument();
+  expect(apiMocks.generateTopicAnalysis).toHaveBeenCalledTimes(1);
+
+  await userEvent.click(screen.getByRole("button", { name: "直接写初稿" }));
+  await userEvent.click(screen.getByRole("button", { name: "AI 出题作文" }));
+
+  expect(await screen.findByText("第 1 步 / 共 4 步：看懂题目")).toBeInTheDocument();
+  expect(apiMocks.generateTopicAnalysis).toHaveBeenCalledTimes(1);
+});
+
+test("ai topic analysis resolves after unmount without repeating on return", async () => {
+  const topicAnalysis = deferred<{ essay: WritingCastleEssay }>();
+  apiMocks.generateTopicAnalysis.mockReturnValueOnce(topicAnalysis.promise);
+
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "student-1" })} />
+      </Suspense>,
+    );
+  });
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "AI 出题作文" }),
+  );
+  await userEvent.type(screen.getByLabelText("兴趣或想写的方向"), "足球");
+  await userEvent.click(screen.getByRole("button", { name: "生成题目灵感" }));
+
+  const firstIdea = await screen.findByText("足球场边的小发现");
+  const firstIdeaCard = firstIdea.closest("article");
+  expect(firstIdeaCard).not.toBeNull();
+  await userEvent.click(
+    within(firstIdeaCard as HTMLElement).getByRole("button", {
+      name: "选择这个题目",
+    }),
+  );
+
+  await waitFor(() => {
+    expect(apiMocks.generateTopicAnalysis).toHaveBeenCalledTimes(1);
+  });
+
+  await userEvent.click(screen.getByRole("button", { name: "直接写初稿" }));
+  expect(screen.getByLabelText("初稿")).toBeInTheDocument();
+
+  await act(async () => {
+    topicAnalysis.resolve({
+      essay: essayState({
+        title: "足球场边的小发现",
+        outline: {
+          ...essayState().outline,
+          schema_version: "v0.6b.1",
+          topic_origin: "ai_topic_idea",
+          selected_topic_idea: { id: "idea-1", title: "足球场边的小发现" },
+          scaffold: {
+            schema_version: "v0.6b.1",
+            topic_type: "place_scenery",
+            topic_variant: "default",
+            scaffold_template_version: "place_scenery.default.v0.6c",
+            resolved_at: "2026-06-29T00:00:00Z",
+            selection_source: "ai_suggested",
+            display_name_child: "写一个地方",
+            display_name_parent: "写景类：地点 / 景物 / 体验",
+            material_slots: [],
+            outline_sections: [],
+            source_policy: {},
+          },
+          topic_analysis: {
+            status: "generated",
+            suggested_focus: "按顺序写清楚球场边的景物",
+            cards: [
+              {
+                id: "topic-ask",
+                kind: "topic_question",
+                title: "题目在问什么",
+                body: "写一个熟悉地方的小发现。",
+                required_points: [],
+              },
+            ],
+          },
+        },
+      }),
+    });
+    await topicAnalysis.promise;
+  });
+
+  await userEvent.click(screen.getByRole("button", { name: "AI 出题作文" }));
+
+  expect(await screen.findByText("第 1 步 / 共 4 步：看懂题目")).toBeInTheDocument();
+  expect(apiMocks.generateTopicAnalysis).toHaveBeenCalledTimes(1);
+});
 
 test("writing castle shows staged loading copy during topic analysis", async () => {
   const topicAnalysis = deferred<{ essay: WritingCastleEssay }>();

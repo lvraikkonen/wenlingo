@@ -1,8 +1,8 @@
 "use client";
 
-import { BookOpenText, PenLine } from "lucide-react";
+import { BookOpenText, PenLine, Sparkles } from "lucide-react";
 
-type WritingCastleMode = "classroom" | "direct";
+export type WritingCastleMode = "classroom" | "ai_topic" | "direct";
 
 export function WritingCastleModeShell({
   mode,
@@ -33,10 +33,14 @@ export function WritingCastleModeShell({
         </button>
         <button
           type="button"
-          className="rounded-lg border border-[var(--wen-border)] bg-[var(--wen-bg)] p-4 text-left font-semibold text-[var(--wen-muted)] disabled:opacity-70"
-          disabled
+          aria-pressed={mode === "ai_topic"}
+          className={`rounded-lg border p-4 text-left font-semibold ${modeClass(
+            "ai_topic",
+          )}`}
+          onClick={() => onModeChange("ai_topic")}
         >
-          AI 出题作文 · 稍后开放
+          <Sparkles size={20} aria-hidden="true" />
+          <span className="mt-2 block">AI 出题作文</span>
         </button>
         <button
           type="button"

@@ -8,8 +8,12 @@ import { AssessmentRecommendationCard } from "../../../../components/AssessmentR
 import { FamilyTopbar } from "../../../../components/FamilyTopbar";
 import { FeedbackReaction } from "../../../../components/FeedbackReaction";
 import { SettlementPanel } from "../../../../components/SettlementPanel";
+import { AiTopicIdeaFlow } from "../../../../components/writing-castle/AiTopicIdeaFlow";
 import { ClassroomPrewritingWizard } from "../../../../components/writing-castle/ClassroomPrewritingWizard";
-import { WritingCastleModeShell } from "../../../../components/writing-castle/WritingCastleModeShell";
+import {
+  WritingCastleModeShell,
+  type WritingCastleMode,
+} from "../../../../components/writing-castle/WritingCastleModeShell";
 import {
   createEssay,
   submitEssayRevision,
@@ -17,6 +21,7 @@ import {
   type EssayRevisionResponse,
   type Settlement,
 } from "../../../../lib/api";
+import type { WritingCastleEssay } from "../../../../lib/types";
 import { useAssessmentRecommendation } from "../../../../lib/useAssessmentRecommendation";
 
 export default function EssayPage({
@@ -37,7 +42,10 @@ function EssayPageContent({ studentId }: { studentId: string }) {
   } = useAssessmentRecommendation(studentId);
   const [title, setTitle] = useState("");
   const [draft, setDraft] = useState("");
-  const [mode, setMode] = useState<"classroom" | "direct">("classroom");
+  const [mode, setMode] = useState<WritingCastleMode>("classroom");
+  const [aiTopicEssay, setAiTopicEssay] = useState<WritingCastleEssay | null>(
+    null,
+  );
   const [revision, setRevision] = useState("");
   const [essayId, setEssayId] = useState<string | null>(null);
   const [firstDraftId, setFirstDraftId] = useState<string | null>(null);
@@ -219,6 +227,23 @@ function EssayPageContent({ studentId }: { studentId: string }) {
         {mode === "classroom" && !feedback ? (
           <ClassroomPrewritingWizard
             studentId={studentId}
+            onFeedback={handlePrewritingFeedback}
+          />
+        ) : null}
+
+        {mode === "ai_topic" && !feedback && !aiTopicEssay ? (
+          <AiTopicIdeaFlow
+            studentId={studentId}
+            onEssayCreated={setAiTopicEssay}
+          />
+        ) : null}
+
+        {mode === "ai_topic" && !feedback && aiTopicEssay ? (
+          <ClassroomPrewritingWizard
+            studentId={studentId}
+            initialEssay={aiTopicEssay}
+            skipActiveResume
+            onEssayChange={setAiTopicEssay}
             onFeedback={handlePrewritingFeedback}
           />
         ) : null}
