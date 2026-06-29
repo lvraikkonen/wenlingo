@@ -28,6 +28,7 @@ from app.services.llm_usage import (
 
 
 T = TypeVar("T", bound=BaseModel)
+ERROR_MESSAGE_MAX_CHARS = 300
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,7 @@ class AttemptRecord:
     pricing_status: str
     request_started_at: datetime | None = None
     response_received_at: datetime | None = None
+    error_message: str = ""
     validation_errors: tuple[dict[str, str], ...] = ()
 
     def to_summary(self) -> dict[str, Any]:
@@ -77,6 +79,8 @@ class AttemptRecord:
             "estimated_cost": self.estimated_cost,
             "pricing_status": self.pricing_status,
         }
+        if self.error_message:
+            summary["error_message"] = self.error_message
         if self.validation_errors:
             summary["validation_errors"] = list(self.validation_errors)
         return summary
@@ -135,6 +139,13 @@ def _classify_provider_exception(exc: Exception) -> str:
     if "rate" in message and "limit" in message:
         return TaskFallbackReason.RATE_LIMIT
     return TaskFallbackReason.API_ERROR
+
+
+def _bounded_error_message(exc: Exception) -> str:
+    message = " ".join(str(exc).split())
+    if len(message) > ERROR_MESSAGE_MAX_CHARS:
+        return message[:ERROR_MESSAGE_MAX_CHARS]
+    return message
 
 
 def _validation_error_summary(exc: ValidationError) -> tuple[dict[str, str], ...]:
@@ -302,6 +313,13 @@ def _overall_pricing_status(attempts: list[AttemptRecord]) -> str:
     return PricingStatus.UNAVAILABLE
 
 
+def _attempt_error_summary(role: str, reason: str, attempt: AttemptRecord) -> str:
+    summary = f"{role} {reason}"
+    if attempt.error_message:
+        summary = f"{summary}: {attempt.error_message}"
+    return summary
+
+
 async def _attempt_provider(
     *,
     attempt_index: int,
@@ -319,6 +337,7 @@ async def _attempt_provider(
     model_name = _model_name(provider)
     output: T | None = None
     validation_errors: tuple[dict[str, str], ...] = ()
+    error_message = ""
     request_started_at = utcnow()
     started_at = perf_counter()
     try:
@@ -328,6 +347,7 @@ async def _attempt_provider(
     except Exception as exc:
         reason = _classify_provider_exception(exc)
         error_class = exc.__class__.__name__
+        error_message = _bounded_error_message(exc)
     else:
         try:
             output = output_schema.model_validate(response.parsed_json)
@@ -346,6 +366,7 @@ async def _attempt_provider(
             except Exception as exc:
                 reason = TaskFallbackReason.TASK_VALIDATION_FAILED
                 error_class = exc.__class__.__name__
+                error_message = _bounded_error_message(exc)
                 output = None
             else:
                 reason = "success"
@@ -374,6 +395,7 @@ async def _attempt_provider(
         pricing_status=_attempt_pricing_status(pricing, route_pricing_status),
         request_started_at=request_started_at,
         response_received_at=response_received_at,
+        error_message=error_message,
         validation_errors=validation_errors,
     )
     return output, response, attempt, reason
@@ -593,5 +615,30 @@ async def run_ai_task(
             session=session,
             counter_id=reservation_counter_id,
             reservation_token=reservation_token,
+        )
+        detailed_errors = [
+            _attempt_error_summary(attempt.role, attempt.status, attempt)
+            for attempt in attempts
+        ]
+        _record_log(
+            session=session,
+            student_id=student_id,
+            task_type=task_type,
+            task_name=task_name,
+            prompt_key=route.prompt_key,
+            prompt_version=effective_prompt_version,
+            input_summary=input_summary,
+            attempts=attempts,
+            final_status=TaskFinalStatus.FAILED,
+            output=None,
+            raw_response="",
+            fallback_reason=(
+                fallback_reason or primary_reason or TaskFallbackReason.UNKNOWN_ERROR
+            ),
+            error_message="; ".join(detailed_errors),
+            resolved_provider="",
+            resolved_model="",
+            payload=payload,
+            pricing_status=route.pricing_status,
         )
     raise RuntimeError(f"AI task failed: {'; '.join(errors)}") from None

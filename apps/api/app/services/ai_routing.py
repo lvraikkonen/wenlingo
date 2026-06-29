@@ -285,6 +285,18 @@ TASK_CONFIGS: dict[str, TaskConfig] = {
         allowed_prompt_keys=("outline_generation",),
         default_prompt_key="outline_generation",
     ),
+    "writing_topic_idea_generation": TaskConfig(
+        task_name="writing_topic_idea_generation",
+        primary_model="cheap_fast",
+        fallback_model="strong_default",
+        primary_timeout_seconds=8,
+        fallback_timeout_seconds=7,
+        max_total_latency_seconds=15,
+        daily_limit=5,
+        cost_tier="low",
+        allowed_prompt_keys=("writing_topic_idea_generation",),
+        default_prompt_key="writing_topic_idea_generation",
+    ),
 }
 
 

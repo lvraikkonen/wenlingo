@@ -1,6 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
+from app.domain.enums import TaskType
 from app.services.ai_tasks import (
     LLMTaskValidationError,
     convert_ghostwriting_request,
@@ -8,6 +9,7 @@ from app.services.ai_tasks import (
     material_card_generation,
     outline_generation,
     sentence_upgrade_feedback,
+    writing_topic_idea_generation,
 )
 from app.services.llm_contracts import (
     EssayFeedback,
@@ -20,6 +22,8 @@ from app.services.llm_contracts import (
     SentenceChallengeFeedback,
     SentenceFeedback,
     WritingOutlineResult,
+    WritingTopicIdea,
+    WritingTopicIdeasResult,
 )
 from app.services.llm_provider import MockLLMProvider, response_contract_for_task
 from app.services.writing_castle_ai import (
@@ -27,7 +31,14 @@ from app.services.writing_castle_ai import (
     fallback_material_questions,
     fallback_outline,
 )
-from app.services.writing_castle_scaffold import resolve_scaffold_snapshot
+from app.services.writing_castle_scaffold import (
+    resolve_scaffold_snapshot,
+    supported_topic_type_choices,
+)
+from app.services.writing_topic_ideas import (
+    allowed_topic_variants,
+    validate_writing_topic_ideas,
+)
 
 
 def test_essay_feedback_rejects_more_than_one_revision_task():
@@ -170,6 +181,115 @@ def test_material_questions_contract_uses_child_view_for_person_portrait():
     ]
     for snippet in required_snippets:
         assert snippet in contract
+
+
+def _topic_idea(
+    idea_id: str,
+    topic_type: str = "generic_narrative",
+    topic_variant: str = "default",
+    title: str | None = None,
+) -> dict:
+    return {
+        "id": idea_id,
+        "title": title if title is not None else f"足球里的小挑战{idea_id}",
+        "topic_type": topic_type,
+        "topic_variant": topic_variant,
+        "why_it_fits_child_interest": "喜欢足球，可以从自己的选择开始想。",
+        "practice_focus": "把顺序和关键动作说清楚",
+        "child_safe_prompt": "你想写哪一次足球经历？先选一个真实画面。",
+    }
+
+
+def test_writing_topic_ideas_contract_requires_exactly_three_ideas():
+    with pytest.raises(ValidationError):
+        WritingTopicIdeasResult(ideas=[_topic_idea("idea-1")])
+
+
+@pytest.mark.parametrize(
+    "bad_title",
+    [
+        "我那天在公园玩得很开心最后我明白了坚持最重要",
+        "我那天踢足球最后学会坚持",
+        "我的乐园\n第一段",
+        "",
+    ],
+)
+def test_writing_topic_idea_rejects_finished_or_invalid_titles(bad_title):
+    with pytest.raises(ValidationError):
+        WritingTopicIdea(**_topic_idea("idea-1", title=bad_title))
+
+
+@pytest.mark.parametrize(
+    ("field_name", "bad_value"),
+    [
+        ("id", "idea\n1"),
+        ("title", "足球\n训练"),
+        ("topic_variant", "default\n"),
+        ("why_it_fits_child_interest", "喜欢足球\n可以自己选择"),
+        ("practice_focus", "练习顺序\n和动作"),
+        ("child_safe_prompt", "你想写哪一次足球经历？\n先选一个真实画面。"),
+    ],
+)
+def test_writing_topic_idea_rejects_newlines_in_string_fields(field_name, bad_value):
+    payload = _topic_idea("idea-1")
+    payload[field_name] = bad_value
+
+    with pytest.raises(ValidationError):
+        WritingTopicIdea(**payload)
+
+
+def test_writing_topic_idea_generation_validator_rejects_unsupported_variant():
+    output = WritingTopicIdeasResult(
+        ideas=[
+            _topic_idea("idea-1", "generic_narrative", "default"),
+            _topic_idea("idea-2", "place_scenery", "my_paradise"),
+            _topic_idea("idea-3", "practical_writing", "unknown_variant"),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="unsupported topic_variant"):
+        validate_writing_topic_ideas(
+            output,
+            supported_choices=supported_topic_type_choices(),
+            allowed_variants=allowed_topic_variants(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_writing_topic_idea_generation_wrapper_uses_registered_prompt_and_no_fallback():
+    class RecordingRunner:
+        def __init__(self):
+            self.calls = []
+
+        async def run(self, **kwargs):
+            self.calls.append(kwargs)
+            return type("Result", (), {"output": None, "log": None, "status": "ok"})()
+
+    runner = RecordingRunner()
+    supported_choices = supported_topic_type_choices()
+    variants = allowed_topic_variants()
+
+    await writing_topic_idea_generation(
+        runner,
+        grade_label="四年级",
+        interest_text="足球",
+        supported_choices=supported_choices,
+        allowed_variants=variants,
+        student_id="s1",
+    )
+
+    call = runner.calls[0]
+    assert call["task_type"] is TaskType.essay
+    assert call["task_name"] == "writing_topic_idea_generation"
+    assert call["prompt_key"] == "writing_topic_idea_generation"
+    assert call["payload"]["grade_label"] == "四年级"
+    assert call["payload"]["interest_text"] == "<child_interest>足球</child_interest>"
+    assert call["payload"]["supported_choices"] == supported_choices
+    assert call["payload"]["allowed_variants"] == variants
+    assert call["output_schema"] is WritingTopicIdeasResult
+    assert call["deterministic_fallback_factory"] is None
+    assert call["prompt_version"] == "v0.6c-2026-06-29"
+    assert callable(call["validate_output"])
 
 
 def test_material_cards_require_source_refs_for_non_placeholder_cards():

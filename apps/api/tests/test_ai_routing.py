@@ -47,6 +47,20 @@ def test_v06a_writing_castle_tasks_are_enabled_with_prompt_keys():
         assert config.daily_limit == 5
 
 
+def test_writing_topic_idea_generation_uses_low_cost_short_route():
+    config = resolve_task_config("writing_topic_idea_generation")
+
+    assert config.enabled is True
+    assert config.primary_model == "cheap_fast"
+    assert config.fallback_model == "strong_default"
+    assert config.primary_timeout_seconds == 8
+    assert config.fallback_timeout_seconds == 7
+    assert config.max_total_latency_seconds == 15
+    assert config.daily_limit == 5
+    assert config.cost_tier == "low"
+    assert config.allowed_prompt_keys == ("writing_topic_idea_generation",)
+
+
 def test_outline_generation_uses_extended_timeout_budget():
     config = resolve_task_config("outline_generation")
 

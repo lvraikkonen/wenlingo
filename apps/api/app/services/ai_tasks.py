@@ -21,6 +21,7 @@ from app.services.llm_contracts import (
     SentenceChallengeFeedback,
     SentenceFeedback,
     WritingOutlineResult,
+    WritingTopicIdeasResult,
     WritingTopicAnalysis,
 )
 from app.services.ai_routing import TaskFinalStatus
@@ -38,6 +39,7 @@ from app.services.writing_castle_ai import (
     fallback_topic_analysis,
 )
 from app.services.writing_castle_sources import validate_slot_level_source_policy
+from app.services.writing_topic_ideas import validate_writing_topic_ideas
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -697,6 +699,44 @@ async def writing_topic_analysis(
         deterministic_fallback_factory=lambda _context: fallback_topic_analysis(topic_text),
         input_summary=f"写作城堡题目分析；题目长度：{len(topic_text)}",
         prompt_version=prompt.version,
+    )
+
+
+async def writing_topic_idea_generation(
+    runner,
+    grade_label: str,
+    interest_text: str,
+    supported_choices: list[dict[str, Any]],
+    allowed_variants: dict[str, tuple[str, ...]],
+    session: Session | None = None,
+    student_id: str | None = None,
+) -> LLMTaskResult[WritingTopicIdeasResult]:
+    prompt = get_prompt("writing_topic_idea_generation")
+
+    def validate_output(output: WritingTopicIdeasResult) -> None:
+        validate_writing_topic_ideas(
+            output,
+            supported_choices=supported_choices,
+            allowed_variants=allowed_variants,
+        )
+
+    return await runner.run(
+        session=session,
+        student_id=student_id,
+        task_type=TaskType.essay,
+        task_name=prompt.prompt_key,
+        prompt_key=prompt.prompt_key,
+        payload={
+            "grade_label": grade_label,
+            "interest_text": _wrap_student_payload("child_interest", interest_text),
+            "supported_choices": supported_choices,
+            "allowed_variants": allowed_variants,
+        },
+        output_schema=WritingTopicIdeasResult,
+        deterministic_fallback_factory=None,
+        input_summary=f"AI 出题灵感；年级：{grade_label}；兴趣长度：{len(interest_text)}",
+        prompt_version=prompt.version,
+        validate_output=validate_output,
     )
 
 

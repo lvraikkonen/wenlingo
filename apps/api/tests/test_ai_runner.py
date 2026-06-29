@@ -921,7 +921,59 @@ async def test_task_validation_failure_triggers_fallback_and_records_reason(sess
 
 
 @pytest.mark.asyncio
-async def test_double_failure_without_deterministic_fallback_raises_without_failed_log(session):
+async def test_no_fallback_task_validation_failure_records_bounded_error_detail(session):
+    primary = FakeProvider(
+        provider_name="primary",
+        model_name="cheap-fast",
+        actions=[
+            response(
+                message="primary valid",
+                provider="primary",
+                model="cheap-fast",
+            )
+        ],
+    )
+    fallback = FakeProvider(
+        provider_name="fallback",
+        model_name="strong-default",
+        actions=[
+            response(
+                message="fallback valid",
+                provider="fallback",
+                model="strong-default",
+            )
+        ],
+    )
+
+    def validate_output(_output: TinyOutput) -> None:
+        raise ValueError("unsupported topic_variant: unknown_variant")
+
+    with pytest.raises(RuntimeError, match="AI task failed"):
+        await run_ai_task(
+            settings=Settings(llm_provider="mock"),
+            session=session,
+            task_type=TaskType.essay,
+            task_name="writing_topic_idea_generation",
+            student_id="s1",
+            payload={"grade_label": "四年级", "interest_text": "足球"},
+            output_schema=TinyOutput,
+            prompt_key="writing_topic_idea_generation",
+            input_summary="tiny test",
+            deterministic_fallback_factory=None,
+            validate_output=validate_output,
+            primary_provider=primary,
+            fallback_provider=fallback,
+        )
+
+    saved = session.exec(select(LLMCallLog)).one()
+    assert saved.final_status == TaskFinalStatus.FAILED
+    assert "unsupported topic_variant" in (
+        saved.error_message + str(saved.attempt_summaries)
+    )
+
+
+@pytest.mark.asyncio
+async def test_double_failure_without_deterministic_fallback_raises_and_records_failed_log(session):
     primary = FakeProvider(
         provider_name="primary",
         model_name="cheap-fast",
@@ -937,19 +989,23 @@ async def test_double_failure_without_deterministic_fallback_raises_without_fail
         await run_ai_task(
             settings=Settings(llm_provider="mock"),
             session=session,
-            task_type=TaskType.sentence,
-            task_name="sentence_upgrade_feedback",
+            task_type=TaskType.essay,
+            task_name="writing_topic_idea_generation",
             student_id="s1",
-            payload={"draft": "tiny draft"},
+            payload={"grade_label": "四年级", "interest_text": "足球"},
             output_schema=TinyOutput,
-            prompt_key="sentence_upgrade_feedback",
+            prompt_key="writing_topic_idea_generation",
             input_summary="tiny test",
             deterministic_fallback_factory=None,
             primary_provider=primary,
             fallback_provider=fallback,
         )
 
-    assert session.exec(select(LLMCallLog)).all() == []
+    saved = session.exec(select(LLMCallLog)).one()
+    assert saved.task_name == "writing_topic_idea_generation"
+    assert saved.final_status == TaskFinalStatus.FAILED
+    assert saved.validation_ok is False
+    assert saved.output_json == {}
 
 
 @pytest.mark.asyncio

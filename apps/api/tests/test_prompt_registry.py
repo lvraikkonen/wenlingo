@@ -16,6 +16,7 @@ EXPECTED_KEYS = {
     "material_questions",
     "material_card_generation",
     "outline_generation",
+    "writing_topic_idea_generation",
 }
 
 EXPECTED_PROMPT_VERSIONS = {
@@ -35,6 +36,7 @@ EXPECTED_PROMPT_VERSIONS.update(
         "material_questions": "v0.6b.1-2026-06-27",
         "material_card_generation": "v0.6b.1-2026-06-27",
         "outline_generation": "v0.6b-2026-06-25",
+        "writing_topic_idea_generation": "v0.6c-2026-06-29",
     }
 )
 
@@ -99,6 +101,16 @@ def test_writing_castle_prompts_are_registered_with_contracts():
         assert prompt.version == EXPECTED_PROMPT_VERSIONS[prompt_key]
         assert contract_name in prompt.response_contract
         assert "Do not write full essay paragraphs" in prompt.response_contract
+
+
+def test_writing_topic_idea_generation_prompt_is_registered():
+    prompt = get_prompt("writing_topic_idea_generation")
+
+    assert prompt.prompt_key == "writing_topic_idea_generation"
+    assert prompt.version == "v0.6c-2026-06-29"
+    assert "WritingTopicIdeasResult" in prompt.response_contract
+    assert "exactly 3" in prompt.response_contract
+    assert "Do not write full essay paragraphs" in prompt.response_contract
 
 
 def test_expository_topic_analysis_contract_sets_fact_boundary():

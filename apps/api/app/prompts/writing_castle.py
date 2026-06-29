@@ -6,6 +6,7 @@ WRITING_CASTLE_VERSION = "v0.6b-2026-06-25"
 WRITING_TOPIC_ANALYSIS_VERSION = "v0.6b.1-2026-06-27"
 MATERIAL_QUESTIONS_VERSION = "v0.6b.1-2026-06-27"
 MATERIAL_CARD_VERSION = "v0.6b.1-2026-06-27"
+WRITING_TOPIC_IDEA_GENERATION_VERSION = "v0.6c-2026-06-29"
 NO_GHOSTWRITE = (
     "Do not write full essay paragraphs. Do not invent people, events, dialogue, "
     "feelings, or lessons. Use only child-provided or explicitly confirmed material."
@@ -117,6 +118,36 @@ OUTLINE_GENERATION_PROMPT = register_prompt(
             "source_card_ids. heading <= 12 chars, note <= 80 chars, tip <= 60 "
             "chars. Response model: WritingOutlineResult. "
             "Do not include any keys not shown. " + NO_GHOSTWRITE
+        ),
+    )
+)
+
+WRITING_TOPIC_IDEA_GENERATION_PROMPT = register_prompt(
+    PromptSpec(
+        prompt_key="writing_topic_idea_generation",
+        version=WRITING_TOPIC_IDEA_GENERATION_VERSION,
+        system_prompt_key="wenlingo_primary_coach",
+        system_prompt=PRIMARY_COACH_SYSTEM_PROMPT,
+        response_contract=(
+            "Return only this exact JSON object with no markdown: "
+            '{"ideas":[{"id":"idea-1","title":"","topic_type":"",'
+            '"topic_variant":"default","why_it_fits_child_interest":"",'
+            '"practice_focus":"","child_safe_prompt":""},{"id":"idea-2",'
+            '"title":"","topic_type":"","topic_variant":"default",'
+            '"why_it_fits_child_interest":"","practice_focus":"",'
+            '"child_safe_prompt":""},{"id":"idea-3","title":"",'
+            '"topic_type":"","topic_variant":"default",'
+            '"why_it_fits_child_interest":"","practice_focus":"",'
+            '"child_safe_prompt":""}]}. Return exactly 3 ideas. '
+            "Use only supported scaffold choices in payload.supported_choices. "
+            "Use only allowed variants in payload.allowed_variants for each topic_type. "
+            "Do not decide specific real event/person/ending/lesson/dialogue/feeling "
+            "for the child. Suggest a safe topic direction and ask the child to choose "
+            "or confirm their own material. No newline characters in any field. "
+            "title <= 30 CJK characters or 60 total characters. "
+            "child_safe_prompt <= 120 characters and asks the child to choose or "
+            "confirm their own material. Response model: WritingTopicIdeasResult. "
+            "Do not include extra keys. " + NO_GHOSTWRITE
         ),
     )
 )

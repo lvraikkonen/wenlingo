@@ -11,6 +11,16 @@ ChallengeGrade = Literal["三年级", "四年级", "五年级", "六年级"]
 TopicCardKind = Literal["topic_question", "must_include", "shine_point"]
 MaterialCardCategory = NonBlankStr
 OutlineSlot = NonBlankStr
+SupportedTopicType = Literal[
+    "generic_narrative",
+    "person_portrait",
+    "imaginative_story",
+    "expository_introduction",
+    "place_scenery",
+    "animal_object_observation",
+    "practical_writing",
+    "story_adaptation",
+]
 DifficultyLabel = Literal[
     "三年级基础",
     "三年级进阶",
@@ -165,6 +175,56 @@ class WritingOutlineResult(BaseModel):
 
     sections: list[WritingOutlineSection] = Field(min_length=1, max_length=6)
     tip: NonBlankStr = Field(max_length=60)
+
+
+class WritingTopicIdea(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: NonBlankStr = Field(max_length=40)
+    title: NonBlankStr = Field(max_length=60)
+    topic_type: SupportedTopicType
+    topic_variant: str = Field(default="default", max_length=80)
+    why_it_fits_child_interest: NonBlankStr = Field(max_length=80)
+    practice_focus: NonBlankStr = Field(max_length=60)
+    child_safe_prompt: NonBlankStr = Field(max_length=120)
+
+    @model_validator(mode="after")
+    def reject_finished_story_shapes(self) -> "WritingTopicIdea":
+        string_fields = {
+            "id": self.id,
+            "title": self.title,
+            "topic_variant": self.topic_variant,
+            "why_it_fits_child_interest": self.why_it_fits_child_interest,
+            "practice_focus": self.practice_focus,
+            "child_safe_prompt": self.child_safe_prompt,
+        }
+        for field_name, value in string_fields.items():
+            if "\n" in value or "\r" in value:
+                raise ValueError(f"topic idea {field_name} must not contain newline characters")
+        joined = f"{self.title}{self.child_safe_prompt}"
+        cjk_count = sum(1 for char in self.title if "\u4e00" <= char <= "\u9fff")
+        if cjk_count > 30:
+            raise ValueError("topic idea title must be <= 30 CJK characters")
+        if "我那天" in joined and "最后" in joined and joined.index("我那天") < joined.index("最后"):
+            raise ValueError("topic idea must not decide completed story sequence: 我那天...最后...")
+        forbidden_patterns = ("我明白了", "最后我", "那天我", "从此我")
+        for pattern in forbidden_patterns:
+            if pattern in joined:
+                raise ValueError(f"topic idea must not decide finished story shape: {pattern}")
+        return self
+
+
+class WritingTopicIdeasResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ideas: list[WritingTopicIdea] = Field(min_length=3, max_length=3)
+
+    @model_validator(mode="after")
+    def reject_duplicate_ids(self) -> "WritingTopicIdeasResult":
+        ids = [idea.id for idea in self.ideas]
+        if len(ids) != len(set(ids)):
+            raise ValueError("topic idea ids must be unique")
+        return self
 
 
 class ReportContent(BaseModel):

@@ -123,6 +123,44 @@ class MockLLMProvider:
                 provider=self.provider_name,
                 model=self.model_name,
             )
+        if task_name == "writing_topic_idea_generation":
+            payload = {
+                "ideas": [
+                    {
+                        "id": "idea-1",
+                        "title": "足球训练小挑战",
+                        "topic_type": "generic_narrative",
+                        "topic_variant": "default",
+                        "why_it_fits_child_interest": "喜欢足球，可以从一次练习中选择真实画面。",
+                        "practice_focus": "按顺序写清楚挑战过程",
+                        "child_safe_prompt": "你想写哪一次足球练习？先选一个自己记得的画面。",
+                    },
+                    {
+                        "id": "idea-2",
+                        "title": "我的运动乐园",
+                        "topic_type": "place_scenery",
+                        "topic_variant": "my_paradise",
+                        "why_it_fits_child_interest": "可以把常去的运动场地写成自己的乐园。",
+                        "practice_focus": "观察地点和活动细节",
+                        "child_safe_prompt": "你想写哪个运动地点？先确认那里最特别的一处。",
+                    },
+                    {
+                        "id": "idea-3",
+                        "title": "给球队的一封信",
+                        "topic_type": "practical_writing",
+                        "topic_variant": "letter",
+                        "why_it_fits_child_interest": "足球兴趣适合练习表达真实想法。",
+                        "practice_focus": "写清楚对象和想说的话",
+                        "child_safe_prompt": "你想写给谁？先确认自己最想表达的一句话。",
+                    },
+                ]
+            }
+            return LLMProviderResponse(
+                parsed_json=payload,
+                raw_response=json.dumps(payload, ensure_ascii=False),
+                provider=self.provider_name,
+                model=self.model_name,
+            )
         if task_name == "material_questions":
             payload = fallback_material_questions(payload.get("scaffold")).model_dump()
             return LLMProviderResponse(
