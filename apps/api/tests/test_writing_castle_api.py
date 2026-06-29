@@ -1,7 +1,14 @@
 import pytest
 from sqlmodel import select
 
-from app.domain.models import Essay, EssayVersion, LLMCallLog, ProductEvent
+from app.api.deps import get_ai_task_runner
+from app.domain.models import (
+    Essay,
+    EssayVersion,
+    LLMCallLog,
+    ProductEvent,
+    WritingTopicIdeaBatch,
+)
 from app.services.writing_castle_state import (
     LEGACY_SCHEMA_VERSION,
     OUTLINE_READY_STATUS,
@@ -11,7 +18,7 @@ from app.services.writing_castle_state import (
     init_material_card_state,
     init_outline_state,
 )
-from tests.conftest import create_authenticated_family
+from tests.conftest import create_authenticated_family, create_second_authenticated_family
 
 
 def _select_generic_scaffold(client, essay_id):
@@ -41,7 +48,240 @@ def test_classroom_creation_returns_supported_scaffold_choices(session, client):
         "person_portrait",
         "imaginative_story",
         "expository_introduction",
+        "place_scenery",
+        "animal_object_observation",
+        "practical_writing",
+        "story_adaptation",
     ]
+
+
+def test_ai_topic_ideas_create_batch_but_no_essay(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    response = client.post(
+        f"/api/students/{student.id}/writing-castle/ai-topic-ideas",
+        json={"interest_text": "足球和公园"},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["idea_batch_id"]
+    assert len(payload["ideas"]) == 3
+    assert session.exec(select(Essay)).all() == []
+    assert session.exec(select(WritingTopicIdeaBatch)).one().student_id == student.id
+
+
+def test_ai_topic_ideas_events_are_persisted_with_safe_payload(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    response = client.post(
+        f"/api/students/{student.id}/writing-castle/ai-topic-ideas",
+        json={"interest_text": "足球和公园"},
+    )
+
+    assert response.status_code == 201
+    idea_batch_id = response.json()["idea_batch_id"]
+    events = session.exec(
+        select(ProductEvent)
+        .where(ProductEvent.student_id == student.id)
+        .where(
+            ProductEvent.event_type.in_(
+                ["ai_topic_ideas_requested", "ai_topic_ideas_generated"]
+            )
+        )
+        .order_by(ProductEvent.created_at)
+    ).all()
+    assert [event.event_type for event in events] == [
+        "ai_topic_ideas_requested",
+        "ai_topic_ideas_generated",
+    ]
+    assert events[0].payload["interest_input_present"] is True
+    assert events[0].payload["grade_label"] == student.grade_label
+    assert events[1].payload["idea_batch_id"] == idea_batch_id
+    assert events[1].payload["interest_input_present"] is True
+    assert events[1].payload["grade_label"] == student.grade_label
+    assert events[1].payload["idea_count"] == 3
+
+
+def test_ai_topic_selection_creates_one_essay_with_scaffold_and_topic_origin(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    ideas = client.post(
+        f"/api/students/{student.id}/writing-castle/ai-topic-ideas",
+        json={"interest_text": "足球"},
+    ).json()
+
+    selected = client.post(
+        f"/api/students/{student.id}/writing-castle/ai-topic-essay",
+        json={
+            "idea_batch_id": ideas["idea_batch_id"],
+            "selected_idea_id": ideas["ideas"][0]["id"],
+        },
+    )
+
+    assert selected.status_code == 201
+    essay = selected.json()["essay"]
+    assert essay["title"] == ideas["ideas"][0]["title"]
+    assert essay["outline"]["topic_origin"] == "ai_topic_idea"
+    assert essay["outline"]["selected_topic_idea"]["id"] == ideas["ideas"][0]["id"]
+    assert essay["outline"]["scaffold"]["selection_source"] == "ai_suggested"
+    assert essay["outline"]["scaffold"]["schema_version"] == "v0.6b.1"
+
+
+def test_ai_topic_selection_event_is_persisted_with_safe_payload(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    ideas = client.post(
+        f"/api/students/{student.id}/writing-castle/ai-topic-ideas",
+        json={"interest_text": "足球"},
+    ).json()
+
+    selected = client.post(
+        f"/api/students/{student.id}/writing-castle/ai-topic-essay",
+        json={
+            "idea_batch_id": ideas["idea_batch_id"],
+            "selected_idea_id": ideas["ideas"][0]["id"],
+        },
+    )
+
+    assert selected.status_code == 201
+    event = session.exec(
+        select(ProductEvent).where(ProductEvent.event_type == "ai_topic_idea_selected")
+    ).one()
+    assert event.payload["idea_batch_id"] == ideas["idea_batch_id"]
+    assert event.payload["selected_idea_id"] == ideas["ideas"][0]["id"]
+    assert event.payload["topic_origin"] == "ai_topic_idea"
+    assert event.payload["topic_type"] == ideas["ideas"][0]["topic_type"]
+    assert event.payload["topic_variant"] == ideas["ideas"][0]["topic_variant"]
+    assert event.payload["selection_source"] == "ai_suggested"
+
+
+def test_ai_topic_selection_event_preserves_alias_variant_from_selected_idea(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    ideas = client.post(
+        f"/api/students/{student.id}/writing-castle/ai-topic-ideas",
+        json={"interest_text": "足球"},
+    ).json()
+    alias_idea = ideas["ideas"][1]
+    assert alias_idea["topic_type"] == "place_scenery"
+    assert alias_idea["topic_variant"] == "my_paradise"
+
+    selected = client.post(
+        f"/api/students/{student.id}/writing-castle/ai-topic-essay",
+        json={
+            "idea_batch_id": ideas["idea_batch_id"],
+            "selected_idea_id": alias_idea["id"],
+        },
+    )
+
+    assert selected.status_code == 201
+    event = session.exec(
+        select(ProductEvent).where(ProductEvent.event_type == "ai_topic_idea_selected")
+    ).one()
+    assert event.payload["topic_type"] == "place_scenery"
+    assert event.payload["topic_variant"] == "my_paradise"
+    assert event.payload["selection_source"] == "ai_suggested"
+
+
+def test_ai_topic_selection_is_idempotent_for_same_batch_and_idea(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    ideas = client.post(
+        f"/api/students/{student.id}/writing-castle/ai-topic-ideas",
+        json={"interest_text": "足球"},
+    ).json()
+    payload = {
+        "idea_batch_id": ideas["idea_batch_id"],
+        "selected_idea_id": ideas["ideas"][0]["id"],
+    }
+
+    first = client.post(
+        f"/api/students/{student.id}/writing-castle/ai-topic-essay",
+        json=payload,
+    )
+    second = client.post(
+        f"/api/students/{student.id}/writing-castle/ai-topic-essay",
+        json=payload,
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 200
+    assert first.json()["essay"]["id"] == second.json()["essay"]["id"]
+    assert len(session.exec(select(Essay)).all()) == 1
+
+
+def test_ai_topic_selection_rejects_batch_owned_by_another_student(session, client):
+    first_family = create_authenticated_family(session)
+    second_family = create_second_authenticated_family(session)
+    first_student = first_family["student"]
+    second_student = second_family["student"]
+    ideas = client.post(
+        f"/api/students/{first_student.id}/writing-castle/ai-topic-ideas",
+        json={"interest_text": "足球"},
+    ).json()
+
+    response = client.post(
+        f"/api/students/{second_student.id}/writing-castle/ai-topic-essay",
+        json={
+            "idea_batch_id": ideas["idea_batch_id"],
+            "selected_idea_id": ideas["ideas"][0]["id"],
+        },
+    )
+
+    assert response.status_code == 404
+    assert session.exec(
+        select(Essay).where(Essay.student_id == second_student.id)
+    ).all() == []
+
+
+def test_ai_topic_selection_rejects_idea_id_not_in_batch(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    ideas = client.post(
+        f"/api/students/{student.id}/writing-castle/ai-topic-ideas",
+        json={"interest_text": "足球"},
+    ).json()
+
+    response = client.post(
+        f"/api/students/{student.id}/writing-castle/ai-topic-essay",
+        json={
+            "idea_batch_id": ideas["idea_batch_id"],
+            "selected_idea_id": "forged-idea",
+        },
+    )
+
+    assert response.status_code == 400
+    assert session.exec(select(Essay)).all() == []
+
+
+def test_ai_topic_ideas_runtime_error_returns_503_and_keeps_requested_event(session, client):
+    class FailingRunner:
+        async def run(self, **kwargs):
+            raise RuntimeError("boom")
+
+    family = create_authenticated_family(session)
+    student = family["student"]
+    client.app.dependency_overrides[get_ai_task_runner] = lambda: FailingRunner()
+    try:
+        response = client.post(
+            f"/api/students/{student.id}/writing-castle/ai-topic-ideas",
+            json={"interest_text": "足球"},
+        )
+    finally:
+        client.app.dependency_overrides.pop(get_ai_task_runner, None)
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "ai topic ideas unavailable"
+    assert session.exec(select(WritingTopicIdeaBatch)).all() == []
+    assert session.exec(select(Essay)).all() == []
+    event = session.exec(
+        select(ProductEvent).where(ProductEvent.event_type == "ai_topic_ideas_requested")
+    ).one()
+    assert event.payload["interest_input_present"] is True
+    assert event.payload["grade_label"] == student.grade_label
 
 
 def test_generation_requires_selected_scaffold_for_v06b_session(session, client):
@@ -164,7 +404,6 @@ def test_each_p0_family_can_select_and_start_topic_analysis(
 @pytest.mark.parametrize(
     ("topic_text", "future_type"),
     [
-        ("写信", "practical_writing"),
         ("推荐一本书", "reading_response_recommendation"),
         ("围绕中心意思写", "central_idea_reflection"),
     ],

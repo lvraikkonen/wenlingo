@@ -64,6 +64,9 @@ def init_material_card_state(*, schema_version: str = SCHEMA_VERSION) -> dict[st
 def init_outline_state(*, schema_version: str = SCHEMA_VERSION) -> dict[str, Any]:
     state = {
         "schema_version": schema_version,
+        "topic_origin": "teacher_provided",
+        "selected_topic_idea": None,
+        "topic_requirement": {},
         "topic_analysis": {"cards": [], "status": "not_started"},
         "child_topic_focus": {
             "text": "",

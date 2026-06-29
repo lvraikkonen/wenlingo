@@ -2,6 +2,8 @@ from copy import deepcopy
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
@@ -17,13 +19,21 @@ from app.api.feedback_state import feedback_reaction_value
 from app.api.routes.alpha import record_product_event
 from app.core.config import Settings, get_settings
 from app.domain.enums import TaskType
-from app.domain.models import AbilityProfile, Essay, EssayVersion, StudentProfile, utcnow
+from app.domain.models import (
+    AbilityProfile,
+    Essay,
+    EssayVersion,
+    StudentProfile,
+    WritingTopicIdeaBatch,
+    utcnow,
+)
 from app.services.abilities import apply_ability_delta
 from app.services.ai_tasks import (
     essay_feedback,
     material_card_generation,
     material_questions,
     outline_generation,
+    writing_topic_idea_generation,
     writing_topic_analysis,
 )
 from app.services.essay_workflow import draft_ability_deltas
@@ -60,6 +70,11 @@ from app.services.writing_castle_scaffold import (
     resolve_scaffold_snapshot,
     supported_topic_type_choices,
 )
+from app.services.writing_topic_ideas import (
+    allowed_topic_variants,
+    create_idea_batch,
+    create_or_return_ai_topic_essay,
+)
 
 router = APIRouter(tags=["writing_castle"])
 DAILY_LIMIT_ERROR_MESSAGES = {"daily limit exceeded", "daily limit reached"}
@@ -77,6 +92,15 @@ CLOSED_PREWRITING_STATUSES = {
 
 class ClassroomEssayCreate(BaseModel):
     topic_text: str = Field(min_length=1, max_length=300)
+
+
+class AiTopicIdeasCreate(BaseModel):
+    interest_text: str = Field(default="", max_length=120)
+
+
+class AiTopicEssayCreate(BaseModel):
+    idea_batch_id: str = Field(min_length=1, max_length=120)
+    selected_idea_id: str = Field(min_length=1, max_length=40)
 
 
 OverrideReason = Literal["manual_choice", "suggestion_accepted", "fallback_selected"]
@@ -178,6 +202,31 @@ def _record_event(
     if payload:
         safe_payload.update(payload)
     safe_payload["server_completed_at"] = utcnow().isoformat()
+    try:
+        record_product_event(
+            session,
+            event_type,
+            parent_id=student.parent_id,
+            student_id=student.id,
+            payload=safe_payload,
+        )
+    except Exception:
+        pass
+
+
+def _record_writing_castle_product_event(
+    session: Session,
+    event_type: str,
+    *,
+    student: StudentProfile,
+    essay_id: str = "",
+    payload: dict[str, Any] | None = None,
+) -> None:
+    safe_payload = {"server_completed_at": utcnow().isoformat()}
+    if essay_id:
+        safe_payload["essay_id"] = essay_id
+    if payload:
+        safe_payload.update(payload)
     try:
         record_product_event(
             session,
@@ -391,6 +440,105 @@ async def create_classroom_writing_castle_essay(
         "supported_topic_types": supported_topic_type_choices(),
         "unsupported_future_type": unsupported_future_type,
     }
+
+
+@router.post("/api/students/{student_id}/writing-castle/ai-topic-ideas", status_code=201)
+async def generate_ai_topic_ideas(
+    student_id: str,
+    request: AiTopicIdeasCreate,
+    session: Session = Depends(get_db_session),
+    runner: AITaskRunner = Depends(get_ai_task_runner),
+    settings: Settings = Depends(get_settings),
+    context: ParentContext | None = Depends(require_auth_mode_state_change),
+):
+    student = require_student_for_auth_mode(session, settings, context, student_id)
+    supported_choices = supported_topic_type_choices()
+    variants = allowed_topic_variants()
+    _record_writing_castle_product_event(
+        session,
+        "ai_topic_ideas_requested",
+        student=student,
+        payload={
+            "interest_input_present": bool(request.interest_text.strip()),
+            "grade_label": student.grade_label,
+        },
+    )
+    session.commit()
+    try:
+        result = await writing_topic_idea_generation(
+            runner,
+            grade_label=student.grade_label,
+            interest_text=request.interest_text,
+            supported_choices=supported_choices,
+            allowed_variants=variants,
+            session=session,
+            student_id=student.id,
+        )
+    except RuntimeError as exc:
+        session.commit()
+        raise HTTPException(status_code=503, detail="ai topic ideas unavailable") from exc
+    batch = create_idea_batch(
+        session,
+        student=student,
+        ideas=result.output,
+        interest_text=request.interest_text,
+    )
+    _record_writing_castle_product_event(
+        session,
+        "ai_topic_ideas_generated",
+        student=student,
+        payload={
+            "idea_batch_id": batch.id,
+            "interest_input_present": batch.interest_input_present,
+            "grade_label": student.grade_label,
+            "idea_count": len(batch.ideas),
+        },
+    )
+    session.commit()
+    return {
+        "idea_batch_id": batch.id,
+        "ideas": batch.ideas,
+        "expires_at": batch.expires_at,
+    }
+
+
+@router.post("/api/students/{student_id}/writing-castle/ai-topic-essay")
+async def create_ai_topic_essay(
+    student_id: str,
+    request: AiTopicEssayCreate,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    context: ParentContext | None = Depends(require_auth_mode_state_change),
+):
+    student = require_student_for_auth_mode(session, settings, context, student_id)
+    batch = session.get(WritingTopicIdeaBatch, request.idea_batch_id)
+    if batch is None or batch.student_id != student.id:
+        raise HTTPException(status_code=404, detail="idea batch not found")
+    essay, selected_idea, created = create_or_return_ai_topic_essay(
+        session,
+        student=student,
+        batch=batch,
+        selected_idea_id=request.selected_idea_id,
+    )
+    _record_event(
+        session,
+        "ai_topic_idea_selected",
+        essay=essay,
+        student=student,
+        payload={
+            **_scaffold_event_payload(essay.outline["scaffold"]),
+            "idea_batch_id": batch.id,
+            "selected_idea_id": request.selected_idea_id,
+            "topic_type": selected_idea["topic_type"],
+            "topic_variant": selected_idea.get("topic_variant") or "default",
+            "topic_origin": "ai_topic_idea",
+        },
+    )
+    session.commit()
+    return JSONResponse(
+        status_code=201 if created else 200,
+        content=jsonable_encoder({"essay": _essay_payload(essay)}),
+    )
 
 
 @router.get("/api/students/{student_id}/writing-castle/classroom/active")
