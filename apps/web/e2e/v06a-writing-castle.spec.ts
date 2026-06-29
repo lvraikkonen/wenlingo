@@ -142,6 +142,40 @@ test("classroom writing castle reaches first draft feedback", async ({
   await expect(page.getByText("修改小任务")).toBeVisible({ timeout: 15_000 });
 });
 
+test("v0.6c classroom new family reaches first draft feedback", async ({
+  page,
+}) => {
+  await createChild(page, "v06c-classroom@example.com", "V06C-CLASSROOM");
+
+  await enterWritingCastle(page);
+  await page.getByRole("button", { name: "课内同步作文" }).click();
+  await page.getByLabel("老师作文题目").fill("给老师写信");
+  await page.getByRole("button", { name: "开始审题" }).click();
+
+  await page.getByRole("button", { name: "写实用文" }).click();
+  await expect(page.getByText("第 1 步 / 共 4 步：看懂题目")).toBeVisible({
+    timeout: 15_000,
+  });
+});
+
+test("v0.6c ai topic path generates and selects an idea", async ({ page }) => {
+  await createChild(page, "v06c-ai-topic@example.com", "V06C-AI-TOPIC");
+
+  await enterWritingCastle(page);
+  await page.getByRole("button", { name: "AI 出题作文" }).click();
+  await page.getByLabel("兴趣或想写的方向").fill("足球");
+  await page.getByRole("button", { name: "生成题目灵感" }).click();
+
+  const firstIdeaButton = page
+    .getByRole("button", { name: "选择这个题目" })
+    .first();
+  await expect(firstIdeaButton).toBeVisible({ timeout: 15_000 });
+  await firstIdeaButton.click();
+  await expect(page.getByText("第 1 步 / 共 4 步：看懂题目")).toBeVisible({
+    timeout: 15_000,
+  });
+});
+
 test("direct draft essay path still reaches settlement", async ({ page }) => {
   await createChild(page, "v06a-direct@example.com", "V06A-DIRECT");
 
