@@ -13,12 +13,12 @@ P0_TOPIC_TYPES = (
     "person_portrait",
     "imaginative_story",
     "expository_introduction",
-)
-FUTURE_TOPIC_TYPES = (
     "place_scenery",
     "animal_object_observation",
     "practical_writing",
     "story_adaptation",
+)
+FUTURE_TOPIC_TYPES = (
     "story_summary",
     "reading_response_recommendation",
     "central_idea_reflection",
@@ -37,15 +37,28 @@ DEFAULT_VARIANTS = {
     "person_portrait": "default",
     "imaginative_story": "default",
     "expository_introduction": "default",
+    "place_scenery": "default",
+    "animal_object_observation": "default",
+    "practical_writing": "default",
+    "story_adaptation": "default",
 }
 
 UNSUPPORTED_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
-    (("写信", "书信", "我想对您说", "倡议书"), "practical_writing"),
     (("推荐一本书", "推荐好书", "写读后感", "读后感"), "reading_response_recommendation"),
     (("漫画的启示", "围绕中心意思写", "让生活更美好"), "central_idea_reflection"),
     (("梗概", "缩写"), "story_summary"),
-    (("故事新编", "续写"), "story_adaptation"),
 )
+
+TEMPLATE_VERSION_SUFFIXES = {
+    ("place_scenery", "default"): "v0.6c",
+    ("animal_object_observation", "default"): "v0.6c",
+    ("animal_object_observation", "observation_diary"): "v0.6c",
+    ("practical_writing", "default"): "v0.6c",
+    ("practical_writing", "diary"): "v0.6c",
+    ("practical_writing", "letter"): "v0.6c",
+    ("practical_writing", "proposal"): "v0.6c",
+    ("story_adaptation", "default"): "v0.6c",
+}
 
 TEMPLATES: dict[tuple[str, str], dict[str, Any]] = {
     ("generic_narrative", "default"): {
@@ -207,6 +220,187 @@ TEMPLATES: dict[tuple[str, str], dict[str, Any]] = {
             "required_for_content": ["observation", "child_confirmed"],
         },
     },
+    ("place_scenery", "default"): {
+        "display_name_child": "写一处景物",
+        "display_name_parent": "写景类：地点 / 景色 / 游览 / 推荐",
+        "material_slots": [
+            {"id": "place_subject", "label": "写哪里", "content_kind": "content"},
+            {"id": "observation_order", "label": "观察顺序", "content_kind": "content"},
+            {"id": "key_scene", "label": "最想写的景色", "content_kind": "content"},
+            {"id": "sensory_detail", "label": "看到/听到/闻到的细节", "content_kind": "content"},
+            {"id": "activity_or_experience", "label": "在那里做了什么", "content_kind": "content"},
+            {"id": "feeling_reason", "label": "喜欢或难忘的原因", "content_kind": "content"},
+        ],
+        "outline_sections": [
+            {"id": "opening_place", "heading": "开头", "label": "点明地点", "content_kind": "structural"},
+            {"id": "order_or_view", "heading": "顺序", "label": "按顺序写景色", "content_kind": "content"},
+            {"id": "key_scene", "heading": "重点", "label": "展开最美或最特别的一处", "content_kind": "content"},
+            {"id": "activity_feeling", "heading": "体验", "label": "写活动和感受", "content_kind": "content"},
+            {"id": "ending_reason", "heading": "结尾", "label": "写推荐或难忘的原因", "content_kind": "content"},
+        ],
+        "source_policy": {
+            "allowed": ["real_experience", "observation", "child_confirmed"],
+            "required_for_content": ["real_experience", "observation", "child_confirmed"],
+        },
+    },
+    ("animal_object_observation", "default"): {
+        "display_name_child": "观察一种动物、植物或物品",
+        "display_name_parent": "观察类：动物 / 植物 / 物品",
+        "material_slots": [
+            {"id": "observation_subject", "label": "观察对象", "content_kind": "content"},
+            {"id": "appearance_detail", "label": "外形特点", "content_kind": "content"},
+            {"id": "change_or_habit", "label": "变化或习性", "content_kind": "content"},
+            {"id": "sensory_detail", "label": "感官细节", "content_kind": "content"},
+            {"id": "relationship_or_story", "label": "我和它的故事", "content_kind": "content"},
+            {"id": "discovery_feeling", "label": "发现和感受", "content_kind": "content"},
+        ],
+        "outline_sections": [
+            {"id": "opening_subject", "heading": "开头", "label": "介绍观察对象", "content_kind": "structural"},
+            {"id": "appearance", "heading": "样子", "label": "写外形特点", "content_kind": "content"},
+            {"id": "change_habit", "heading": "变化", "label": "写变化或习性", "content_kind": "content"},
+            {"id": "story_or_discovery", "heading": "发现", "label": "写故事或发现", "content_kind": "content"},
+            {"id": "ending_feeling", "heading": "结尾", "label": "写感受", "content_kind": "content"},
+        ],
+        "source_policy": {
+            "allowed": ["observation", "real_experience", "child_confirmed"],
+            "required_for_content": ["observation", "real_experience", "child_confirmed"],
+        },
+    },
+    ("animal_object_observation", "observation_diary"): {
+        "display_name_child": "写观察日记",
+        "display_name_parent": "观察类：观察日记",
+        "material_slots": [
+            {"id": "date_time", "label": "观察时间", "content_kind": "content"},
+            {"id": "observation_subject", "label": "观察对象", "content_kind": "content"},
+            {"id": "sequence_order", "label": "观察顺序", "content_kind": "content"},
+            {"id": "change_detail", "label": "变化细节", "content_kind": "content"},
+            {"id": "key_discovery", "label": "重要发现", "content_kind": "content"},
+            {"id": "feeling_question", "label": "感受或疑问", "content_kind": "content"},
+        ],
+        "outline_sections": [
+            {"id": "date_subject", "heading": "时间", "label": "写日期和观察对象", "content_kind": "structural"},
+            {"id": "sequence", "heading": "顺序", "label": "按观察顺序写", "content_kind": "content"},
+            {"id": "change", "heading": "变化", "label": "写清楚变化", "content_kind": "content"},
+            {"id": "discovery", "heading": "发现", "label": "写新的发现", "content_kind": "content"},
+            {"id": "ending_feeling", "heading": "结尾", "label": "写感受或疑问", "content_kind": "content"},
+        ],
+        "source_policy": {
+            "allowed": ["observation", "real_experience", "child_confirmed"],
+            "required_for_content": ["observation", "real_experience", "child_confirmed"],
+        },
+    },
+    ("practical_writing", "default"): {
+        "display_name_child": "写实用文",
+        "display_name_parent": "应用文：日记 / 书信 / 倡议书",
+        "material_slots": [
+            {"id": "format_type", "label": "文体格式", "content_kind": "structural"},
+            {"id": "audience_or_date", "label": "对象或日期", "content_kind": "structural"},
+            {"id": "main_message", "label": "主要想表达什么", "content_kind": "content"},
+            {"id": "reason_or_background", "label": "原因或背景", "content_kind": "content"},
+            {"id": "specific_details", "label": "具体内容", "content_kind": "content"},
+            {"id": "closing_or_call", "label": "结尾或呼吁", "content_kind": "content"},
+        ],
+        "outline_sections": [
+            {"id": "format_opening", "heading": "格式", "label": "写清格式开头", "content_kind": "structural"},
+            {"id": "main_message", "heading": "重点", "label": "说明主要信息", "content_kind": "content"},
+            {"id": "details_or_reasons", "heading": "理由", "label": "写具体内容和原因", "content_kind": "content"},
+            {"id": "closing", "heading": "结尾", "label": "收束或发出呼吁", "content_kind": "content"},
+            {"id": "signature_or_date", "heading": "署名", "label": "补充署名或日期", "content_kind": "structural"},
+        ],
+        "source_policy": {
+            "allowed": ["topic_requirement", "real_experience", "observation", "child_confirmed"],
+            "required_for_content": ["real_experience", "observation", "child_confirmed"],
+        },
+    },
+    ("practical_writing", "diary"): {
+        "display_name_child": "写日记",
+        "display_name_parent": "应用文：日记",
+        "material_slots": [
+            {"id": "date_weather", "label": "日期和天气", "content_kind": "structural"},
+            {"id": "day_event", "label": "当天发生的事", "content_kind": "content"},
+            {"id": "key_detail", "label": "一个关键细节", "content_kind": "content"},
+            {"id": "feeling_or_discovery", "label": "感受或发现", "content_kind": "content"},
+        ],
+        "outline_sections": [
+            {"id": "date_weather", "heading": "日期", "label": "写日期和天气", "content_kind": "structural"},
+            {"id": "event_process", "heading": "事情", "label": "写事情经过", "content_kind": "content"},
+            {"id": "key_detail", "heading": "细节", "label": "展开一个细节", "content_kind": "content"},
+            {"id": "feeling_discovery", "heading": "感受", "label": "写感受或发现", "content_kind": "content"},
+        ],
+        "source_policy": {
+            "allowed": ["topic_requirement", "real_experience", "observation", "child_confirmed"],
+            "required_for_content": ["real_experience", "observation", "child_confirmed"],
+        },
+    },
+    ("practical_writing", "letter"): {
+        "display_name_child": "写一封信",
+        "display_name_parent": "应用文：书信",
+        "material_slots": [
+            {"id": "recipient", "label": "写给谁", "content_kind": "structural"},
+            {"id": "main_message", "label": "主要想说的话", "content_kind": "content"},
+            {"id": "reason_or_background", "label": "原因或背景", "content_kind": "content"},
+            {"id": "specific_details", "label": "具体事情", "content_kind": "content"},
+            {"id": "blessing", "label": "祝福语", "content_kind": "structural"},
+            {"id": "signature_date", "label": "署名和日期", "content_kind": "structural"},
+        ],
+        "outline_sections": [
+            {"id": "salutation", "heading": "称呼", "label": "写称呼", "content_kind": "structural"},
+            {"id": "main_message", "heading": "正文", "label": "写主要内容", "content_kind": "content"},
+            {"id": "details_or_reasons", "heading": "细节", "label": "写具体理由或事情", "content_kind": "content"},
+            {"id": "blessing", "heading": "祝福", "label": "写祝福语", "content_kind": "structural"},
+            {"id": "signature_date", "heading": "署名", "label": "写署名和日期", "content_kind": "structural"},
+        ],
+        "source_policy": {
+            "allowed": ["topic_requirement", "real_experience", "observation", "child_confirmed"],
+            "required_for_content": ["real_experience", "observation", "child_confirmed"],
+        },
+    },
+    ("practical_writing", "proposal"): {
+        "display_name_child": "写倡议书",
+        "display_name_parent": "应用文：倡议书",
+        "material_slots": [
+            {"id": "proposal_topic", "label": "倡议主题", "content_kind": "structural"},
+            {"id": "problem_observed", "label": "看到的问题", "content_kind": "content"},
+            {"id": "reason_or_background", "label": "原因或背景", "content_kind": "content"},
+            {"id": "specific_suggestions", "label": "具体建议", "content_kind": "content"},
+            {"id": "closing_or_call", "label": "结尾呼吁", "content_kind": "content"},
+            {"id": "signature_or_date", "label": "署名或日期", "content_kind": "structural"},
+        ],
+        "outline_sections": [
+            {"id": "problem", "heading": "问题", "label": "点出问题", "content_kind": "content"},
+            {"id": "reason", "heading": "原因", "label": "说明背景或理由", "content_kind": "content"},
+            {"id": "suggestions", "heading": "建议", "label": "列出具体建议", "content_kind": "content"},
+            {"id": "call", "heading": "呼吁", "label": "发出倡议", "content_kind": "content"},
+            {"id": "signature_date", "heading": "署名", "label": "写署名和日期", "content_kind": "structural"},
+        ],
+        "source_policy": {
+            "allowed": ["topic_requirement", "real_experience", "observation", "child_confirmed"],
+            "required_for_content": ["real_experience", "observation", "child_confirmed"],
+        },
+    },
+    ("story_adaptation", "default"): {
+        "display_name_child": "改编一个故事",
+        "display_name_parent": "故事改编类：续写 / 新编 / 改写",
+        "material_slots": [
+            {"id": "original_basis", "label": "原故事基础", "content_kind": "source"},
+            {"id": "kept_elements", "label": "保留的人物或设定", "content_kind": "content"},
+            {"id": "change_point", "label": "改变从哪里开始", "content_kind": "content"},
+            {"id": "new_event", "label": "新发生的事", "content_kind": "content"},
+            {"id": "new_ending", "label": "新的结局", "content_kind": "content"},
+            {"id": "new_meaning", "label": "新的意思或启发", "content_kind": "content"},
+        ],
+        "outline_sections": [
+            {"id": "original_setup", "heading": "原文", "label": "交代原故事基础", "content_kind": "structural"},
+            {"id": "change_start", "heading": "变化", "label": "写改变的起点", "content_kind": "content"},
+            {"id": "new_development", "heading": "发展", "label": "展开新情节", "content_kind": "content"},
+            {"id": "new_ending", "heading": "结局", "label": "写新的结尾", "content_kind": "content"},
+            {"id": "ending_meaning", "heading": "意义", "label": "写新的启发", "content_kind": "content"},
+        ],
+        "source_policy": {
+            "allowed": ["topic_requirement", "reading_material", "imagined_setting", "child_confirmed"],
+            "required_for_content": ["topic_requirement", "reading_material", "imagined_setting", "child_confirmed"],
+        },
+    },
 }
 
 VARIANT_ALIASES = {
@@ -215,6 +409,16 @@ VARIANT_ALIASES = {
     ("expository_introduction", "research_introduction"): ("expository_introduction", "default"),
     ("expository_introduction", "object_introduction"): ("expository_introduction", "default"),
     ("expository_introduction", "culture_introduction"): ("expository_introduction", "default"),
+    ("place_scenery", "my_paradise"): ("place_scenery", "default"),
+    ("place_scenery", "travel_writing"): ("place_scenery", "default"),
+    ("place_scenery", "scene_description"): ("place_scenery", "default"),
+    ("place_scenery", "place_recommendation"): ("place_scenery", "default"),
+    ("animal_object_observation", "plant_friend"): ("animal_object_observation", "default"),
+    ("animal_object_observation", "animal_friend"): ("animal_object_observation", "default"),
+    ("animal_object_observation", "beloved_object"): ("animal_object_observation", "default"),
+    ("practical_writing", "heartfelt_letter"): ("practical_writing", "letter"),
+    ("story_adaptation", "story_continuation"): ("story_adaptation", "default"),
+    ("story_adaptation", "story_rewrite"): ("story_adaptation", "default"),
 }
 
 
@@ -269,6 +473,11 @@ def _materialize_template(topic_type: str, variant: str) -> dict[str, Any]:
     return template
 
 
+def _scaffold_template_version(topic_type: str, variant: str) -> str:
+    suffix = TEMPLATE_VERSION_SUFFIXES.get((topic_type, variant), SCHEMA_VERSION)
+    return f"{topic_type}.{variant}.{suffix}"
+
+
 def resolve_scaffold_snapshot(
     topic_type: str,
     topic_variant: str | None,
@@ -280,7 +489,7 @@ def resolve_scaffold_snapshot(
         "schema_version": SCHEMA_VERSION,
         "topic_type": resolved_type,
         "topic_variant": resolved_variant,
-        "scaffold_template_version": f"{resolved_type}.{resolved_variant}.v0.6b.1",
+        "scaffold_template_version": _scaffold_template_version(resolved_type, resolved_variant),
         "resolved_at": _now_iso(),
         "selection_source": selection_source,
         "display_name_child": template["display_name_child"],
