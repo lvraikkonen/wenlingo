@@ -244,6 +244,20 @@ class Essay(SQLModel, table=True):
     material_card: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
     outline: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
     created_at: datetime = timestamp_field()
+    updated_at: datetime = timestamp_field()
+    last_version_submitted_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
+    visibility_changed_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
+    hidden_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
+    hidden_by: str = Field(default="", index=True)
 
 
 class WritingTopicIdeaBatch(SQLModel, table=True):
@@ -265,11 +279,13 @@ class WritingTopicIdeaBatch(SQLModel, table=True):
 class EssayVersion(SQLModel, table=True):
     __table_args__ = (
         UniqueConstraint("essay_id", "version_label", name="uq_essay_version_label_per_essay"),
+        UniqueConstraint("essay_id", "round_index", name="uq_essay_version_round_per_essay"),
     )
 
     id: str = Field(default_factory=new_uuid, primary_key=True)
     essay_id: str = Field(foreign_key="essay.id", index=True)
     version_label: str
+    round_index: int | None = Field(default=None, index=True)
     content: str
     ai_feedback: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
     duration_seconds: int | None = None
@@ -277,6 +293,30 @@ class EssayVersion(SQLModel, table=True):
     skipped_tasks: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     llm_call_log_id: str | None = Field(default=None, foreign_key="llmcalllog.id", index=True)
     created_at: datetime = timestamp_field()
+
+
+class EssayRevisionAttempt(SQLModel, table=True):
+    __table_args__ = (
+        UniqueConstraint(
+            "essay_id",
+            "base_version_id",
+            "idempotency_key",
+            name="uq_essay_revision_attempt_idempotency",
+        ),
+    )
+
+    id: str = Field(default_factory=new_uuid, primary_key=True)
+    essay_id: str = Field(foreign_key="essay.id", index=True)
+    base_version_id: str = Field(foreign_key="essayversion.id", index=True)
+    target_round_index: int = Field(index=True)
+    submitted_content: str | None = None
+    submitted_content_hash: str = Field(default="", index=True)
+    idempotency_key: str = Field(index=True)
+    status: str = Field(default="pending_comparison", index=True)
+    new_version_id: str | None = Field(default=None, foreign_key="essayversion.id", index=True)
+    error_code: str | None = Field(default=None, index=True)
+    created_at: datetime = timestamp_field()
+    updated_at: datetime = timestamp_field()
 
 
 class ReadingSession(SQLModel, table=True):

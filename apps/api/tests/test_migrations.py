@@ -132,3 +132,24 @@ def test_v06c_topic_idea_batch_has_migration():
     assert "consumed_at" in migration_text
     assert "selected_idea_id" in migration_text
     assert "created_essay_id" in migration_text
+
+
+def test_v06d_essay_archive_revision_attempts_has_migration():
+    migration_path = Path(
+        "app/db/migrations/versions/20260630_v06d_essay_archive_revision_attempts.py"
+    )
+    migration_text = migration_path.read_text(encoding="utf-8")
+
+    assert "20260630_v06d_essay_archive" in migration_text
+    assert 'down_revision = "20260629_v06c_idea_batch"' in migration_text
+    assert "last_version_submitted_at" in migration_text
+    assert "visibility_changed_at" in migration_text
+    assert "hidden_at" in migration_text
+    assert "hidden_by" in migration_text
+    assert "round_index" in migration_text
+    assert "essayrevisionattempt" in migration_text
+    assert "target_round_index" in migration_text
+    assert "submitted_content_hash" in migration_text
+    assert "uq_essay_revision_attempt_idempotency" in migration_text
+    assert "uq_essay_revision_attempt_target_round_active" in migration_text
+    assert "uq_essay_version_round_per_essay" in migration_text

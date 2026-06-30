@@ -8,16 +8,19 @@ from app.domain.models import (
     Assessment,
     AuthMagicCode,
     Essay,
+    EssayRevisionAttempt,
     EssayVersion,
     GameEvent,
     LLMCallLog,
     ParentAccount,
+    ProductEvent,
     ParentSession,
     ParentUser,
     ReadingSession,
     Report,
     SentenceTraining,
     StudentProfile,
+    WritingTopicIdeaBatch,
 )
 
 
@@ -35,7 +38,12 @@ TIMESTAMP_FIELDS = [
     (Assessment, "created_at"),
     (SentenceTraining, "created_at"),
     (Essay, "created_at"),
+    (Essay, "updated_at"),
     (EssayVersion, "created_at"),
+    (EssayRevisionAttempt, "created_at"),
+    (EssayRevisionAttempt, "updated_at"),
+    (WritingTopicIdeaBatch, "expires_at"),
+    (WritingTopicIdeaBatch, "created_at"),
     (ReadingSession, "created_at"),
     (GameEvent, "created_at"),
     (Report, "created_at"),
@@ -52,20 +60,29 @@ NULLABLE_TIMESTAMP_FIELDS = [
     (AuthMagicCode, "consumed_at"),
     (AuthMagicCode, "last_attempt_at"),
     (ParentSession, "revoked_at"),
+    (Essay, "last_version_submitted_at"),
+    (Essay, "visibility_changed_at"),
+    (Essay, "hidden_at"),
+    (WritingTopicIdeaBatch, "consumed_at"),
 ]
 
 
 JSON_FIELDS = [
     (AbilityProfile, "evidence"),
+    (ProductEvent, "payload"),
     (SentenceTraining, "ai_feedback"),
     (Essay, "material_card"),
     (Essay, "outline"),
     (EssayVersion, "ai_feedback"),
+    (EssayVersion, "completed_tasks"),
+    (EssayVersion, "skipped_tasks"),
+    (WritingTopicIdeaBatch, "ideas"),
     (ReadingSession, "answers"),
     (ReadingSession, "ai_feedback"),
     (GameEvent, "problem_monsters"),
     (GameEvent, "evidence"),
     (Report, "content"),
+    (LLMCallLog, "attempt_summaries"),
     (LLMCallLog, "output_json"),
 ]
 
@@ -133,6 +150,31 @@ def test_essay_version_labels_are_unique_per_essay(session):
 
     with pytest.raises(IntegrityError):
         session.flush()
+
+
+def test_essay_archive_fields_have_expected_defaults():
+    essay = Essay(student_id="student-1", title="我的一次修改")
+
+    assert essay.hidden_by == ""
+    assert essay.hidden_at is None
+    assert essay.last_version_submitted_at is None
+    assert essay.visibility_changed_at is None
+
+
+def test_essay_revision_attempt_tracks_recoverable_content():
+    attempt = EssayRevisionAttempt(
+        essay_id="essay-1",
+        base_version_id="version-2",
+        target_round_index=3,
+        submitted_content="孩子写的第三稿，里面保留了自己修改的细节。",
+        submitted_content_hash="hash-1",
+        idempotency_key="idem-1",
+        status="comparison_failed",
+    )
+
+    assert attempt.target_round_index == 3
+    assert attempt.status == "comparison_failed"
+    assert attempt.submitted_content.startswith("孩子写的第三稿")
 
 
 def test_llm_call_log_tracks_provider_prompt_raw_response_and_retry_count():
