@@ -227,6 +227,7 @@ async def create_essay(
     version = EssayVersion(
         essay_id=essay.id,
         version_label="first_draft",
+        round_index=1,
         content=request.draft,
         ai_feedback=feedback.model_dump(),
         llm_call_log_id=feedback_result.log.id if feedback_result.log else None,
@@ -330,6 +331,10 @@ async def submit_revision(
     ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == essay.student_id)).first()
     if not student or not ability:
         raise HTTPException(status_code=404, detail="student not found")
+    base_content = latest.content
+    student_id = essay.student_id
+    parent_id = student.parent_id
+    prompt_version = settings.llm_prompt_version
 
     attempt = EssayRevisionAttempt(
         essay_id=essay_id,
@@ -357,19 +362,20 @@ async def submit_revision(
             return _completed_attempt_payload(session, active_attempt)
         raise HTTPException(status_code=409, detail="revision attempt conflict")
 
-    base_content = latest.content
+    attempt_id = attempt.id
+    session.rollback()
     try:
         comparison_result = await essay_revision_comparison(
             runner,
             base_content,
             request.content,
-            session=session,
-            prompt_version=settings.llm_prompt_version,
-            student_id=essay.student_id,
+            session=None,
+            prompt_version=prompt_version,
+            student_id=student_id,
         )
     except Exception:
         session.rollback()
-        failed_attempt = session.get(EssayRevisionAttempt, attempt.id)
+        failed_attempt = session.get(EssayRevisionAttempt, attempt_id)
         if failed_attempt is not None:
             failed_attempt.status = "comparison_failed"
             failed_attempt.error_code = "comparison_failed"
@@ -386,16 +392,19 @@ async def submit_revision(
             record_product_event(
                 session,
                 "ai_feedback_failed",
-                parent_id=student.parent_id,
-                student_id=student.id,
+                parent_id=parent_id,
+                student_id=student_id,
                 payload={"task_type": "essay", "error_category": "exception"},
             )
         except Exception:
             pass
-    attempt = session.get(EssayRevisionAttempt, attempt.id)
+    attempt = session.get(EssayRevisionAttempt, attempt_id)
     essay = session.get(Essay, essay_id)
     if attempt is None or essay is None:
         raise HTTPException(status_code=409, detail="revision attempt not found")
+    ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
+    if ability is None:
+        raise HTTPException(status_code=404, detail="student not found")
     revision = EssayVersion(
         essay_id=essay_id,
         version_label=get_version_label_for_round(target_round_index),
@@ -417,8 +426,8 @@ async def submit_revision(
         record_product_event(
             session,
             "essay_revision_feedback_completed",
-            parent_id=student.parent_id,
-            student_id=student.id,
+            parent_id=parent_id,
+            student_id=student_id,
             payload={
                 "target_type": "essay_revision",
                 "target_id": revision.id,
@@ -430,6 +439,9 @@ async def submit_revision(
         pass
     settlement_payload = None
     if target_round_index == 2:
+        student = session.get(StudentProfile, student_id)
+        if student is None:
+            raise HTTPException(status_code=404, detail="student not found")
         ability_deltas = revision_ability_deltas(len(comparison.evidence))
         apply_ability_delta(session, ability, ability_deltas, TaskType.essay, revision.id)
         event = settle_task(
@@ -452,10 +464,11 @@ async def submit_revision(
     attempt.submitted_content = None
     attempt.error_code = None
     attempt.updated_at = utcnow()
+    essay.last_version_submitted_at = revision.created_at
     session.add(essay)
     session.add(ability)
     session.add(attempt)
-    payload = _revision_payload(session, student.id, revision, comparison, settlement_payload)
+    payload = _revision_payload(session, student_id, revision, comparison, settlement_payload)
     session.commit()
     return payload
 
@@ -497,21 +510,51 @@ async def retry_revision_attempt(
 
     revision_content = attempt.submitted_content
     target_round_index = attempt.target_round_index
+    base_version_id = attempt.base_version_id
     base_content = latest.content
+    student_id = essay.student_id
+    prompt_version = settings.llm_prompt_version
+    active_attempt = _active_attempt_for_target(
+        session,
+        essay_id=essay_id,
+        base_version_id=base_version_id,
+        target_round_index=target_round_index,
+    )
+    if active_attempt is not None and active_attempt.id != attempt.id:
+        if active_attempt.status == "pending_comparison":
+            return _pending_revision_response(active_attempt)
+        if active_attempt.status == "completed":
+            return _completed_attempt_payload(session, active_attempt)
+        return _failed_revision_response(attempt)
     attempt.status = "pending_comparison"
     attempt.error_code = None
     attempt.updated_at = utcnow()
     session.add(attempt)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        active_attempt = _active_attempt_for_target(
+            session,
+            essay_id=essay_id,
+            base_version_id=base_version_id,
+            target_round_index=target_round_index,
+        )
+        if active_attempt is not None and active_attempt.status == "pending_comparison":
+            return _pending_revision_response(active_attempt)
+        if active_attempt is not None and active_attempt.status == "completed":
+            return _completed_attempt_payload(session, active_attempt)
+        raise HTTPException(status_code=409, detail="revision attempt conflict")
 
+    session.rollback()
     try:
         comparison_result = await essay_revision_comparison(
             runner,
             base_content,
             revision_content,
-            session=session,
-            prompt_version=settings.llm_prompt_version,
-            student_id=essay.student_id,
+            session=None,
+            prompt_version=prompt_version,
+            student_id=student_id,
         )
     except Exception:
         session.rollback()
@@ -532,6 +575,9 @@ async def retry_revision_attempt(
     essay = session.get(Essay, essay_id)
     if attempt is None or essay is None:
         raise HTTPException(status_code=409, detail="revision attempt not found")
+    ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
+    if ability is None:
+        raise HTTPException(status_code=404, detail="student not found")
     revision = EssayVersion(
         essay_id=essay_id,
         version_label=get_version_label_for_round(target_round_index),
@@ -549,6 +595,9 @@ async def retry_revision_attempt(
 
     settlement_payload = None
     if target_round_index == 2:
+        student = session.get(StudentProfile, student_id)
+        if student is None:
+            raise HTTPException(status_code=404, detail="student not found")
         ability_deltas = revision_ability_deltas(len(comparison.evidence))
         apply_ability_delta(session, ability, ability_deltas, TaskType.essay, revision.id)
         event = settle_task(
@@ -572,9 +621,10 @@ async def retry_revision_attempt(
     attempt.submitted_content = None
     attempt.error_code = None
     attempt.updated_at = utcnow()
+    essay.last_version_submitted_at = revision.created_at
     session.add(essay)
     session.add(ability)
     session.add(attempt)
-    payload = _revision_payload(session, student.id, revision, comparison, settlement_payload)
+    payload = _revision_payload(session, student_id, revision, comparison, settlement_payload)
     session.commit()
     return payload

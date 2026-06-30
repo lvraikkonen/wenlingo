@@ -32,10 +32,17 @@ class RecordingEssayRunner:
     def __init__(self, *, fail_comparison: bool = False):
         self.fail_comparison = fail_comparison
         self.calls: list[str] = []
+        self.sessions_by_task: dict[str, list[object | None]] = {}
+        self.in_transaction_by_task: dict[str, list[bool | None]] = {}
 
     async def run(self, **kwargs):
         task_name = kwargs["task_name"]
         self.calls.append(task_name)
+        task_session = kwargs["session"]
+        self.sessions_by_task.setdefault(task_name, []).append(task_session)
+        self.in_transaction_by_task.setdefault(task_name, []).append(
+            task_session.in_transaction() if task_session is not None else None
+        )
         if task_name == "essay_feedback":
             output = EssayFeedback(
                 strengths=["能写清楚发生了什么", "有一处心情表达"],
@@ -55,22 +62,24 @@ class RecordingEssayRunner:
             )
         else:
             raise AssertionError(f"unexpected task: {task_name}")
-        log = log_llm_result(
-            session=kwargs["session"],
-            student_id=kwargs["student_id"],
-            task_type=kwargs["task_type"],
-            task_name=task_name,
-            prompt_key=kwargs["prompt_key"],
-            provider=self.provider_name,
-            model=self.model_name,
-            prompt_version=kwargs["prompt_version"],
-            input_summary=kwargs["input_summary"],
-            raw_response="{}",
-            output_json=output.model_dump(),
-            validation_ok=True,
-            error_message="",
-            retry_count=0,
-        )
+        log = None
+        if task_session is not None:
+            log = log_llm_result(
+                session=task_session,
+                student_id=kwargs["student_id"],
+                task_type=kwargs["task_type"],
+                task_name=task_name,
+                prompt_key=kwargs["prompt_key"],
+                provider=self.provider_name,
+                model=self.model_name,
+                prompt_version=kwargs["prompt_version"],
+                input_summary=kwargs["input_summary"],
+                raw_response="{}",
+                output_json=output.model_dump(),
+                validation_ok=True,
+                error_message="",
+                retry_count=0,
+            )
         return AITaskResult(output=output, log=log, status="ok")
 
 
@@ -169,6 +178,7 @@ def test_essay_from_existing_draft_feedback_and_revision(session, client):
     first_draft = session.exec(
         select(EssayVersion).where(EssayVersion.version_label == "first_draft")
     ).one()
+    assert first_draft.round_index == 1
     draft_history = session.exec(
         select(AbilityHistory).where(AbilityHistory.source_id == first_draft.id)
     ).all()
@@ -214,9 +224,12 @@ def test_essay_from_existing_draft_feedback_and_revision(session, client):
     assert saved_revision.completed_tasks == ["给第二段加一个动作描写"]
     assert saved_revision.skipped_tasks == []
     assert saved_revision.duration_seconds == 420
-    assert saved_revision.llm_call_log_id is not None
+    assert saved_revision.llm_call_log_id is None
+    saved_essay = session.get(Essay, essay_id)
+    assert saved_essay is not None
+    assert saved_essay.last_version_submitted_at == saved_revision.created_at
     logs = session.exec(select(LLMCallLog).where(LLMCallLog.student_id == student.id)).all()
-    assert {log.task_name for log in logs} == {"essay_feedback", "essay_revision_comparison"}
+    assert {log.task_name for log in logs} == {"essay_feedback"}
     assert {log.task_type for log in logs} == {TaskType.essay}
 
 
@@ -310,6 +323,11 @@ def test_second_draft_keeps_full_settlement_behavior(session, client):
         select(EssayVersion).where(EssayVersion.version_label == "revision")
     ).one()
     assert saved_revision.round_index == 2
+    saved_essay = session.get(Essay, essay_id)
+    assert saved_essay is not None
+    assert saved_essay.last_version_submitted_at == saved_revision.created_at
+    assert runner.sessions_by_task["essay_revision_comparison"] == [None]
+    assert runner.in_transaction_by_task["essay_revision_comparison"] == [None]
     revision_history = session.exec(
         select(AbilityHistory).where(AbilityHistory.source_id == saved_revision.id)
     ).all()
@@ -340,9 +358,13 @@ def test_third_draft_appends_round_three_without_full_settlement(session, client
     assert len(session.exec(select(EssayVersion)).all()) == 3
     assert len(session.exec(select(GameEvent)).all()) == 1
     assert runner.calls.count("essay_revision_comparison") == comparison_call_count + 1
+    assert runner.sessions_by_task["essay_revision_comparison"][-1] is None
     round_3 = session.exec(
         select(EssayVersion).where(EssayVersion.version_label == "revision_round_3")
     ).one()
+    saved_essay = session.get(Essay, essay_id)
+    assert saved_essay is not None
+    assert saved_essay.last_version_submitted_at == round_3.created_at
     revision_history = session.exec(
         select(AbilityHistory).where(AbilityHistory.source_id == round_3.id)
     ).all()
@@ -548,6 +570,8 @@ def test_retry_failed_revision_attempt_appends_next_version(session, client):
     session.add(attempt)
     session.commit()
     runner.calls.clear()
+    runner.sessions_by_task.clear()
+    runner.in_transaction_by_task.clear()
 
     response = client.post(
         f"/api/essays/{essay_id}/revision-attempts/{attempt.id}/retry-comparison",
@@ -557,10 +581,55 @@ def test_retry_failed_revision_attempt_appends_next_version(session, client):
     assert response.json()["revision"]["version_label"] == "revision_round_3"
     assert response.json()["revision"]["content"] == ROUND_3_CONTENT
     assert runner.calls == ["essay_revision_comparison"]
+    assert runner.sessions_by_task["essay_revision_comparison"] == [None]
     session.refresh(attempt)
     assert attempt.status == "completed"
     assert attempt.new_version_id == response.json()["revision"]["id"]
     assert attempt.submitted_content is None
+    round_3 = session.get(EssayVersion, attempt.new_version_id)
+    saved_essay = session.get(Essay, essay_id)
+    assert round_3 is not None
+    assert saved_essay is not None
+    assert saved_essay.last_version_submitted_at == round_3.created_at
+
+
+def test_retry_failed_revision_attempt_conflict_returns_pending_before_llm(session, client):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    failed_attempt = EssayRevisionAttempt(
+        essay_id=essay_id,
+        base_version_id=round_2.id,
+        target_round_index=3,
+        submitted_content=ROUND_3_CONTENT,
+        submitted_content_hash="failed-hash",
+        idempotency_key="client-key-failed-round-3",
+        status="comparison_failed",
+        error_code="comparison_failed",
+    )
+    pending_attempt = EssayRevisionAttempt(
+        essay_id=essay_id,
+        base_version_id=round_2.id,
+        target_round_index=3,
+        submitted_content=ROUND_3_CONTENT,
+        submitted_content_hash="pending-hash",
+        idempotency_key="client-key-pending-round-3",
+        status="pending_comparison",
+    )
+    session.add(failed_attempt)
+    session.add(pending_attempt)
+    session.commit()
+    runner.calls.clear()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision-attempts/{failed_attempt.id}/retry-comparison",
+    )
+
+    assert response.status_code == 202
+    assert response.json()["attempt_id"] == pending_attempt.id
+    assert runner.calls == []
+    session.refresh(failed_attempt)
+    assert failed_attempt.status == "comparison_failed"
 
 
 @pytest.mark.asyncio
