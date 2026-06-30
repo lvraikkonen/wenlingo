@@ -91,7 +91,7 @@ def derive_archive_status(
         return "hidden_by_child"
     if failed_attempt is not None:
         return "needs_retry"
-    if not versions:
+    if not _has_first_draft_round(versions):
         return "not_archived"
 
     latest_round_index = get_round_index(versions[-1])
@@ -115,7 +115,7 @@ def can_continue_revision(
         return False
     if essay.status in ASSESSMENT_STATUSES or essay.status.startswith("assessment_"):
         return False
-    return bool(versions)
+    return _has_first_draft_round(versions)
 
 
 def can_retry_revision_attempt(
@@ -266,6 +266,10 @@ def _summary_label_for_status(status: str, latest_round_index: int | None) -> st
     if status == "multi_round_revision" and latest_round_index is not None:
         return f"已完成 {latest_round_index} 稿"
     return labels.get(status, "写作记录")
+
+
+def _has_first_draft_round(versions: list[EssayVersion]) -> bool:
+    return any(get_round_index(version) == 1 for version in versions)
 
 
 def _version_payload(version: EssayVersion) -> dict[str, Any]:

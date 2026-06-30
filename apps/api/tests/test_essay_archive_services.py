@@ -234,6 +234,40 @@ def test_archive_status_distinguishes_revision_states(session):
     assert item["summary_label"]
 
 
+def test_archive_status_requires_first_draft_round(session):
+    essay = Essay(
+        id="missing-first-draft",
+        student_id="student-1",
+        title="缺少初稿",
+        status="settled",
+        last_version_submitted_at=utcnow(),
+    )
+    session.add(essay)
+    session.flush()
+    session.add(
+        EssayVersion(
+            id="missing-first-draft-v2",
+            essay_id=essay.id,
+            version_label="revision",
+            round_index=2,
+            content="只有第二稿",
+        )
+    )
+    session.commit()
+
+    item = essay_archive.build_archive_item(
+        session,
+        essay,
+        parent_visible=False,
+        child_surface=True,
+    )
+
+    assert item["status"] == "not_archived"
+    assert item["latest_round_index"] == 2
+    assert item["needs_revision"] is False
+    assert item["can_continue_revision"] is False
+
+
 def test_child_archive_recency_uses_submission_time_and_preserves_topic_metadata(session):
     now = utcnow()
     older = _add_essay_with_versions(
