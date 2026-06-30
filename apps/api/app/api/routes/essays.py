@@ -78,6 +78,14 @@ def _content_hash(content: str) -> str:
     return sha256(content.encode("utf-8")).hexdigest()
 
 
+def _ensure_idempotency_content_matches(
+    attempt: EssayRevisionAttempt,
+    submitted_content_hash: str,
+) -> None:
+    if attempt.submitted_content_hash and attempt.submitted_content_hash != submitted_content_hash:
+        raise HTTPException(status_code=409, detail="idempotency key content mismatch")
+
+
 def _pending_revision_response(attempt: EssayRevisionAttempt) -> JSONResponse:
     return JSONResponse(
         status_code=202,
@@ -106,6 +114,13 @@ def _failed_revision_response(attempt: EssayRevisionAttempt) -> JSONResponse:
             "can_retry": True,
             "message": "上次 AI 对比没有完成，请重新提交这一稿。",
         },
+    )
+
+
+def _comparison_failed_http_exception() -> HTTPException:
+    return HTTPException(
+        status_code=502,
+        detail="这次 AI 对比没有完成，请稍后重试。",
     )
 
 
@@ -337,8 +352,7 @@ async def submit_revision(
         idempotency_key=request.idempotency_key,
     )
     if attempt is not None:
-        if attempt.submitted_content_hash and attempt.submitted_content_hash != request_content_hash:
-            raise HTTPException(status_code=409, detail="idempotency key content mismatch")
+        _ensure_idempotency_content_matches(attempt, request_content_hash)
         if attempt.status == "completed":
             return _completed_attempt_payload(session, attempt)
         if attempt.status == "comparison_failed":
@@ -408,8 +422,10 @@ async def submit_revision(
             target_round_index=target_round_index,
         )
         if active_attempt is not None and active_attempt.status == "pending_comparison":
+            _ensure_idempotency_content_matches(active_attempt, request_content_hash)
             return _pending_revision_response(active_attempt)
         if active_attempt is not None and active_attempt.status == "completed":
+            _ensure_idempotency_content_matches(active_attempt, request_content_hash)
             return _completed_attempt_payload(session, active_attempt)
         raise HTTPException(status_code=409, detail="revision attempt conflict")
 
@@ -432,23 +448,30 @@ async def submit_revision(
             failed_attempt.updated_at = utcnow()
             session.add(failed_attempt)
             session.commit()
-        raise HTTPException(
-            status_code=502,
-            detail="这次 AI 对比没有完成，请稍后重试。",
-        )
+        raise _comparison_failed_http_exception()
     comparison = comparison_result.output
+    comparison_log_id = comparison_result.log.id if comparison_result.log else None
+    comparison_failed = _is_ai_feedback_failure(comparison_result.log)
+    session.commit()
+    if comparison_failed:
+        try:
+            record_product_event(
+                session,
+                "ai_feedback_failed",
+                parent_id=parent_id,
+                student_id=student_id,
+                payload={"task_type": "essay", "error_category": "exception"},
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+        _mark_reserved_attempt_failed(
+            session,
+            attempt_id,
+            error_code="comparison_failed",
+        )
+        raise _comparison_failed_http_exception()
     try:
-        if _is_ai_feedback_failure(comparison_result.log):
-            try:
-                record_product_event(
-                    session,
-                    "ai_feedback_failed",
-                    parent_id=parent_id,
-                    student_id=student_id,
-                    payload={"task_type": "essay", "error_category": "exception"},
-                )
-            except Exception:
-                pass
         attempt = session.get(EssayRevisionAttempt, attempt_id)
         essay = session.get(Essay, essay_id)
         if attempt is None or essay is None:
@@ -465,7 +488,7 @@ async def submit_revision(
             completed_tasks=request.completed_tasks,
             skipped_tasks=request.skipped_tasks,
             duration_seconds=request.duration_seconds,
-            llm_call_log_id=comparison_result.log.id if comparison_result.log else None,
+            llm_call_log_id=comparison_log_id,
         )
         session.add(revision)
         try:
@@ -622,12 +645,19 @@ async def retry_revision_attempt(
             failed_attempt.updated_at = utcnow()
             session.add(failed_attempt)
             session.commit()
-        raise HTTPException(
-            status_code=502,
-            detail="这次 AI 对比没有完成，请稍后重试。",
-        )
+        raise _comparison_failed_http_exception()
 
     comparison = comparison_result.output
+    comparison_log_id = comparison_result.log.id if comparison_result.log else None
+    comparison_failed = _is_ai_feedback_failure(comparison_result.log)
+    session.commit()
+    if comparison_failed:
+        _mark_reserved_attempt_failed(
+            session,
+            attempt_id,
+            error_code="comparison_failed",
+        )
+        raise _comparison_failed_http_exception()
     try:
         attempt = session.get(EssayRevisionAttempt, attempt_id)
         essay = session.get(Essay, essay_id)
@@ -642,7 +672,7 @@ async def retry_revision_attempt(
             round_index=target_round_index,
             content=revision_content,
             ai_feedback=comparison.model_dump(),
-            llm_call_log_id=comparison_result.log.id if comparison_result.log else None,
+            llm_call_log_id=comparison_log_id,
         )
         session.add(revision)
         try:

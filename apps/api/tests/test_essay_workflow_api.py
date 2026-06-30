@@ -3,6 +3,7 @@ from hashlib import sha256
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
 from app.api.deps import AITaskRunner, get_ai_task_runner
@@ -30,8 +31,16 @@ class RecordingEssayRunner:
     provider_name = "workflow-test-provider"
     model_name = "workflow-test-model"
 
-    def __init__(self, *, fail_comparison: bool = False):
+    def __init__(
+        self,
+        *,
+        fail_comparison: bool = False,
+        comparison_validation_ok: bool = True,
+        comparison_error_message: str = "",
+    ):
         self.fail_comparison = fail_comparison
+        self.comparison_validation_ok = comparison_validation_ok
+        self.comparison_error_message = comparison_error_message
         self.calls: list[str] = []
         self.sessions_by_task: dict[str, list[object | None]] = {}
         self.in_transaction_by_task: dict[str, list[bool | None]] = {}
@@ -61,8 +70,13 @@ class RecordingEssayRunner:
                 evidence=["手心都出汗了", "摇摇晃晃骑过花坛"],
                 next_step="下一次把结尾感受写清楚。",
             )
+            validation_ok = self.comparison_validation_ok
+            error_message = self.comparison_error_message
         else:
             raise AssertionError(f"unexpected task: {task_name}")
+        if task_name != "essay_revision_comparison":
+            validation_ok = True
+            error_message = ""
         log = None
         if task_session is not None:
             log = log_llm_result(
@@ -77,8 +91,8 @@ class RecordingEssayRunner:
                 input_summary=kwargs["input_summary"],
                 raw_response="{}",
                 output_json=output.model_dump(),
-                validation_ok=True,
-                error_message="",
+                validation_ok=validation_ok,
+                error_message=error_message,
                 retry_count=0,
             )
         return AITaskResult(output=output, log=log, status="ok")
@@ -684,6 +698,41 @@ def test_ai_comparison_failure_preserves_revision_attempt_content(session, clien
     assert attempt.submitted_content == ROUND_3_CONTENT
 
 
+def test_ai_validation_failure_preserves_attempt_without_revision_or_settlement(session, client):
+    runner = RecordingEssayRunner(
+        comparison_validation_ok=False,
+        comparison_error_message="validation failed after fallback",
+    )
+    family, essay_id, first_draft = _start_essay(session, client, runner)
+    student = family["student"]
+    runner.calls.clear()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(first_draft),
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "这次 AI 对比没有完成，请稍后重试。"
+    attempt = session.exec(
+        select(EssayRevisionAttempt).where(EssayRevisionAttempt.idempotency_key == "client-key-round-2")
+    ).one()
+    assert attempt.status == "comparison_failed"
+    assert attempt.error_code == "comparison_failed"
+    assert attempt.submitted_content == ROUND_2_CONTENT
+    assert session.exec(select(EssayVersion).where(EssayVersion.version_label == "revision")).all() == []
+    assert session.exec(select(GameEvent)).all() == []
+    revision_history = session.exec(
+        select(AbilityHistory).where(AbilityHistory.ability_name == "revision")
+    ).all()
+    assert revision_history == []
+    logs = session.exec(select(LLMCallLog).where(LLMCallLog.student_id == student.id)).all()
+    comparison_logs = [log for log in logs if log.task_name == "essay_revision_comparison"]
+    assert len(comparison_logs) == 1
+    assert comparison_logs[0].validation_ok is False
+    assert comparison_logs[0].error_message == "validation failed after fallback"
+
+
 def test_retry_failed_revision_attempt_appends_next_version(session, client):
     runner = RecordingEssayRunner()
     _, essay_id, first_draft = _start_essay(session, client, runner)
@@ -730,6 +779,11 @@ def test_completion_phase_failure_marks_attempt_failed_after_llm(session, client
     runner = RecordingEssayRunner()
     _, essay_id, first_draft = _start_essay(session, client, runner)
     round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    comparison_log_count = len(
+        session.exec(
+            select(LLMCallLog).where(LLMCallLog.task_name == "essay_revision_comparison")
+        ).all()
+    )
     runner.calls.clear()
     from app.api.routes import essays as essay_routes
 
@@ -757,6 +811,57 @@ def test_completion_phase_failure_marks_attempt_failed_after_llm(session, client
     assert attempt.error_code == "completion_failed"
     assert attempt.submitted_content == ROUND_3_CONTENT
     assert attempt.new_version_id is None
+    comparison_logs = session.exec(
+        select(LLMCallLog).where(LLMCallLog.task_name == "essay_revision_comparison")
+    ).all()
+    assert len(comparison_logs) == comparison_log_count + 1
+
+
+def test_reservation_integrity_conflict_checks_content_hash_before_pending_response(
+    session,
+    client,
+    monkeypatch,
+):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    runner.calls.clear()
+    commit_calls = {"count": 0}
+    original_commit = session.commit
+
+    def flaky_commit():
+        commit_calls["count"] += 1
+        if commit_calls["count"] == 3:
+            session.rollback()
+            session.add(
+                EssayRevisionAttempt(
+                    essay_id=essay_id,
+                    base_version_id=round_2.id,
+                    target_round_index=3,
+                    submitted_content=ROUND_3_CONTENT,
+                    submitted_content_hash=_content_hash(ROUND_3_CONTENT),
+                    idempotency_key="client-key-round-3",
+                    status="pending_comparison",
+                )
+            )
+            original_commit()
+            raise IntegrityError("forced reservation race", None, None)
+        original_commit()
+
+    monkeypatch.setattr(session, "commit", flaky_commit)
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(
+            round_2,
+            content=DIFFERENT_ROUND_3_CONTENT,
+            key="client-key-round-3",
+        ),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "idempotency key content mismatch"
+    assert runner.calls == []
 
 
 def test_retry_failed_revision_attempt_conflict_returns_pending_before_llm(session, client):
