@@ -268,6 +268,51 @@ def test_archive_status_requires_first_draft_round(session):
     assert item["can_continue_revision"] is False
 
 
+def test_archive_status_without_first_draft_ignores_failed_attempt(session):
+    essay = Essay(
+        id="missing-first-with-failure",
+        student_id="student-1",
+        title="缺少初稿但有失败尝试",
+        status="settled",
+        last_version_submitted_at=utcnow(),
+    )
+    session.add(essay)
+    session.flush()
+    session.add(
+        EssayVersion(
+            id="missing-first-with-failure-v2",
+            essay_id=essay.id,
+            version_label="revision",
+            round_index=2,
+            content="只有第二稿",
+        )
+    )
+    session.add(
+        EssayRevisionAttempt(
+            essay_id=essay.id,
+            base_version_id="missing-first-with-failure-v2",
+            target_round_index=3,
+            submitted_content="第三稿内容",
+            submitted_content_hash="hash-missing-first",
+            idempotency_key="idem-missing-first",
+            status="comparison_failed",
+        )
+    )
+    session.commit()
+
+    item = essay_archive.build_archive_item(
+        session,
+        essay,
+        parent_visible=False,
+        child_surface=True,
+    )
+
+    assert item["status"] == "not_archived"
+    assert item["needs_revision"] is False
+    assert item["can_continue_revision"] is False
+    assert item["can_retry_revision_attempt"] is False
+
+
 def test_child_archive_recency_uses_submission_time_and_preserves_topic_metadata(session):
     now = utcnow()
     older = _add_essay_with_versions(
@@ -387,3 +432,36 @@ def test_archive_detail_includes_timeline_continue_guidance_retry_and_parent_sum
     assert detail["revision_attempt"]["error_code"] == "llm_timeout"
     assert detail["parent_summary"]["latest_round_index"] == 2
     assert detail["parent_summary"]["summary_label"]
+
+
+def test_archive_detail_uses_retry_guidance_when_error_code_is_missing(session):
+    essay = _add_essay_with_versions(
+        session,
+        essay_id="retry-without-error-code",
+        title="无错误码重试",
+        rounds=2,
+    )
+    session.add(
+        EssayRevisionAttempt(
+            essay_id=essay.id,
+            base_version_id="retry-without-error-code-v2",
+            target_round_index=3,
+            submitted_content="第三稿内容",
+            submitted_content_hash="hash-no-error",
+            idempotency_key="idem-no-error",
+            status="comparison_failed",
+            error_code=None,
+        )
+    )
+    session.commit()
+
+    detail = essay_archive.build_archive_detail(
+        session,
+        essay,
+        parent_visible=False,
+        child_surface=True,
+    )
+
+    assert detail["status"] == "needs_retry"
+    assert detail["continue_revision"]["previous_ai_guidance"].startswith("上次 AI 对比没有完成")
+    assert detail["continue_revision"]["previous_ai_guidance"] != "第 2 稿下一步建议"

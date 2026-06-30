@@ -89,10 +89,10 @@ def derive_archive_status(
     """Return hidden_by_child, needs_retry, needs_revision, revised_once, multi_round_revision, or not_archived."""
     if parent_visible and essay.hidden_by == "child":
         return "hidden_by_child"
-    if failed_attempt is not None:
-        return "needs_retry"
     if not _has_first_draft_round(versions):
         return "not_archived"
+    if failed_attempt is not None:
+        return "needs_retry"
 
     latest_round_index = get_round_index(versions[-1])
     if latest_round_index <= 1:
@@ -185,7 +185,7 @@ def build_archive_item(
     )
     retry_allowed = can_retry_revision_attempt(failed_attempt, latest)
     continue_allowed = can_continue_revision(essay, versions, child_surface=child_surface)
-    if status == "hidden_by_child":
+    if status in {"hidden_by_child", "not_archived"}:
         retry_allowed = False
         continue_allowed = False
 
@@ -330,8 +330,10 @@ def _continue_revision_guidance(
     versions: list[EssayVersion],
     failed_attempt: EssayRevisionAttempt | None,
 ) -> str:
-    if status == "needs_retry" and failed_attempt is not None and failed_attempt.error_code:
-        return f"上次 AI 对比没有完成（{failed_attempt.error_code}）。请重新提交这一稿，我们会继续帮你比较修改。"
+    if status == "needs_retry" and failed_attempt is not None:
+        if failed_attempt.error_code:
+            return f"上次 AI 对比没有完成（{failed_attempt.error_code}）。请重新提交这一稿，我们会继续帮你比较修改。"
+        return "上次 AI 对比没有完成。请重新提交这一稿，我们会继续帮你比较修改。"
 
     latest_feedback = latest.ai_feedback if isinstance(latest.ai_feedback, dict) else {}
     next_step = latest_feedback.get("next_step")
