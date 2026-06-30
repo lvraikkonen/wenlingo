@@ -221,7 +221,14 @@ async def create_essay(
             )
         except Exception:
             pass
-    essay = Essay(student_id=student_id, title=request.title, status=REVISION_REQUESTED_STATUS)
+    submitted_at = utcnow()
+    essay = Essay(
+        student_id=student_id,
+        title=request.title,
+        status=REVISION_REQUESTED_STATUS,
+        updated_at=submitted_at,
+        last_version_submitted_at=submitted_at,
+    )
     session.add(essay)
     session.flush()
     version = EssayVersion(
@@ -231,6 +238,7 @@ async def create_essay(
         content=request.draft,
         ai_feedback=feedback.model_dump(),
         llm_call_log_id=feedback_result.log.id if feedback_result.log else None,
+        created_at=submitted_at,
     )
     session.add(version)
     session.flush()
@@ -345,6 +353,7 @@ async def submit_revision(
         idempotency_key=request.idempotency_key,
         status="pending_comparison",
     )
+    attempt_id = attempt.id
     session.add(attempt)
     try:
         session.commit()
@@ -362,14 +371,13 @@ async def submit_revision(
             return _completed_attempt_payload(session, active_attempt)
         raise HTTPException(status_code=409, detail="revision attempt conflict")
 
-    attempt_id = attempt.id
     session.rollback()
     try:
         comparison_result = await essay_revision_comparison(
             runner,
             base_content,
             request.content,
-            session=None,
+            session=session,
             prompt_version=prompt_version,
             student_id=student_id,
         )
@@ -552,7 +560,7 @@ async def retry_revision_attempt(
             runner,
             base_content,
             revision_content,
-            session=None,
+            session=session,
             prompt_version=prompt_version,
             student_id=student_id,
         )

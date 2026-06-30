@@ -179,6 +179,10 @@ def test_essay_from_existing_draft_feedback_and_revision(session, client):
         select(EssayVersion).where(EssayVersion.version_label == "first_draft")
     ).one()
     assert first_draft.round_index == 1
+    saved_essay = session.get(Essay, essay_id)
+    assert saved_essay is not None
+    assert saved_essay.last_version_submitted_at == first_draft.created_at
+    assert saved_essay.updated_at == first_draft.created_at
     draft_history = session.exec(
         select(AbilityHistory).where(AbilityHistory.source_id == first_draft.id)
     ).all()
@@ -224,12 +228,12 @@ def test_essay_from_existing_draft_feedback_and_revision(session, client):
     assert saved_revision.completed_tasks == ["给第二段加一个动作描写"]
     assert saved_revision.skipped_tasks == []
     assert saved_revision.duration_seconds == 420
-    assert saved_revision.llm_call_log_id is None
+    assert saved_revision.llm_call_log_id is not None
     saved_essay = session.get(Essay, essay_id)
     assert saved_essay is not None
     assert saved_essay.last_version_submitted_at == saved_revision.created_at
     logs = session.exec(select(LLMCallLog).where(LLMCallLog.student_id == student.id)).all()
-    assert {log.task_name for log in logs} == {"essay_feedback"}
+    assert {log.task_name for log in logs} == {"essay_feedback", "essay_revision_comparison"}
     assert {log.task_type for log in logs} == {TaskType.essay}
 
 
@@ -326,8 +330,8 @@ def test_second_draft_keeps_full_settlement_behavior(session, client):
     saved_essay = session.get(Essay, essay_id)
     assert saved_essay is not None
     assert saved_essay.last_version_submitted_at == saved_revision.created_at
-    assert runner.sessions_by_task["essay_revision_comparison"] == [None]
-    assert runner.in_transaction_by_task["essay_revision_comparison"] == [None]
+    assert runner.sessions_by_task["essay_revision_comparison"] == [session]
+    assert runner.in_transaction_by_task["essay_revision_comparison"] == [False]
     revision_history = session.exec(
         select(AbilityHistory).where(AbilityHistory.source_id == saved_revision.id)
     ).all()
@@ -358,10 +362,12 @@ def test_third_draft_appends_round_three_without_full_settlement(session, client
     assert len(session.exec(select(EssayVersion)).all()) == 3
     assert len(session.exec(select(GameEvent)).all()) == 1
     assert runner.calls.count("essay_revision_comparison") == comparison_call_count + 1
-    assert runner.sessions_by_task["essay_revision_comparison"][-1] is None
+    assert runner.sessions_by_task["essay_revision_comparison"][-1] is session
+    assert runner.in_transaction_by_task["essay_revision_comparison"][-1] is False
     round_3 = session.exec(
         select(EssayVersion).where(EssayVersion.version_label == "revision_round_3")
     ).one()
+    assert round_3.llm_call_log_id is not None
     saved_essay = session.get(Essay, essay_id)
     assert saved_essay is not None
     assert saved_essay.last_version_submitted_at == round_3.created_at
@@ -581,7 +587,8 @@ def test_retry_failed_revision_attempt_appends_next_version(session, client):
     assert response.json()["revision"]["version_label"] == "revision_round_3"
     assert response.json()["revision"]["content"] == ROUND_3_CONTENT
     assert runner.calls == ["essay_revision_comparison"]
-    assert runner.sessions_by_task["essay_revision_comparison"] == [None]
+    assert runner.sessions_by_task["essay_revision_comparison"] == [session]
+    assert runner.in_transaction_by_task["essay_revision_comparison"] == [False]
     session.refresh(attempt)
     assert attempt.status == "completed"
     assert attempt.new_version_id == response.json()["revision"]["id"]
@@ -589,6 +596,7 @@ def test_retry_failed_revision_attempt_appends_next_version(session, client):
     round_3 = session.get(EssayVersion, attempt.new_version_id)
     saved_essay = session.get(Essay, essay_id)
     assert round_3 is not None
+    assert round_3.llm_call_log_id is not None
     assert saved_essay is not None
     assert saved_essay.last_version_submitted_at == round_3.created_at
 
