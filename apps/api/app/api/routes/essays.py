@@ -159,6 +159,42 @@ def _mark_reserved_attempt_failed(
     session.commit()
 
 
+def _mark_stale_pending_attempt_failed(
+    session: Session,
+    attempt: EssayRevisionAttempt,
+    *,
+    now,
+) -> bool:
+    if attempt.status != "pending_comparison" or not _attempt_is_stale(attempt, now):
+        return False
+    attempt.status = "comparison_failed"
+    attempt.error_code = "attempt_timeout"
+    attempt.updated_at = now
+    session.add(attempt)
+    session.commit()
+    return True
+
+
+def _completion_attempt_conflict_response(
+    attempt: EssayRevisionAttempt,
+    *,
+    essay_id: str,
+    base_version_id: str,
+    target_round_index: int,
+) -> JSONResponse | None:
+    if (
+        attempt.essay_id != essay_id
+        or attempt.base_version_id != base_version_id
+        or attempt.target_round_index != target_round_index
+    ):
+        raise HTTPException(status_code=409, detail="revision attempt conflict")
+    if attempt.status == "pending_comparison":
+        return None
+    if attempt.status == "comparison_failed":
+        return _failed_revision_response(attempt)
+    raise HTTPException(status_code=409, detail="revision attempt is not pending")
+
+
 def _revision_payload(
     session: Session,
     student_id: str,
@@ -477,6 +513,14 @@ async def submit_revision(
         essay = session.get(Essay, essay_id)
         if attempt is None or essay is None:
             raise HTTPException(status_code=409, detail="revision attempt not found")
+        conflict_response = _completion_attempt_conflict_response(
+            attempt,
+            essay_id=essay_id,
+            base_version_id=request.base_version_id,
+            target_round_index=target_round_index,
+        )
+        if conflict_response is not None:
+            return conflict_response
         ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
         if ability is None:
             raise HTTPException(status_code=404, detail="student not found")
@@ -574,6 +618,8 @@ async def retry_revision_attempt(
     attempt = session.get(EssayRevisionAttempt, attempt_id)
     if attempt is None or attempt.essay_id != essay_id:
         raise HTTPException(status_code=404, detail="revision attempt not found")
+    if _mark_stale_pending_attempt_failed(session, attempt, now=utcnow()):
+        return _failed_revision_response(attempt)
     if attempt.status != "comparison_failed":
         raise HTTPException(status_code=409, detail="revision attempt is not retryable")
     if not attempt.submitted_content:
@@ -603,6 +649,8 @@ async def retry_revision_attempt(
     )
     if active_attempt is not None and active_attempt.id != attempt.id:
         if active_attempt.status == "pending_comparison":
+            if _mark_stale_pending_attempt_failed(session, active_attempt, now=utcnow()):
+                return _failed_revision_response(active_attempt)
             return _pending_revision_response(active_attempt)
         if active_attempt.status == "completed":
             return _completed_attempt_payload(session, active_attempt)
@@ -622,6 +670,8 @@ async def retry_revision_attempt(
             target_round_index=target_round_index,
         )
         if active_attempt is not None and active_attempt.status == "pending_comparison":
+            if _mark_stale_pending_attempt_failed(session, active_attempt, now=utcnow()):
+                return _failed_revision_response(active_attempt)
             return _pending_revision_response(active_attempt)
         if active_attempt is not None and active_attempt.status == "completed":
             return _completed_attempt_payload(session, active_attempt)
@@ -664,6 +714,14 @@ async def retry_revision_attempt(
         essay = session.get(Essay, essay_id)
         if attempt is None or essay is None:
             raise HTTPException(status_code=409, detail="revision attempt not found")
+        conflict_response = _completion_attempt_conflict_response(
+            attempt,
+            essay_id=essay_id,
+            base_version_id=base_version_id,
+            target_round_index=target_round_index,
+        )
+        if conflict_response is not None:
+            return conflict_response
         ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
         if ability is None:
             raise HTTPException(status_code=404, detail="student not found")

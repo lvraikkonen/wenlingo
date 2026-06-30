@@ -849,6 +849,63 @@ def test_completion_phase_failure_marks_attempt_failed_after_llm(session, client
     assert len(comparison_logs) == comparison_log_count + 1
 
 
+def test_slow_completion_after_attempt_timeout_does_not_create_revision(session, client, monkeypatch):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    comparison_log_count = len(
+        session.exec(
+            select(LLMCallLog).where(LLMCallLog.task_name == "essay_revision_comparison")
+        ).all()
+    )
+    version_count = len(session.exec(select(EssayVersion).where(EssayVersion.essay_id == essay_id)).all())
+    runner.calls.clear()
+    commit_calls = {"count": 0}
+    original_commit = session.commit
+
+    def timeout_after_llm_log_commit():
+        commit_calls["count"] += 1
+        original_commit()
+        if commit_calls["count"] == 4:
+            attempt = session.exec(
+                select(EssayRevisionAttempt).where(
+                    EssayRevisionAttempt.idempotency_key == "client-key-round-3"
+                )
+            ).one()
+            attempt.status = "comparison_failed"
+            attempt.error_code = "attempt_timeout"
+            attempt.updated_at = utcnow()
+            session.add(attempt)
+            original_commit()
+
+    monkeypatch.setattr(session, "commit", timeout_after_llm_log_commit)
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(
+            round_2,
+            content=ROUND_3_CONTENT,
+            key="client-key-round-3",
+        ),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["status"] == "comparison_failed"
+    assert runner.calls == ["essay_revision_comparison"]
+    attempt = session.exec(
+        select(EssayRevisionAttempt).where(EssayRevisionAttempt.idempotency_key == "client-key-round-3")
+    ).one()
+    assert attempt.status == "comparison_failed"
+    assert attempt.error_code == "attempt_timeout"
+    assert attempt.submitted_content == ROUND_3_CONTENT
+    assert attempt.new_version_id is None
+    assert len(session.exec(select(EssayVersion).where(EssayVersion.essay_id == essay_id)).all()) == version_count
+    comparison_logs = session.exec(
+        select(LLMCallLog).where(LLMCallLog.task_name == "essay_revision_comparison")
+    ).all()
+    assert len(comparison_logs) == comparison_log_count + 1
+
+
 def test_reservation_integrity_conflict_checks_content_hash_before_pending_response(
     session,
     client,
@@ -994,6 +1051,88 @@ def test_retry_failed_revision_attempt_conflict_returns_pending_before_llm(sessi
     assert runner.calls == []
     session.refresh(failed_attempt)
     assert failed_attempt.status == "comparison_failed"
+
+
+def test_retry_endpoint_marks_own_stale_pending_attempt_failed(session, client):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    stale_time = utcnow() - timedelta(seconds=REVISION_ATTEMPT_TIMEOUT_SECONDS + 1)
+    attempt = EssayRevisionAttempt(
+        essay_id=essay_id,
+        base_version_id=round_2.id,
+        target_round_index=3,
+        submitted_content=ROUND_3_CONTENT,
+        submitted_content_hash=_content_hash(ROUND_3_CONTENT),
+        idempotency_key="client-key-stale-pending-round-3",
+        status="pending_comparison",
+        created_at=stale_time,
+        updated_at=stale_time,
+    )
+    session.add(attempt)
+    session.commit()
+    runner.calls.clear()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision-attempts/{attempt.id}/retry-comparison",
+    )
+
+    assert response.status_code == 409
+    assert response.json()["status"] == "comparison_failed"
+    assert response.json()["attempt_id"] == attempt.id
+    assert response.json()["error_code"] == "attempt_timeout"
+    assert runner.calls == []
+    session.refresh(attempt)
+    assert attempt.status == "comparison_failed"
+    assert attempt.error_code == "attempt_timeout"
+    assert attempt.submitted_content == ROUND_3_CONTENT
+
+
+def test_retry_failed_revision_attempt_marks_stale_active_pending_failed(session, client):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    stale_time = utcnow() - timedelta(seconds=REVISION_ATTEMPT_TIMEOUT_SECONDS + 1)
+    failed_attempt = EssayRevisionAttempt(
+        essay_id=essay_id,
+        base_version_id=round_2.id,
+        target_round_index=3,
+        submitted_content=ROUND_3_CONTENT,
+        submitted_content_hash=_content_hash(ROUND_3_CONTENT),
+        idempotency_key="client-key-failed-round-3",
+        status="comparison_failed",
+        error_code="comparison_failed",
+    )
+    pending_attempt = EssayRevisionAttempt(
+        essay_id=essay_id,
+        base_version_id=round_2.id,
+        target_round_index=3,
+        submitted_content=ROUND_3_CONTENT,
+        submitted_content_hash=_content_hash(ROUND_3_CONTENT),
+        idempotency_key="client-key-stale-active-round-3",
+        status="pending_comparison",
+        created_at=stale_time,
+        updated_at=stale_time,
+    )
+    session.add(failed_attempt)
+    session.add(pending_attempt)
+    session.commit()
+    runner.calls.clear()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision-attempts/{failed_attempt.id}/retry-comparison",
+    )
+
+    assert response.status_code == 409
+    assert response.json()["status"] == "comparison_failed"
+    assert response.json()["attempt_id"] == pending_attempt.id
+    assert response.json()["error_code"] == "attempt_timeout"
+    assert runner.calls == []
+    session.refresh(failed_attempt)
+    session.refresh(pending_attempt)
+    assert failed_attempt.status == "comparison_failed"
+    assert pending_attempt.status == "comparison_failed"
+    assert pending_attempt.error_code == "attempt_timeout"
 
 
 @pytest.mark.asyncio
