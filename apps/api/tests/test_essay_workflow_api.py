@@ -1,4 +1,5 @@
 from datetime import timedelta
+from hashlib import sha256
 
 import pytest
 from fastapi import HTTPException
@@ -88,6 +89,11 @@ ROUND_2_CONTENT = (
     "爸爸松手后，我摇摇晃晃骑过了花坛。我开心得跳了起来。"
 )
 ROUND_3_CONTENT = "孩子自己写的第三稿，加入了动作、心情和更清楚的顺序。"
+DIFFERENT_ROUND_3_CONTENT = "孩子这次写了完全不同的第三稿，加入了新的地点、对话和心情。"
+
+
+def _content_hash(content: str) -> str:
+    return sha256(content.encode("utf-8")).hexdigest()
 
 
 def _start_essay(session, client, runner: RecordingEssayRunner | None = None):
@@ -387,7 +393,7 @@ def test_lost_response_retry_returns_completed_attempt_even_after_latest_advance
         essay_id=essay_id,
         base_version_id=round_2.id,
         target_round_index=3,
-        submitted_content_hash="hash",
+        submitted_content_hash=_content_hash(ROUND_3_CONTENT),
         idempotency_key="client-key-round-3",
         status="completed",
         new_version_id=round_3.id,
@@ -412,6 +418,30 @@ def test_lost_response_retry_returns_completed_attempt_even_after_latest_advance
     assert len(session.exec(select(EssayVersion)).all()) == 4
 
 
+def test_completed_round_two_replay_returns_original_settlement_without_llm(session, client):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    first_response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(first_draft),
+    )
+    assert first_response.status_code == 201
+    assert first_response.json()["settlement"]["xp_delta"] == 60
+    runner.calls.clear()
+
+    replay_response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(first_draft),
+    )
+
+    assert replay_response.status_code == 201
+    assert replay_response.json()["revision"]["id"] == first_response.json()["revision"]["id"]
+    assert replay_response.json()["settlement"]["xp_delta"] == 60
+    assert replay_response.json()["settlement"]["id"] == first_response.json()["settlement"]["id"]
+    assert len(session.exec(select(GameEvent)).all()) == 1
+    assert runner.calls == []
+
+
 def test_same_pending_idempotency_key_returns_202_without_second_llm_call(session, client):
     runner = RecordingEssayRunner()
     _, essay_id, first_draft = _start_essay(session, client, runner)
@@ -421,7 +451,7 @@ def test_same_pending_idempotency_key_returns_202_without_second_llm_call(sessio
         base_version_id=round_2.id,
         target_round_index=3,
         submitted_content=ROUND_3_CONTENT,
-        submitted_content_hash="hash",
+        submitted_content_hash=_content_hash(ROUND_3_CONTENT),
         idempotency_key="client-key-round-3",
         status="pending_comparison",
     )
@@ -444,6 +474,101 @@ def test_same_pending_idempotency_key_returns_202_without_second_llm_call(sessio
     assert runner.calls == []
 
 
+def test_same_pending_idempotency_key_with_different_content_returns_409(session, client):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    attempt = EssayRevisionAttempt(
+        essay_id=essay_id,
+        base_version_id=round_2.id,
+        target_round_index=3,
+        submitted_content=ROUND_3_CONTENT,
+        submitted_content_hash=_content_hash(ROUND_3_CONTENT),
+        idempotency_key="client-key-round-3",
+        status="pending_comparison",
+    )
+    session.add(attempt)
+    session.commit()
+    runner.calls.clear()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(
+            round_2,
+            content=DIFFERENT_ROUND_3_CONTENT,
+            key="client-key-round-3",
+        ),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "idempotency key content mismatch"
+    assert runner.calls == []
+
+
+def test_same_completed_idempotency_key_with_different_content_returns_409(session, client):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    round_3 = _manual_version(session, essay_id, round_index=3)
+    attempt = EssayRevisionAttempt(
+        essay_id=essay_id,
+        base_version_id=round_2.id,
+        target_round_index=3,
+        submitted_content_hash=_content_hash(ROUND_3_CONTENT),
+        idempotency_key="client-key-round-3",
+        status="completed",
+        new_version_id=round_3.id,
+    )
+    session.add(attempt)
+    session.commit()
+    runner.calls.clear()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(
+            round_2,
+            content=DIFFERENT_ROUND_3_CONTENT,
+            key="client-key-round-3",
+        ),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "idempotency key content mismatch"
+    assert runner.calls == []
+
+
+def test_same_failed_idempotency_key_with_different_content_returns_409(session, client):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    attempt = EssayRevisionAttempt(
+        essay_id=essay_id,
+        base_version_id=round_2.id,
+        target_round_index=3,
+        submitted_content=ROUND_3_CONTENT,
+        submitted_content_hash=_content_hash(ROUND_3_CONTENT),
+        idempotency_key="client-key-round-3",
+        status="comparison_failed",
+        error_code="comparison_failed",
+    )
+    session.add(attempt)
+    session.commit()
+    runner.calls.clear()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(
+            round_2,
+            content=DIFFERENT_ROUND_3_CONTENT,
+            key="client-key-round-3",
+        ),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "idempotency key content mismatch"
+    assert runner.calls == []
+
+
 def test_different_idempotency_keys_same_target_round_stop_before_second_llm_call(session, client):
     runner = RecordingEssayRunner()
     _, essay_id, first_draft = _start_essay(session, client, runner)
@@ -453,7 +578,7 @@ def test_different_idempotency_keys_same_target_round_stop_before_second_llm_cal
         base_version_id=round_2.id,
         target_round_index=3,
         submitted_content=ROUND_3_CONTENT,
-        submitted_content_hash="hash",
+        submitted_content_hash=_content_hash(ROUND_3_CONTENT),
         idempotency_key="client-key-round-3-a",
         status="pending_comparison",
     )
@@ -484,7 +609,7 @@ def test_stale_pending_attempt_is_marked_failed_and_can_be_retried(session, clie
         base_version_id=round_2.id,
         target_round_index=3,
         submitted_content=ROUND_3_CONTENT,
-        submitted_content_hash="hash",
+        submitted_content_hash=_content_hash(ROUND_3_CONTENT),
         idempotency_key="client-key-round-3",
         status="pending_comparison",
         created_at=stale_time,
@@ -568,7 +693,7 @@ def test_retry_failed_revision_attempt_appends_next_version(session, client):
         base_version_id=round_2.id,
         target_round_index=3,
         submitted_content=ROUND_3_CONTENT,
-        submitted_content_hash="hash",
+        submitted_content_hash=_content_hash(ROUND_3_CONTENT),
         idempotency_key="client-key-round-3",
         status="comparison_failed",
         error_code="comparison_failed",
@@ -599,6 +724,39 @@ def test_retry_failed_revision_attempt_appends_next_version(session, client):
     assert round_3.llm_call_log_id is not None
     assert saved_essay is not None
     assert saved_essay.last_version_submitted_at == round_3.created_at
+
+
+def test_completion_phase_failure_marks_attempt_failed_after_llm(session, client, monkeypatch):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    runner.calls.clear()
+    from app.api.routes import essays as essay_routes
+
+    monkeypatch.setattr(
+        essay_routes,
+        "get_version_label_for_round",
+        lambda _round_index: "revision",
+    )
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(
+            round_2,
+            content=ROUND_3_CONTENT,
+            key="client-key-round-3",
+        ),
+    )
+
+    assert response.status_code == 409
+    assert runner.calls == ["essay_revision_comparison"]
+    attempt = session.exec(
+        select(EssayRevisionAttempt).where(EssayRevisionAttempt.idempotency_key == "client-key-round-3")
+    ).one()
+    assert attempt.status == "comparison_failed"
+    assert attempt.error_code == "completion_failed"
+    assert attempt.submitted_content == ROUND_3_CONTENT
+    assert attempt.new_version_id is None
 
 
 def test_retry_failed_revision_attempt_conflict_returns_pending_before_llm(session, client):

@@ -24,6 +24,7 @@ from app.domain.models import (
     Essay,
     EssayRevisionAttempt,
     EssayVersion,
+    GameEvent,
     StudentProfile,
     utcnow,
 )
@@ -108,6 +109,41 @@ def _failed_revision_response(attempt: EssayRevisionAttempt) -> JSONResponse:
     )
 
 
+def _settlement_payload_for_essay(session: Session, essay: Essay) -> dict[str, Any] | None:
+    events = session.exec(
+        select(GameEvent).where(
+            GameEvent.student_id == essay.student_id,
+            GameEvent.task_type == TaskType.essay,
+        )
+    ).all()
+    matching_events = [
+        event
+        for event in events
+        if isinstance(event.evidence, dict) and event.evidence.get("essay_id") == essay.id
+    ]
+    if not matching_events:
+        return None
+    event = sorted(matching_events, key=lambda row: (row.created_at, row.id))[-1]
+    return event.model_dump()
+
+
+def _mark_reserved_attempt_failed(
+    session: Session,
+    attempt_id: str,
+    *,
+    error_code: str,
+) -> None:
+    session.rollback()
+    attempt = session.get(EssayRevisionAttempt, attempt_id)
+    if attempt is None or attempt.status == "completed":
+        return
+    attempt.status = "comparison_failed"
+    attempt.error_code = error_code
+    attempt.updated_at = utcnow()
+    session.add(attempt)
+    session.commit()
+
+
 def _revision_payload(
     session: Session,
     student_id: str,
@@ -132,7 +168,10 @@ def _completed_attempt_payload(session: Session, attempt: EssayRevisionAttempt) 
     essay = session.get(Essay, attempt.essay_id)
     if essay is None:
         raise HTTPException(status_code=404, detail="essay not found")
-    return _revision_payload(session, essay.student_id, revision, revision.ai_feedback, None)
+    settlement = None
+    if get_round_index(revision) == 2:
+        settlement = _settlement_payload_for_essay(session, essay)
+    return _revision_payload(session, essay.student_id, revision, revision.ai_feedback, settlement)
 
 
 def _same_key_attempt(
@@ -290,6 +329,7 @@ async def submit_revision(
         raise HTTPException(status_code=404, detail="essay not found")
 
     now = utcnow()
+    request_content_hash = _content_hash(request.content)
     attempt = _same_key_attempt(
         session,
         essay_id=essay_id,
@@ -297,6 +337,8 @@ async def submit_revision(
         idempotency_key=request.idempotency_key,
     )
     if attempt is not None:
+        if attempt.submitted_content_hash and attempt.submitted_content_hash != request_content_hash:
+            raise HTTPException(status_code=409, detail="idempotency key content mismatch")
         if attempt.status == "completed":
             return _completed_attempt_payload(session, attempt)
         if attempt.status == "comparison_failed":
@@ -349,7 +391,7 @@ async def submit_revision(
         base_version_id=request.base_version_id,
         target_round_index=target_round_index,
         submitted_content=request.content,
-        submitted_content_hash=_content_hash(request.content),
+        submitted_content_hash=request_content_hash,
         idempotency_key=request.idempotency_key,
         status="pending_comparison",
     )
@@ -395,90 +437,97 @@ async def submit_revision(
             detail="这次 AI 对比没有完成，请稍后重试。",
         )
     comparison = comparison_result.output
-    if _is_ai_feedback_failure(comparison_result.log):
+    try:
+        if _is_ai_feedback_failure(comparison_result.log):
+            try:
+                record_product_event(
+                    session,
+                    "ai_feedback_failed",
+                    parent_id=parent_id,
+                    student_id=student_id,
+                    payload={"task_type": "essay", "error_category": "exception"},
+                )
+            except Exception:
+                pass
+        attempt = session.get(EssayRevisionAttempt, attempt_id)
+        essay = session.get(Essay, essay_id)
+        if attempt is None or essay is None:
+            raise HTTPException(status_code=409, detail="revision attempt not found")
+        ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
+        if ability is None:
+            raise HTTPException(status_code=404, detail="student not found")
+        revision = EssayVersion(
+            essay_id=essay_id,
+            version_label=get_version_label_for_round(target_round_index),
+            round_index=target_round_index,
+            content=request.content,
+            ai_feedback=comparison.model_dump(),
+            completed_tasks=request.completed_tasks,
+            skipped_tasks=request.skipped_tasks,
+            duration_seconds=request.duration_seconds,
+            llm_call_log_id=comparison_result.log.id if comparison_result.log else None,
+        )
+        session.add(revision)
+        try:
+            session.flush()
+        except IntegrityError as exc:
+            raise HTTPException(status_code=409, detail="essay version already exists") from exc
         try:
             record_product_event(
                 session,
-                "ai_feedback_failed",
+                "essay_revision_feedback_completed",
                 parent_id=parent_id,
                 student_id=student_id,
-                payload={"task_type": "essay", "error_category": "exception"},
+                payload={
+                    "target_type": "essay_revision",
+                    "target_id": revision.id,
+                    "task_type": "essay",
+                    "status": "completed",
+                },
             )
         except Exception:
             pass
-    attempt = session.get(EssayRevisionAttempt, attempt_id)
-    essay = session.get(Essay, essay_id)
-    if attempt is None or essay is None:
-        raise HTTPException(status_code=409, detail="revision attempt not found")
-    ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
-    if ability is None:
-        raise HTTPException(status_code=404, detail="student not found")
-    revision = EssayVersion(
-        essay_id=essay_id,
-        version_label=get_version_label_for_round(target_round_index),
-        round_index=target_round_index,
-        content=request.content,
-        ai_feedback=comparison.model_dump(),
-        completed_tasks=request.completed_tasks,
-        skipped_tasks=request.skipped_tasks,
-        duration_seconds=request.duration_seconds,
-        llm_call_log_id=comparison_result.log.id if comparison_result.log else None,
-    )
-    session.add(revision)
-    try:
-        session.flush()
-    except IntegrityError as exc:
-        session.rollback()
-        raise HTTPException(status_code=409, detail="essay version already exists") from exc
-    try:
-        record_product_event(
-            session,
-            "essay_revision_feedback_completed",
-            parent_id=parent_id,
-            student_id=student_id,
-            payload={
-                "target_type": "essay_revision",
-                "target_id": revision.id,
-                "task_type": "essay",
-                "status": "completed",
-            },
-        )
+        settlement_payload = None
+        if target_round_index == 2:
+            student = session.get(StudentProfile, student_id)
+            if student is None:
+                raise HTTPException(status_code=404, detail="student not found")
+            ability_deltas = revision_ability_deltas(len(comparison.evidence))
+            apply_ability_delta(session, ability, ability_deltas, TaskType.essay, revision.id)
+            event = settle_task(
+                student,
+                TaskType.essay,
+                ["细节缺口"],
+                {
+                    "essay_id": essay_id,
+                    "completed_task_count": len(request.completed_tasks),
+                    "completed_tasks": request.completed_tasks,
+                    "ability_deltas": ability_deltas,
+                },
+            )
+            essay.status = SETTLED_ESSAY_STATUS
+            session.add(student)
+            session.add(event)
+            settlement_payload = event.model_dump()
+        attempt.status = "completed"
+        attempt.new_version_id = revision.id
+        attempt.submitted_content = None
+        attempt.error_code = None
+        attempt.updated_at = utcnow()
+        essay.last_version_submitted_at = revision.created_at
+        session.add(essay)
+        session.add(ability)
+        session.add(attempt)
+        payload = _revision_payload(session, student_id, revision, comparison, settlement_payload)
+        session.commit()
+        return payload
     except Exception:
-        pass
-    settlement_payload = None
-    if target_round_index == 2:
-        student = session.get(StudentProfile, student_id)
-        if student is None:
-            raise HTTPException(status_code=404, detail="student not found")
-        ability_deltas = revision_ability_deltas(len(comparison.evidence))
-        apply_ability_delta(session, ability, ability_deltas, TaskType.essay, revision.id)
-        event = settle_task(
-            student,
-            TaskType.essay,
-            ["细节缺口"],
-            {
-                "essay_id": essay_id,
-                "completed_task_count": len(request.completed_tasks),
-                "completed_tasks": request.completed_tasks,
-                "ability_deltas": ability_deltas,
-            },
+        _mark_reserved_attempt_failed(
+            session,
+            attempt_id,
+            error_code="completion_failed",
         )
-        essay.status = SETTLED_ESSAY_STATUS
-        session.add(student)
-        session.add(event)
-        settlement_payload = event.model_dump()
-    attempt.status = "completed"
-    attempt.new_version_id = revision.id
-    attempt.submitted_content = None
-    attempt.error_code = None
-    attempt.updated_at = utcnow()
-    essay.last_version_submitted_at = revision.created_at
-    session.add(essay)
-    session.add(ability)
-    session.add(attempt)
-    payload = _revision_payload(session, student_id, revision, comparison, settlement_payload)
-    session.commit()
-    return payload
+        raise
 
 
 @router.post(
@@ -579,60 +628,67 @@ async def retry_revision_attempt(
         )
 
     comparison = comparison_result.output
-    attempt = session.get(EssayRevisionAttempt, attempt_id)
-    essay = session.get(Essay, essay_id)
-    if attempt is None or essay is None:
-        raise HTTPException(status_code=409, detail="revision attempt not found")
-    ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
-    if ability is None:
-        raise HTTPException(status_code=404, detail="student not found")
-    revision = EssayVersion(
-        essay_id=essay_id,
-        version_label=get_version_label_for_round(target_round_index),
-        round_index=target_round_index,
-        content=revision_content,
-        ai_feedback=comparison.model_dump(),
-        llm_call_log_id=comparison_result.log.id if comparison_result.log else None,
-    )
-    session.add(revision)
     try:
-        session.flush()
-    except IntegrityError as exc:
-        session.rollback()
-        raise HTTPException(status_code=409, detail="essay version already exists") from exc
-
-    settlement_payload = None
-    if target_round_index == 2:
-        student = session.get(StudentProfile, student_id)
-        if student is None:
+        attempt = session.get(EssayRevisionAttempt, attempt_id)
+        essay = session.get(Essay, essay_id)
+        if attempt is None or essay is None:
+            raise HTTPException(status_code=409, detail="revision attempt not found")
+        ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
+        if ability is None:
             raise HTTPException(status_code=404, detail="student not found")
-        ability_deltas = revision_ability_deltas(len(comparison.evidence))
-        apply_ability_delta(session, ability, ability_deltas, TaskType.essay, revision.id)
-        event = settle_task(
-            student,
-            TaskType.essay,
-            ["细节缺口"],
-            {
-                "essay_id": essay_id,
-                "completed_task_count": 0,
-                "completed_tasks": [],
-                "ability_deltas": ability_deltas,
-            },
+        revision = EssayVersion(
+            essay_id=essay_id,
+            version_label=get_version_label_for_round(target_round_index),
+            round_index=target_round_index,
+            content=revision_content,
+            ai_feedback=comparison.model_dump(),
+            llm_call_log_id=comparison_result.log.id if comparison_result.log else None,
         )
-        essay.status = SETTLED_ESSAY_STATUS
-        session.add(student)
-        session.add(event)
-        settlement_payload = event.model_dump()
+        session.add(revision)
+        try:
+            session.flush()
+        except IntegrityError as exc:
+            raise HTTPException(status_code=409, detail="essay version already exists") from exc
 
-    attempt.status = "completed"
-    attempt.new_version_id = revision.id
-    attempt.submitted_content = None
-    attempt.error_code = None
-    attempt.updated_at = utcnow()
-    essay.last_version_submitted_at = revision.created_at
-    session.add(essay)
-    session.add(ability)
-    session.add(attempt)
-    payload = _revision_payload(session, student_id, revision, comparison, settlement_payload)
-    session.commit()
-    return payload
+        settlement_payload = None
+        if target_round_index == 2:
+            student = session.get(StudentProfile, student_id)
+            if student is None:
+                raise HTTPException(status_code=404, detail="student not found")
+            ability_deltas = revision_ability_deltas(len(comparison.evidence))
+            apply_ability_delta(session, ability, ability_deltas, TaskType.essay, revision.id)
+            event = settle_task(
+                student,
+                TaskType.essay,
+                ["细节缺口"],
+                {
+                    "essay_id": essay_id,
+                    "completed_task_count": 0,
+                    "completed_tasks": [],
+                    "ability_deltas": ability_deltas,
+                },
+            )
+            essay.status = SETTLED_ESSAY_STATUS
+            session.add(student)
+            session.add(event)
+            settlement_payload = event.model_dump()
+
+        attempt.status = "completed"
+        attempt.new_version_id = revision.id
+        attempt.submitted_content = None
+        attempt.error_code = None
+        attempt.updated_at = utcnow()
+        essay.last_version_submitted_at = revision.created_at
+        session.add(essay)
+        session.add(ability)
+        session.add(attempt)
+        payload = _revision_payload(session, student_id, revision, comparison, settlement_payload)
+        session.commit()
+        return payload
+    except Exception:
+        _mark_reserved_attempt_failed(
+            session,
+            attempt_id,
+            error_code="completion_failed",
+        )
+        raise
