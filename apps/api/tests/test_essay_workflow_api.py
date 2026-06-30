@@ -1,34 +1,154 @@
+from datetime import timedelta
+
 import pytest
 from fastapi import HTTPException
 from sqlmodel import select
 
-from app.api.deps import AITaskRunner
+from app.api.deps import AITaskRunner, get_ai_task_runner
 from app.api.routes.essays import EssayRevisionCreate, submit_revision
 from app.core.config import get_settings
 from app.domain.enums import TaskType
-from app.domain.models import AbilityHistory, Essay, EssayVersion, GameEvent, LLMCallLog
+from app.domain.models import (
+    AbilityHistory,
+    Essay,
+    EssayRevisionAttempt,
+    EssayVersion,
+    GameEvent,
+    LLMCallLog,
+    utcnow,
+)
+from app.services.ai_runner import AITaskResult
+from app.services.ai_tasks import log_llm_result
+from app.services.essay_archive import REVISION_ATTEMPT_TIMEOUT_SECONDS
 from app.services.essay_workflow import draft_ability_deltas
+from app.services.llm_contracts import EssayFeedback, EssayRevisionComparison, RevisionTask
 from tests.conftest import create_authenticated_family
 
 
-class EmptyScalarResult:
-    def first(self):
-        return None
+class RecordingEssayRunner:
+    provider_name = "workflow-test-provider"
+    model_name = "workflow-test-model"
+
+    def __init__(self, *, fail_comparison: bool = False):
+        self.fail_comparison = fail_comparison
+        self.calls: list[str] = []
+
+    async def run(self, **kwargs):
+        task_name = kwargs["task_name"]
+        self.calls.append(task_name)
+        if task_name == "essay_feedback":
+            output = EssayFeedback(
+                strengths=["能写清楚发生了什么", "有一处心情表达"],
+                improvements=["第二段缺少动作细节"],
+                problem_monsters=["细节缺口"],
+                sentence_notes=["把开心换成看到、听到、做到的细节。"],
+                revision_tasks=[RevisionTask(instruction="给第二段加一个动作描写", target="第二段")],
+            )
+        elif task_name == "essay_revision_comparison":
+            if self.fail_comparison:
+                raise RuntimeError("forced comparison failure")
+            output = EssayRevisionComparison(
+                encouragement="你把最重要的画面写清楚了。",
+                improved_dimensions=["细节更多", "动作更具体"],
+                evidence=["手心都出汗了", "摇摇晃晃骑过花坛"],
+                next_step="下一次把结尾感受写清楚。",
+            )
+        else:
+            raise AssertionError(f"unexpected task: {task_name}")
+        log = log_llm_result(
+            session=kwargs["session"],
+            student_id=kwargs["student_id"],
+            task_type=kwargs["task_type"],
+            task_name=task_name,
+            prompt_key=kwargs["prompt_key"],
+            provider=self.provider_name,
+            model=self.model_name,
+            prompt_version=kwargs["prompt_version"],
+            input_summary=kwargs["input_summary"],
+            raw_response="{}",
+            output_json=output.model_dump(),
+            validation_ok=True,
+            error_message="",
+            retry_count=0,
+        )
+        return AITaskResult(output=output, log=log, status="ok")
 
 
-class StaleRevisionReadSession:
-    def __init__(self, session):
-        self.session = session
-        self.exec_count = 0
+ROUND_2_CONTENT = (
+    "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。"
+    "爸爸松手后，我摇摇晃晃骑过了花坛。我开心得跳了起来。"
+)
+ROUND_3_CONTENT = "孩子自己写的第三稿，加入了动作、心情和更清楚的顺序。"
 
-    def exec(self, statement):
-        self.exec_count += 1
-        if self.exec_count == 2:
-            return EmptyScalarResult()
-        return self.session.exec(statement)
 
-    def __getattr__(self, name):
-        return getattr(self.session, name)
+def _start_essay(session, client, runner: RecordingEssayRunner | None = None):
+    if runner is not None:
+        client.app.dependency_overrides[get_ai_task_runner] = lambda: runner
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/essays",
+        json={
+            "title": "我学会了骑车",
+            "draft": "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+            "entry": "existing_draft",
+        },
+    )
+    assert start.status_code == 201
+    first_draft = session.exec(
+        select(EssayVersion).where(EssayVersion.version_label == "first_draft")
+    ).one()
+    return family, start.json()["essay"]["id"], first_draft
+
+
+def _revision_payload(
+    base_version: EssayVersion,
+    *,
+    content: str = ROUND_2_CONTENT,
+    key: str = "client-key-round-2",
+) -> dict:
+    return {
+        "base_version_id": base_version.id,
+        "content": content,
+        "idempotency_key": key,
+        "completed_tasks": ["把动作写清楚"],
+        "skipped_tasks": [],
+        "duration_seconds": 180,
+    }
+
+
+def _submit_round_2(session, client, essay_id: str, first_draft: EssayVersion) -> EssayVersion:
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(first_draft),
+    )
+    assert response.status_code == 201
+    return session.exec(select(EssayVersion).where(EssayVersion.version_label == "revision")).one()
+
+
+def _manual_version(
+    session,
+    essay_id: str,
+    *,
+    round_index: int,
+    content: str = ROUND_3_CONTENT,
+) -> EssayVersion:
+    version = EssayVersion(
+        essay_id=essay_id,
+        version_label=f"revision_round_{round_index}" if round_index > 2 else "revision",
+        round_index=round_index,
+        content=content,
+        ai_feedback={
+            "encouragement": "你继续完成了修改。",
+            "improved_dimensions": ["顺序更清楚"],
+            "evidence": ["加入了动作"],
+            "next_step": "下一次继续补心情。",
+        },
+    )
+    session.add(version)
+    session.commit()
+    session.refresh(version)
+    return version
 
 
 def test_essay_from_existing_draft_feedback_and_revision(session, client):
@@ -60,7 +180,9 @@ def test_essay_from_existing_draft_feedback_and_revision(session, client):
     revision = client.post(
         f"/api/essays/{essay_id}/revision",
         json={
-            "content": "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。爸爸松手后，我摇摇晃晃骑过了花坛。我开心得跳了起来。",
+            "base_version_id": first_draft.id,
+            "content": ROUND_2_CONTENT,
+            "idempotency_key": "client-key-existing-workflow",
             "completed_tasks": ["给第二段加一个动作描写"],
             "skipped_tasks": [],
             "duration_seconds": 420,
@@ -72,6 +194,7 @@ def test_essay_from_existing_draft_feedback_and_revision(session, client):
     assert revision.json()["revision"]["completed_tasks"] == ["给第二段加一个动作描写"]
     assert revision.json()["revision"]["skipped_tasks"] == []
     assert revision.json()["revision"]["duration_seconds"] == 420
+    assert revision.json()["revision"]["round_index"] == 2
     assert len(session.exec(select(Essay)).all()) == 1
     assert len(session.exec(select(EssayVersion)).all()) == 2
     event = session.exec(select(GameEvent)).one()
@@ -129,7 +252,11 @@ def test_revision_without_first_draft_returns_conflict(session, client):
 
     response = client.post(
         f"/api/essays/{essay.id}/revision",
-        json={"content": "我学会了骑车。刚开始我很害怕。后来我慢慢练习，终于能稳稳骑过小路。"},
+        json={
+            "base_version_id": "missing-first-draft",
+            "content": "我学会了骑车。刚开始我很害怕。后来我慢慢练习，终于能稳稳骑过小路。",
+            "idempotency_key": "client-key-no-draft",
+        },
     )
 
     assert response.status_code == 409
@@ -142,18 +269,21 @@ def test_revision_missing_student_or_ability_returns_not_found(session, client):
     essay = Essay(student_id="missing-student", title="我学会了骑车", status="revision_requested")
     session.add(essay)
     session.flush()
-    session.add(
-        EssayVersion(
-            essay_id=essay.id,
-            version_label="first_draft",
-            content="我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
-        )
+    first_draft = EssayVersion(
+        essay_id=essay.id,
+        version_label="first_draft",
+        content="我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
     )
+    session.add(first_draft)
     session.commit()
 
     response = client.post(
         f"/api/essays/{essay.id}/revision",
-        json={"content": "我学会了骑车。刚开始我很害怕。后来我慢慢练习，终于能稳稳骑过小路。"},
+        json={
+            "base_version_id": first_draft.id,
+            "content": "我学会了骑车。刚开始我很害怕。后来我慢慢练习，终于能稳稳骑过小路。",
+            "idempotency_key": "client-key-missing-student",
+        },
     )
 
     assert response.status_code == 404
@@ -161,36 +291,276 @@ def test_revision_missing_student_or_ability_returns_not_found(session, client):
     assert len(session.exec(select(GameEvent)).all()) == 0
 
 
-def test_revision_cannot_be_settled_twice(session, client):
-    family = create_authenticated_family(session)
+def test_second_draft_keeps_full_settlement_behavior(session, client):
+    runner = RecordingEssayRunner()
+    family, essay_id, first_draft = _start_essay(session, client, runner)
     student = family["student"]
 
-    start = client.post(
-        f"/api/students/{student.id}/essays",
-        json={
-            "title": "我学会了骑车",
-            "draft": "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
-            "entry": "existing_draft",
-        },
+    first_revision = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(first_draft),
     )
-    essay_id = start.json()["essay"]["id"]
-    revision_payload = {
-        "content": "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。爸爸松手后，我摇摇晃晃骑过了花坛。我开心得跳了起来。"
-    }
-
-    first_revision = client.post(f"/api/essays/{essay_id}/revision", json=revision_payload)
-    session.refresh(student)
-    xp_after_first_revision = student.xp
-    second_revision = client.post(f"/api/essays/{essay_id}/revision", json=revision_payload)
 
     assert first_revision.status_code == 201
-    assert second_revision.status_code == 409
-    assert second_revision.json()["detail"] == "essay already settled"
+    assert first_revision.json()["settlement"]["xp_delta"] == 60
     assert len(session.exec(select(EssayVersion)).all()) == 2
     assert len(session.exec(select(GameEvent)).all()) == 1
     assert len(session.exec(select(AbilityHistory)).all()) == 3
+    saved_revision = session.exec(
+        select(EssayVersion).where(EssayVersion.version_label == "revision")
+    ).one()
+    assert saved_revision.round_index == 2
+    revision_history = session.exec(
+        select(AbilityHistory).where(AbilityHistory.source_id == saved_revision.id)
+    ).all()
+    assert {(row.ability_name, row.delta) for row in revision_history} == {("revision", 5)}
     session.refresh(student)
-    assert student.xp == xp_after_first_revision
+    assert student.xp == 60
+
+
+def test_third_draft_appends_round_three_without_full_settlement(session, client):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    comparison_call_count = runner.calls.count("essay_revision_comparison")
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(
+            round_2,
+            content=ROUND_3_CONTENT,
+            key="client-key-round-3",
+        ),
+    )
+
+    assert response.status_code == 201
+    assert response.json().get("settlement") is None
+    assert response.json()["revision"]["version_label"] == "revision_round_3"
+    assert response.json()["revision"]["round_index"] == 3
+    assert len(session.exec(select(EssayVersion)).all()) == 3
+    assert len(session.exec(select(GameEvent)).all()) == 1
+    assert runner.calls.count("essay_revision_comparison") == comparison_call_count + 1
+    round_3 = session.exec(
+        select(EssayVersion).where(EssayVersion.version_label == "revision_round_3")
+    ).one()
+    revision_history = session.exec(
+        select(AbilityHistory).where(AbilityHistory.source_id == round_3.id)
+    ).all()
+    assert all(row.ability_name == "revision" and row.delta <= 2 for row in revision_history)
+
+
+def test_lost_response_retry_returns_completed_attempt_even_after_latest_advances(session, client):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    round_3 = _manual_version(session, essay_id, round_index=3)
+    _manual_version(session, essay_id, round_index=4, content="第四稿继续补充了场景和心情。")
+    attempt = EssayRevisionAttempt(
+        essay_id=essay_id,
+        base_version_id=round_2.id,
+        target_round_index=3,
+        submitted_content_hash="hash",
+        idempotency_key="client-key-round-3",
+        status="completed",
+        new_version_id=round_3.id,
+    )
+    session.add(attempt)
+    session.commit()
+    runner.calls.clear()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(
+            round_2,
+            content=ROUND_3_CONTENT,
+            key="client-key-round-3",
+        ),
+    )
+
+    assert response.status_code == 201
+    assert response.json()["revision"]["id"] == round_3.id
+    assert response.json()["revision"]["version_label"] == "revision_round_3"
+    assert runner.calls == []
+    assert len(session.exec(select(EssayVersion)).all()) == 4
+
+
+def test_same_pending_idempotency_key_returns_202_without_second_llm_call(session, client):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    attempt = EssayRevisionAttempt(
+        essay_id=essay_id,
+        base_version_id=round_2.id,
+        target_round_index=3,
+        submitted_content=ROUND_3_CONTENT,
+        submitted_content_hash="hash",
+        idempotency_key="client-key-round-3",
+        status="pending_comparison",
+    )
+    session.add(attempt)
+    session.commit()
+    runner.calls.clear()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(
+            round_2,
+            content=ROUND_3_CONTENT,
+            key="client-key-round-3",
+        ),
+    )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "pending_comparison"
+    assert response.json()["attempt_id"] == attempt.id
+    assert runner.calls == []
+
+
+def test_different_idempotency_keys_same_target_round_stop_before_second_llm_call(session, client):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    attempt = EssayRevisionAttempt(
+        essay_id=essay_id,
+        base_version_id=round_2.id,
+        target_round_index=3,
+        submitted_content=ROUND_3_CONTENT,
+        submitted_content_hash="hash",
+        idempotency_key="client-key-round-3-a",
+        status="pending_comparison",
+    )
+    session.add(attempt)
+    session.commit()
+    runner.calls.clear()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(
+            round_2,
+            content=ROUND_3_CONTENT,
+            key="client-key-round-3-b",
+        ),
+    )
+
+    assert response.status_code in {202, 409}
+    assert runner.calls == []
+
+
+def test_stale_pending_attempt_is_marked_failed_and_can_be_retried(session, client):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    stale_time = utcnow() - timedelta(seconds=REVISION_ATTEMPT_TIMEOUT_SECONDS + 1)
+    attempt = EssayRevisionAttempt(
+        essay_id=essay_id,
+        base_version_id=round_2.id,
+        target_round_index=3,
+        submitted_content=ROUND_3_CONTENT,
+        submitted_content_hash="hash",
+        idempotency_key="client-key-round-3",
+        status="pending_comparison",
+        created_at=stale_time,
+        updated_at=stale_time,
+    )
+    session.add(attempt)
+    session.commit()
+    runner.calls.clear()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(
+            round_2,
+            content=ROUND_3_CONTENT,
+            key="client-key-round-3",
+        ),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["status"] == "comparison_failed"
+    session.refresh(attempt)
+    assert attempt.status == "comparison_failed"
+    assert attempt.error_code == "attempt_timeout"
+    assert attempt.submitted_content == ROUND_3_CONTENT
+    assert runner.calls == []
+
+
+def test_stale_base_version_returns_409_before_llm_call_after_idempotency_lookup(session, client):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    _manual_version(session, essay_id, round_index=3)
+    runner.calls.clear()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(
+            round_2,
+            content=ROUND_3_CONTENT,
+            key="client-key-stale-base",
+        ),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "base version is stale"
+    assert runner.calls == []
+
+
+def test_ai_comparison_failure_preserves_revision_attempt_content(session, client):
+    runner = RecordingEssayRunner(fail_comparison=True)
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    runner.fail_comparison = False
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    runner.fail_comparison = True
+    runner.calls.clear()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(
+            round_2,
+            content=ROUND_3_CONTENT,
+            key="client-key-round-3",
+        ),
+    )
+
+    assert response.status_code == 502
+    attempt = session.exec(
+        select(EssayRevisionAttempt).where(EssayRevisionAttempt.idempotency_key == "client-key-round-3")
+    ).one()
+    assert attempt.status == "comparison_failed"
+    assert attempt.error_code == "comparison_failed"
+    assert attempt.submitted_content == ROUND_3_CONTENT
+
+
+def test_retry_failed_revision_attempt_appends_next_version(session, client):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    attempt = EssayRevisionAttempt(
+        essay_id=essay_id,
+        base_version_id=round_2.id,
+        target_round_index=3,
+        submitted_content=ROUND_3_CONTENT,
+        submitted_content_hash="hash",
+        idempotency_key="client-key-round-3",
+        status="comparison_failed",
+        error_code="comparison_failed",
+    )
+    session.add(attempt)
+    session.commit()
+    runner.calls.clear()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision-attempts/{attempt.id}/retry-comparison",
+    )
+
+    assert response.status_code == 201
+    assert response.json()["revision"]["version_label"] == "revision_round_3"
+    assert response.json()["revision"]["content"] == ROUND_3_CONTENT
+    assert runner.calls == ["essay_revision_comparison"]
+    session.refresh(attempt)
+    assert attempt.status == "completed"
+    assert attempt.new_version_id == response.json()["revision"]["id"]
+    assert attempt.submitted_content is None
 
 
 @pytest.mark.asyncio
@@ -200,17 +570,17 @@ async def test_revision_integrity_conflict_returns_409_before_settlement(session
     essay = Essay(student_id=student.id, title="我学会了骑车", status="revision_requested")
     session.add(essay)
     session.flush()
-    session.add(
-        EssayVersion(
-            essay_id=essay.id,
-            version_label="first_draft",
-            content="我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
-        )
+    first_draft = EssayVersion(
+        essay_id=essay.id,
+        version_label="first_draft",
+        content="我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
     )
+    session.add(first_draft)
     session.add(
         EssayVersion(
             essay_id=essay.id,
             version_label="revision",
+            round_index=2,
             content="我学会了骑车。第一次修改已经保存。",
         )
     )
@@ -221,15 +591,16 @@ async def test_revision_integrity_conflict_returns_409_before_settlement(session
         await submit_revision(
             essay.id,
             EssayRevisionCreate(
-                content="我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。爸爸松手后，我摇摇晃晃骑过了花坛。"
+                base_version_id=first_draft.id,
+                content=ROUND_2_CONTENT,
+                idempotency_key="client-key-integrity-conflict",
             ),
-            StaleRevisionReadSession(session),
+            session,
             AITaskRunner(settings=get_settings()),
             get_settings(),
         )
 
     assert exc_info.value.status_code == 409
-    assert exc_info.value.detail == "essay already settled"
     assert len(session.exec(select(GameEvent)).all()) == 0
     assert len(session.exec(select(AbilityHistory)).all()) == 0
     session.refresh(student)

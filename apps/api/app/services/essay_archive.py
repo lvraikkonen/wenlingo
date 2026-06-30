@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlmodel import Session, select
@@ -7,6 +8,7 @@ from app.domain.models import Essay, EssayRevisionAttempt, EssayVersion
 
 CANONICAL_TOPIC_ORIGINS = {"teacher_provided", "ai_topic_idea", "direct_draft"}
 ASSESSMENT_STATUSES = {"assessment_completed", "assessment_feedback", "assessment_settled"}
+REVISION_ATTEMPT_TIMEOUT_SECONDS = 180
 
 
 def get_version_label_for_round(round_index: int) -> str:
@@ -77,6 +79,22 @@ def failed_attempt_for_latest(
     return sorted(
         attempts, key=lambda attempt: (attempt.updated_at, attempt.created_at, attempt.id)
     )[-1]
+
+
+def mark_stale_pending_attempts_failed(session: Session, *, now: datetime) -> int:
+    cutoff = now - timedelta(seconds=REVISION_ATTEMPT_TIMEOUT_SECONDS)
+    attempts = session.exec(
+        select(EssayRevisionAttempt).where(
+            EssayRevisionAttempt.status == "pending_comparison",
+            EssayRevisionAttempt.updated_at < cutoff,
+        )
+    ).all()
+    for attempt in attempts:
+        attempt.status = "comparison_failed"
+        attempt.error_code = "attempt_timeout"
+        attempt.updated_at = now
+        session.add(attempt)
+    return len(attempts)
 
 
 def derive_archive_status(
