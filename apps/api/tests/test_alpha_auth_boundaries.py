@@ -377,6 +377,51 @@ def test_parent_authorization_helpers_scope_students_and_essays(session):
     assert other_child.parent_id == other_parent.id
 
 
+def test_essay_archive_product_events_are_whitelisted_and_sanitized(session):
+    _, parent, child, _ = create_session_family(session)
+
+    for event_type in [
+        "essay_archive_drawer_opened",
+        "essay_archive_item_selected",
+        "essay_hidden_by_child",
+        "essay_restored_by_parent",
+        "essay_multi_round_revision_submitted",
+        "essay_revision_comparison_failed",
+        "essay_revision_attempt_retried",
+    ]:
+        event = alpha_routes.record_product_event(
+            session,
+            event_type,
+            parent_id=parent.id,
+            student_id=child.id,
+            payload={
+                "essay_id": "essay-1",
+                "round_index": 2,
+                "previous_version_id": "v1",
+                "new_version_id": "v2",
+                "attempt_id": "attempt-1",
+                "hidden": True,
+                "revision_growth_awarded": False,
+                "actor_type": "parent",
+                "parent_account_id": parent.account_id,
+                "unsafe_full_content": "孩子写的完整作文不应进入事件",
+            },
+        )
+
+        assert event.event_type == event_type
+        assert event.payload == {
+            "essay_id": "essay-1",
+            "round_index": 2,
+            "previous_version_id": "v1",
+            "new_version_id": "v2",
+            "attempt_id": "attempt-1",
+            "hidden": True,
+            "revision_growth_awarded": False,
+            "actor_type": "parent",
+            "parent_account_id": parent.account_id,
+        }
+
+
 def test_prewriting_routes_reject_cross_family_access(session, client, monkeypatch):
     monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
     first = create_authenticated_family(session)

@@ -7,6 +7,7 @@ from app.api.routes import (
     assessment,
     auth,
     dashboard,
+    essay_archive,
     essays,
     reactions,
     readings,
@@ -49,6 +50,7 @@ def create_app() -> FastAPI:
     app.include_router(reactions.router)
     app.include_router(assessment.router)
     app.include_router(dashboard.router)
+    app.include_router(essay_archive.router)
     app.include_router(essays.router)
     app.include_router(writing_castle.router)
     app.include_router(readings.router)

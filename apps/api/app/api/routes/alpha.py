@@ -109,6 +109,13 @@ P0_EVENT_TYPES = {
     "outline_confirmed",
     "outline_skipped",
     "prewriting_first_draft_submitted",
+    "essay_archive_drawer_opened",
+    "essay_archive_item_selected",
+    "essay_hidden_by_child",
+    "essay_restored_by_parent",
+    "essay_multi_round_revision_submitted",
+    "essay_revision_comparison_failed",
+    "essay_revision_attempt_retried",
 }
 
 P1_EVENT_TYPES = {
@@ -162,6 +169,14 @@ SAFE_PAYLOAD_KEYS = {
     "server_completed_at",
     "response_received_at",
     "duration_ms",
+    "round_index",
+    "previous_version_id",
+    "new_version_id",
+    "attempt_id",
+    "hidden",
+    "revision_growth_awarded",
+    "actor_type",
+    "parent_account_id",
 }
 JSON_SAFE_SCALARS = (str, int, float, bool, type(None))
 INVITE_CODE_VALUE_PATTERN = re.compile(
