@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, JSON, UniqueConstraint
+from sqlalchemy import Column, DateTime, Index, JSON, UniqueConstraint, text
 from sqlmodel import Field, SQLModel
 
 from app.domain.enums import BadgeCode, ReportType, StudentPersona, TaskType
@@ -302,6 +302,15 @@ class EssayRevisionAttempt(SQLModel, table=True):
             "base_version_id",
             "idempotency_key",
             name="uq_essay_revision_attempt_idempotency",
+        ),
+        Index(
+            "uq_essay_revision_attempt_target_round_active",
+            "essay_id",
+            "base_version_id",
+            "target_round_index",
+            unique=True,
+            sqlite_where=text("status IN ('pending_comparison', 'completed')"),
+            postgresql_where=text("status IN ('pending_comparison', 'completed')"),
         ),
     )
 

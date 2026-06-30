@@ -177,6 +177,57 @@ def test_essay_revision_attempt_tracks_recoverable_content():
     assert attempt.submitted_content.startswith("孩子写的第三稿")
 
 
+def test_essay_revision_attempt_reserves_active_target_round(session):
+    session.add(
+        EssayRevisionAttempt(
+            essay_id="essay-1",
+            base_version_id="version-1",
+            target_round_index=3,
+            submitted_content_hash="hash-1",
+            idempotency_key="idem-1",
+            status="pending_comparison",
+        )
+    )
+    session.add(
+        EssayRevisionAttempt(
+            essay_id="essay-1",
+            base_version_id="version-1",
+            target_round_index=3,
+            submitted_content_hash="hash-2",
+            idempotency_key="idem-2",
+            status="pending_comparison",
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_failed_revision_attempts_do_not_reserve_target_round(session):
+    session.add(
+        EssayRevisionAttempt(
+            essay_id="essay-1",
+            base_version_id="version-1",
+            target_round_index=3,
+            submitted_content_hash="hash-1",
+            idempotency_key="idem-1",
+            status="comparison_failed",
+        )
+    )
+    session.add(
+        EssayRevisionAttempt(
+            essay_id="essay-1",
+            base_version_id="version-1",
+            target_round_index=3,
+            submitted_content_hash="hash-2",
+            idempotency_key="idem-2",
+            status="comparison_failed",
+        )
+    )
+
+    session.flush()
+
+
 def test_llm_call_log_tracks_provider_prompt_raw_response_and_retry_count():
     log = LLMCallLog(
         task_type=TaskType.essay,

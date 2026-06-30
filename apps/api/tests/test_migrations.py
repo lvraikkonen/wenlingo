@@ -1,5 +1,12 @@
+import importlib
 from pathlib import Path
 import re
+
+import pytest
+import sqlalchemy as sa
+from alembic.operations import Operations
+from alembic.runtime.migration import MigrationContext
+from sqlalchemy.exc import IntegrityError
 
 
 def test_alembic_revision_ids_fit_default_version_column():
@@ -153,3 +160,104 @@ def test_v06d_essay_archive_revision_attempts_has_migration():
     assert "uq_essay_revision_attempt_idempotency" in migration_text
     assert "uq_essay_revision_attempt_target_round_active" in migration_text
     assert "uq_essay_version_round_per_essay" in migration_text
+
+
+def test_v06d_essay_archive_revision_attempts_migrates_existing_sqlite_rows(monkeypatch):
+    migration = importlib.import_module(
+        "app.db.migrations.versions.20260630_v06d_essay_archive_revision_attempts"
+    )
+    engine = sa.create_engine("sqlite://")
+    metadata = sa.MetaData()
+    sa.Table(
+        "essay",
+        metadata,
+        sa.Column("id", sa.String(), primary_key=True),
+        sa.Column("created_at", sa.String(), nullable=False),
+    )
+    sa.Table(
+        "essayversion",
+        metadata,
+        sa.Column("id", sa.String(), primary_key=True),
+        sa.Column("essay_id", sa.String(), nullable=False),
+        sa.Column("version_label", sa.String(), nullable=False),
+        sa.Column("created_at", sa.String(), nullable=False),
+    )
+
+    with engine.begin() as connection:
+        metadata.create_all(connection)
+        connection.execute(
+            sa.text("INSERT INTO essay (id, created_at) VALUES (:id, :created_at)"),
+            [
+                {"id": "essay-1", "created_at": "2026-06-01 09:00:00+00:00"},
+                {"id": "essay-2", "created_at": "2026-06-02 10:00:00+00:00"},
+            ],
+        )
+        connection.execute(
+            sa.text(
+                "INSERT INTO essayversion (id, essay_id, version_label, created_at) "
+                "VALUES (:id, :essay_id, :version_label, :created_at)"
+            ),
+            [
+                {
+                    "id": "version-1",
+                    "essay_id": "essay-1",
+                    "version_label": "first_draft",
+                    "created_at": "2026-06-01 09:30:00+00:00",
+                },
+                {
+                    "id": "version-2",
+                    "essay_id": "essay-1",
+                    "version_label": "revision",
+                    "created_at": "2026-06-03 11:30:00+00:00",
+                },
+                {
+                    "id": "version-3",
+                    "essay_id": "essay-2",
+                    "version_label": "first_draft",
+                    "created_at": "2026-06-02 10:30:00+00:00",
+                },
+            ],
+        )
+        context = MigrationContext.configure(connection)
+        monkeypatch.setattr(migration, "op", Operations(context))
+
+        migration.upgrade()
+
+        essay_1 = connection.execute(
+            sa.text(
+                "SELECT updated_at, last_version_submitted_at, hidden_by "
+                "FROM essay WHERE id = 'essay-1'"
+            )
+        ).mappings().one()
+        assert essay_1["updated_at"] == "2026-06-01 09:00:00+00:00"
+        assert essay_1["last_version_submitted_at"] == "2026-06-03 11:30:00+00:00"
+        assert essay_1["hidden_by"] == ""
+
+        round_indexes = connection.execute(
+            sa.text("SELECT id, round_index FROM essayversion ORDER BY id")
+        ).all()
+        assert round_indexes == [("version-1", 1), ("version-2", 2), ("version-3", 1)]
+
+        connection.execute(
+            sa.text(
+                "INSERT INTO essayrevisionattempt "
+                "(id, essay_id, base_version_id, target_round_index, "
+                "submitted_content_hash, idempotency_key, status, created_at, updated_at) "
+                "VALUES "
+                "('attempt-1', 'essay-1', 'version-2', 3, 'hash-1', 'idem-1', "
+                "'pending_comparison', '2026-06-03 12:00:00+00:00', "
+                "'2026-06-03 12:00:00+00:00')"
+            )
+        )
+        with pytest.raises(IntegrityError):
+            connection.execute(
+                sa.text(
+                    "INSERT INTO essayrevisionattempt "
+                    "(id, essay_id, base_version_id, target_round_index, "
+                    "submitted_content_hash, idempotency_key, status, created_at, updated_at) "
+                    "VALUES "
+                    "('attempt-2', 'essay-1', 'version-2', 3, 'hash-2', 'idem-2', "
+                    "'pending_comparison', '2026-06-03 12:01:00+00:00', "
+                    "'2026-06-03 12:01:00+00:00')"
+                )
+            )

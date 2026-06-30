@@ -51,7 +51,7 @@ def upgrade() -> None:
     op.add_column("essayversion", sa.Column("round_index", sa.Integer(), nullable=True))
     op.create_index("ix_essayversion_round_index", "essayversion", ["round_index"])
 
-    op.execute("UPDATE essay SET updated_at = created_at WHERE updated_at IS NULL")
+    op.execute("UPDATE essay SET updated_at = created_at")
     op.execute(
         "UPDATE essayversion SET round_index = 1 "
         "WHERE version_label = 'first_draft' AND round_index IS NULL"
