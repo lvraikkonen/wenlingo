@@ -387,6 +387,7 @@ async def submit_revision(
         target_round_index=target_round_index,
     )
     if active_attempt is not None:
+        _ensure_idempotency_content_matches(active_attempt, request_content_hash)
         if active_attempt.status == "pending_comparison":
             return _pending_revision_response(active_attempt)
         return _completed_attempt_payload(session, active_attempt)

@@ -583,7 +583,7 @@ def test_same_failed_idempotency_key_with_different_content_returns_409(session,
     assert runner.calls == []
 
 
-def test_different_idempotency_keys_same_target_round_stop_before_second_llm_call(session, client):
+def test_different_idempotency_keys_same_target_round_same_content_returns_pending(session, client):
     runner = RecordingEssayRunner()
     _, essay_id, first_draft = _start_essay(session, client, runner)
     round_2 = _submit_round_2(session, client, essay_id, first_draft)
@@ -609,7 +609,39 @@ def test_different_idempotency_keys_same_target_round_stop_before_second_llm_cal
         ),
     )
 
-    assert response.status_code in {202, 409}
+    assert response.status_code == 202
+    assert response.json()["attempt_id"] == attempt.id
+    assert runner.calls == []
+
+
+def test_different_idempotency_keys_same_target_round_different_content_returns_409(session, client):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    attempt = EssayRevisionAttempt(
+        essay_id=essay_id,
+        base_version_id=round_2.id,
+        target_round_index=3,
+        submitted_content=ROUND_3_CONTENT,
+        submitted_content_hash=_content_hash(ROUND_3_CONTENT),
+        idempotency_key="client-key-round-3-a",
+        status="pending_comparison",
+    )
+    session.add(attempt)
+    session.commit()
+    runner.calls.clear()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(
+            round_2,
+            content=DIFFERENT_ROUND_3_CONTENT,
+            key="client-key-round-3-b",
+        ),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "idempotency key content mismatch"
     assert runner.calls == []
 
 
@@ -856,6 +888,67 @@ def test_reservation_integrity_conflict_checks_content_hash_before_pending_respo
             round_2,
             content=DIFFERENT_ROUND_3_CONTENT,
             key="client-key-round-3",
+        ),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "idempotency key content mismatch"
+    assert runner.calls == []
+
+
+def test_reservation_integrity_conflict_checks_content_hash_before_completed_response(
+    session,
+    client,
+    monkeypatch,
+):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    round_3 = EssayVersion(
+        essay_id=essay_id,
+        version_label="revision_round_3",
+        round_index=3,
+        content=ROUND_3_CONTENT,
+        ai_feedback={
+            "encouragement": "你继续完成了修改。",
+            "improved_dimensions": ["顺序更清楚"],
+            "evidence": ["加入了动作"],
+            "next_step": "下一次继续补心情。",
+        },
+    )
+    runner.calls.clear()
+    commit_calls = {"count": 0}
+    original_commit = session.commit
+
+    def flaky_commit():
+        commit_calls["count"] += 1
+        if commit_calls["count"] == 3:
+            session.rollback()
+            session.add(round_3)
+            session.flush()
+            session.add(
+                EssayRevisionAttempt(
+                    essay_id=essay_id,
+                    base_version_id=round_2.id,
+                    target_round_index=3,
+                    submitted_content_hash=_content_hash(ROUND_3_CONTENT),
+                    idempotency_key="client-key-round-3",
+                    status="completed",
+                    new_version_id=round_3.id,
+                )
+            )
+            original_commit()
+            raise IntegrityError("forced completed reservation race", None, None)
+        original_commit()
+
+    monkeypatch.setattr(session, "commit", flaky_commit)
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(
+            round_2,
+            content=DIFFERENT_ROUND_3_CONTENT,
+            key="client-key-round-3-b",
         ),
     )
 
