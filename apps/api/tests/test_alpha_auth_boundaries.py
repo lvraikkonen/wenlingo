@@ -707,11 +707,14 @@ def test_essay_revision_hides_cross_family_essay(client, session, monkeypatch):
         cookies={"wenlingo_parent_session": "other-token"},
     )
     essay_id = essay_response.json()["essay"]["id"]
+    first_draft_id = essay_response.json()["first_draft"]["id"]
 
     response = client.post(
         f"/api/essays/{essay_id}/revision",
         json={
+            "base_version_id": first_draft_id,
             "content": "我学会了骑车。刚开始我紧紧抓车把，后来能自己骑过花坛。",
+            "idempotency_key": "cross-family-revision",
             "completed_tasks": [],
         },
         cookies={"wenlingo_parent_session": token},

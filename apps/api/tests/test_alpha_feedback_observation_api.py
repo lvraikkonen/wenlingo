@@ -425,7 +425,9 @@ def test_essay_draft_and_revision_record_product_events(session, client):
     revision_response = client.post(
         f"/api/essays/{essay_id}/revision",
         json={
+            "base_version_id": draft_response.json()["first_draft"]["id"],
             "content": "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。爸爸松手后，我摇摇晃晃骑过了花坛。",
+            "idempotency_key": "product-events-revision",
             "completed_tasks": ["给第二段加一个动作描写"],
         },
     )
@@ -485,7 +487,9 @@ def test_provider_fallback_records_failure_and_completion_events(session, client
         revision_response = test_client.post(
             f"/api/essays/{draft_response.json()['essay']['id']}/revision",
             json={
+                "base_version_id": draft_response.json()["first_draft"]["id"],
                 "content": "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。爸爸松手后，我摇摇晃晃骑过了花坛。",
+                "idempotency_key": "fallback-events-revision",
                 "completed_tasks": ["给第二段加一个动作描写"],
             },
         )
@@ -493,7 +497,8 @@ def test_provider_fallback_records_failure_and_completion_events(session, client
 
     assert sentence_response.status_code == 201
     assert draft_response.status_code == 201
-    assert revision_response.status_code == 201
+    assert revision_response.status_code == 502
+    assert revision_response.json()["detail"] == "这次 AI 对比没有完成，请稍后重试。"
     failure_events = session.exec(
         select(ProductEvent).where(ProductEvent.event_type == "ai_feedback_failed")
     ).all()
@@ -519,7 +524,6 @@ def test_provider_fallback_records_failure_and_completion_events(session, client
     assert completion_types == {
         "sentence_training_completed",
         "essay_draft_feedback_completed",
-        "essay_revision_feedback_completed",
     }
 
 
@@ -890,7 +894,9 @@ def test_learning_responses_return_existing_feedback_reactions(
     revision_response = client.post(
         f"/api/essays/{draft_response.json()['essay']['id']}/revision",
         json={
+            "base_version_id": draft_response.json()["first_draft"]["id"],
             "content": "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。爸爸松手后，我摇摇晃晃骑过了花坛。",
+            "idempotency_key": "feedback-reaction-revision",
             "completed_tasks": ["给第二段加一个动作描写"],
         },
     )

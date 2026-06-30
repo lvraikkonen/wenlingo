@@ -116,7 +116,9 @@ def test_essay_routes_use_runner_dependency_override(session, client):
     revision = client.post(
         f"/api/essays/{start.json()['essay']['id']}/revision",
         json={
+            "base_version_id": start.json()["first_draft"]["id"],
             "content": "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。爸爸松手后，我骑过了花坛。",
+            "idempotency_key": "runner-override-revision",
             "completed_tasks": ["给第二段加一个动作描写"],
             "skipped_tasks": [],
             "duration_seconds": 360,

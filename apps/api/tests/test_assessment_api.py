@@ -24,7 +24,7 @@ from app.domain.models import (
 from app.main import create_app
 from app.services.ai_runner import run_ai_task
 from app.services.essay_workflow import ASSESSMENT_ESSAY_STATUS
-from app.services.ai_routing import TASK_CONFIGS, TaskFinalStatus
+from app.services.ai_routing import TASK_CONFIGS
 from app.services.llm_provider import LLMProviderResponse
 from app.services.llm_usage import local_product_day
 
@@ -390,11 +390,16 @@ def test_assessment_created_essay_is_not_revisable(session, client):
     )
     assert created.status_code == 201
     essay_id = created.json()["assessment"]["essay_id"]
+    base_version = session.exec(
+        select(EssayVersion).where(EssayVersion.essay_id == essay_id)
+    ).one()
 
     response = client.post(
         f"/api/essays/{essay_id}/revision",
         json={
-            "content": "我学会了骑车。后来我能慢慢骑过小路，还听见爸爸在后面给我鼓掌。"
+            "base_version_id": base_version.id,
+            "content": "我学会了骑车。后来我能慢慢骑过小路，还听见爸爸在后面给我鼓掌。",
+            "idempotency_key": "assessment-not-revisable",
         },
     )
 
