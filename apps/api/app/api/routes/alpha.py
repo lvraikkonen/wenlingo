@@ -609,8 +609,7 @@ def _writing_castle_summary(session: Session, student_id: str) -> dict[str, Any]
         "revision_completed": revision is not None,
         "settlement_completed": essay.status == "settled",
         "latest_round_index": archive_item["latest_round_index"],
-        "revision_round_count": archive_item["latest_round_index"]
-        or archive_item["revision_round_count"],
+        "revision_round_count": archive_item["revision_round_count"],
         "status": archive_item["status"],
         "summary_label": archive_item["summary_label"],
         "hidden": archive_item["hidden"],

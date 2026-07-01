@@ -549,8 +549,9 @@ def test_parent_summary_uses_latest_round_and_collapsed_archive_summary(session,
     assert response.status_code == 200
     payload = response.json()
     summary = payload["writing_castle_summary"]
-    assert summary["revision_round_count"] == 3
     assert summary["latest_round_index"] == 3
+    assert summary["revision_round_count"] == 2
+    assert summary["revision_round_count"] == summary["latest_round_index"] - 1
     assert summary["status"] == "multi_round_revision"
     assert summary["summary_label"] == "已完成 3 稿"
     assert summary["can_continue_revision"] is False
