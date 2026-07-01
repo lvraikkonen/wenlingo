@@ -61,6 +61,18 @@ def test_essay_feedback_provider_contract_prefers_exactly_one_revision_task():
     assert "Do not write a full essay" in contract
 
 
+def test_revision_comparison_prompt_uses_round_neutral_copy():
+    from app.prompts.registry import get_prompt
+
+    prompt_text = get_prompt("essay_revision_comparison").response_contract
+
+    assert "上一稿" in prompt_text
+    assert "这一稿" in prompt_text
+    assert "这次修改" in prompt_text
+    assert "下一步建议" in prompt_text
+    assert "二稿" not in prompt_text
+
+
 def test_writing_topic_analysis_contract_is_short_and_structured():
     from app.services.llm_contracts import WritingTopicAnalysis
 

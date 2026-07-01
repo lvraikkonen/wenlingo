@@ -441,7 +441,7 @@ async def create_essay(
     session.flush()
     version = EssayVersion(
         essay_id=essay.id,
-        version_label="first_draft",
+        version_label=get_version_label_for_round(1),
         round_index=1,
         content=request.draft,
         ai_feedback=feedback.model_dump(),

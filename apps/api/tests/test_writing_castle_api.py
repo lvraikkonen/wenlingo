@@ -446,6 +446,29 @@ def test_unsupported_future_type_can_direct_draft_without_scaffold(session, clie
     assert draft.status_code == 201
 
 
+def test_direct_first_draft_sets_round_one_and_last_submitted_at(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    response = client.post(
+        f"/api/students/{student.id}/essays",
+        json={
+            "title": "我学会了骑车",
+            "draft": "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。",
+            "entry": "classroom",
+        },
+    )
+
+    assert response.status_code == 201
+    essay_id = response.json()["essay"]["id"]
+    essay = session.get(Essay, essay_id)
+    first_draft = session.exec(
+        select(EssayVersion).where(EssayVersion.essay_id == essay_id)
+    ).one()
+    assert first_draft.round_index == 1
+    assert essay.last_version_submitted_at == first_draft.created_at
+
+
 def test_unsupported_future_type_override_is_saved_for_parent_summary(session, client):
     family = create_authenticated_family(session)
     student = family["student"]
@@ -786,6 +809,30 @@ def test_classroom_prewriting_happy_path_reaches_first_draft_feedback(session, c
     }
 
 
+def test_prewriting_first_draft_sets_round_one_and_last_submitted_at(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+
+    response = client.post(
+        f"/api/essays/{essay_id}/first-draft",
+        json={"draft": "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。"},
+    )
+
+    assert response.status_code == 201
+    essay = session.get(Essay, essay_id)
+    first_draft = session.exec(
+        select(EssayVersion).where(EssayVersion.essay_id == essay_id)
+    ).one()
+    assert first_draft.round_index == 1
+    assert essay.last_version_submitted_at == first_draft.created_at
+
+
 def test_material_card_generation_synthesizes_refs_when_saved_answer_refs_are_empty(
     session,
     client,
@@ -886,6 +933,31 @@ def test_active_classroom_writing_castle_essay_allows_unselected_scaffold(sessio
 
     assert response.status_code == 200
     assert response.json()["essay"]["id"] == essay_id
+
+
+def test_active_classroom_essay_ignores_submitted_first_draft(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+
+    draft = client.post(
+        f"/api/essays/{essay_id}/first-draft",
+        json={"draft": "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。"},
+    )
+    saved = session.get(Essay, essay_id)
+    active = client.get(
+        f"/api/students/{student.id}/writing-castle/classroom/active",
+    )
+
+    assert draft.status_code == 201
+    assert saved.status == REVISION_REQUESTED_STATUS
+    assert active.status_code == 200
+    assert active.json()["essay"] is None
 
 
 def test_active_classroom_writing_castle_essay_rejects_scaffold_ref_mismatch(session, client):

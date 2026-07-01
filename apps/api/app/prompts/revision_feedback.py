@@ -10,6 +10,8 @@ ESSAY_REVISION_COMPARISON_PROMPT = register_prompt(
         system_prompt=PRIMARY_COACH_SYSTEM_PROMPT,
         response_contract=(
             "Return a JSON object with exactly these fields: "
+            "Use round-neutral comparison labels in any child-facing copy: "
+            "上一稿, 这一稿, 这次修改, 下一步建议. "
             "encouragement: non-empty string; "
             "improved_dimensions: array of 1 to 3 non-empty strings; "
             "evidence: array of 1 to 3 non-empty strings quoted or summarized from the revision; "

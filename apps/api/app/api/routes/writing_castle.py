@@ -36,6 +36,7 @@ from app.services.ai_tasks import (
     writing_topic_idea_generation,
     writing_topic_analysis,
 )
+from app.services.essay_archive import get_version_label_for_round
 from app.services.essay_workflow import draft_ability_deltas
 from app.services.writing_castle_state import (
     LEGACY_SCHEMA_VERSION,
@@ -1040,13 +1041,18 @@ async def submit_first_draft(
         except Exception:
             pass
 
+    submitted_at = utcnow()
     essay.status = REVISION_REQUESTED_STATUS
+    essay.updated_at = submitted_at
+    essay.last_version_submitted_at = submitted_at
     version = EssayVersion(
         essay_id=essay.id,
-        version_label="first_draft",
+        version_label=get_version_label_for_round(1),
+        round_index=1,
         content=request.draft,
         ai_feedback=feedback.model_dump(),
         llm_call_log_id=feedback_result.log.id if feedback_result.log else None,
+        created_at=submitted_at,
     )
     session.add(essay)
     session.add(version)
