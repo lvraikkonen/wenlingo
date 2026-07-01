@@ -3,6 +3,7 @@ from hashlib import sha256
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
@@ -891,6 +892,75 @@ def test_slow_completion_after_attempt_timeout_does_not_create_revision(session,
 
     assert response.status_code == 409
     assert response.json()["status"] == "comparison_failed"
+    assert runner.calls == ["essay_revision_comparison"]
+    attempt = session.exec(
+        select(EssayRevisionAttempt).where(EssayRevisionAttempt.idempotency_key == "client-key-round-3")
+    ).one()
+    assert attempt.status == "comparison_failed"
+    assert attempt.error_code == "attempt_timeout"
+    assert attempt.submitted_content == ROUND_3_CONTENT
+    assert attempt.new_version_id is None
+    assert len(session.exec(select(EssayVersion).where(EssayVersion.essay_id == essay_id)).all()) == version_count
+    comparison_logs = session.exec(
+        select(LLMCallLog).where(LLMCallLog.task_name == "essay_revision_comparison")
+    ).all()
+    assert len(comparison_logs) == comparison_log_count + 1
+
+
+def test_completion_race_after_pending_check_does_not_overwrite_failed_attempt(
+    session,
+    client,
+    monkeypatch,
+):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    comparison_log_count = len(
+        session.exec(
+            select(LLMCallLog).where(LLMCallLog.task_name == "essay_revision_comparison")
+        ).all()
+    )
+    version_count = len(session.exec(select(EssayVersion).where(EssayVersion.essay_id == essay_id)).all())
+    runner.calls.clear()
+
+    from app.api.routes import essays as essay_routes
+
+    original_conflict_response = essay_routes._completion_attempt_conflict_response
+
+    def timeout_after_pending_check(attempt, **kwargs):
+        response = original_conflict_response(attempt, **kwargs)
+        if response is None and attempt.idempotency_key == "client-key-round-3":
+            session.execute(
+                update(EssayRevisionAttempt)
+                .where(EssayRevisionAttempt.id == attempt.id)
+                .values(
+                    status="comparison_failed",
+                    error_code="attempt_timeout",
+                    updated_at=utcnow(),
+                )
+                .execution_options(synchronize_session=False)
+            )
+            session.commit()
+        return response
+
+    monkeypatch.setattr(
+        essay_routes,
+        "_completion_attempt_conflict_response",
+        timeout_after_pending_check,
+    )
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(
+            round_2,
+            content=ROUND_3_CONTENT,
+            key="client-key-round-3",
+        ),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["status"] == "comparison_failed"
+    assert response.json()["error_code"] == "attempt_timeout"
     assert runner.calls == ["essay_revision_comparison"]
     attempt = session.exec(
         select(EssayRevisionAttempt).where(EssayRevisionAttempt.idempotency_key == "client-key-round-3")

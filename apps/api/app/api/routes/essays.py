@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
@@ -48,6 +49,12 @@ from app.services.gamification import settle_task
 
 router = APIRouter(tags=["essays"])
 DAILY_LIMIT_ERROR_MESSAGES = {"daily limit exceeded", "daily limit reached"}
+COMPLETING_COMPARISON_STATUS = "completing_comparison"
+ACTIVE_REVISION_ATTEMPT_STATUSES = (
+    "pending_comparison",
+    COMPLETING_COMPARISON_STATUS,
+    "completed",
+)
 
 
 class EssayCreate(BaseModel):
@@ -190,9 +197,58 @@ def _completion_attempt_conflict_response(
         raise HTTPException(status_code=409, detail="revision attempt conflict")
     if attempt.status == "pending_comparison":
         return None
+    if attempt.status == COMPLETING_COMPARISON_STATUS:
+        return _pending_revision_response(attempt)
     if attempt.status == "comparison_failed":
         return _failed_revision_response(attempt)
     raise HTTPException(status_code=409, detail="revision attempt is not pending")
+
+
+def _claim_pending_attempt_for_completion(
+    session: Session,
+    *,
+    attempt_id: str,
+    essay_id: str,
+    base_version_id: str,
+    target_round_index: int,
+) -> EssayRevisionAttempt | JSONResponse:
+    result = session.execute(
+        update(EssayRevisionAttempt)
+        .where(
+            EssayRevisionAttempt.id == attempt_id,
+            EssayRevisionAttempt.essay_id == essay_id,
+            EssayRevisionAttempt.base_version_id == base_version_id,
+            EssayRevisionAttempt.target_round_index == target_round_index,
+            EssayRevisionAttempt.status == "pending_comparison",
+        )
+        .values(
+            status=COMPLETING_COMPARISON_STATUS,
+            updated_at=utcnow(),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount == 1:
+        session.commit()
+        session.expire_all()
+        claimed_attempt = session.get(EssayRevisionAttempt, attempt_id)
+        if claimed_attempt is None:
+            raise HTTPException(status_code=409, detail="revision attempt not found")
+        return claimed_attempt
+
+    session.rollback()
+    session.expire_all()
+    attempt = session.get(EssayRevisionAttempt, attempt_id)
+    if attempt is None:
+        raise HTTPException(status_code=409, detail="revision attempt not found")
+    conflict_response = _completion_attempt_conflict_response(
+        attempt,
+        essay_id=essay_id,
+        base_version_id=base_version_id,
+        target_round_index=target_round_index,
+    )
+    if conflict_response is not None:
+        return conflict_response
+    raise HTTPException(status_code=409, detail="revision attempt conflict")
 
 
 def _revision_payload(
@@ -253,7 +309,7 @@ def _active_attempt_for_target(
             EssayRevisionAttempt.essay_id == essay_id,
             EssayRevisionAttempt.base_version_id == base_version_id,
             EssayRevisionAttempt.target_round_index == target_round_index,
-            EssayRevisionAttempt.status.in_(["pending_comparison", "completed"]),
+            EssayRevisionAttempt.status.in_(ACTIVE_REVISION_ATTEMPT_STATUSES),
         )
     ).first()
 
@@ -393,6 +449,8 @@ async def submit_revision(
             return _completed_attempt_payload(session, attempt)
         if attempt.status == "comparison_failed":
             return _failed_revision_response(attempt)
+        if attempt.status == COMPLETING_COMPARISON_STATUS:
+            return _pending_revision_response(attempt)
         if attempt.status == "pending_comparison":
             if not _attempt_is_stale(attempt, now):
                 return _pending_revision_response(attempt)
@@ -424,7 +482,7 @@ async def submit_revision(
     )
     if active_attempt is not None:
         _ensure_idempotency_content_matches(active_attempt, request_content_hash)
-        if active_attempt.status == "pending_comparison":
+        if active_attempt.status in {"pending_comparison", COMPLETING_COMPARISON_STATUS}:
             return _pending_revision_response(active_attempt)
         return _completed_attempt_payload(session, active_attempt)
 
@@ -458,7 +516,10 @@ async def submit_revision(
             base_version_id=request.base_version_id,
             target_round_index=target_round_index,
         )
-        if active_attempt is not None and active_attempt.status == "pending_comparison":
+        if active_attempt is not None and active_attempt.status in {
+            "pending_comparison",
+            COMPLETING_COMPARISON_STATUS,
+        }:
             _ensure_idempotency_content_matches(active_attempt, request_content_hash)
             return _pending_revision_response(active_attempt)
         if active_attempt is not None and active_attempt.status == "completed":
@@ -521,6 +582,16 @@ async def submit_revision(
         )
         if conflict_response is not None:
             return conflict_response
+        claimed_attempt = _claim_pending_attempt_for_completion(
+            session,
+            attempt_id=attempt_id,
+            essay_id=essay_id,
+            base_version_id=request.base_version_id,
+            target_round_index=target_round_index,
+        )
+        if isinstance(claimed_attempt, JSONResponse):
+            return claimed_attempt
+        attempt = claimed_attempt
         ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
         if ability is None:
             raise HTTPException(status_code=404, detail="student not found")
@@ -648,7 +719,7 @@ async def retry_revision_attempt(
         target_round_index=target_round_index,
     )
     if active_attempt is not None and active_attempt.id != attempt.id:
-        if active_attempt.status == "pending_comparison":
+        if active_attempt.status in {"pending_comparison", COMPLETING_COMPARISON_STATUS}:
             if _mark_stale_pending_attempt_failed(session, active_attempt, now=utcnow()):
                 return _failed_revision_response(active_attempt)
             return _pending_revision_response(active_attempt)
@@ -669,7 +740,10 @@ async def retry_revision_attempt(
             base_version_id=base_version_id,
             target_round_index=target_round_index,
         )
-        if active_attempt is not None and active_attempt.status == "pending_comparison":
+        if active_attempt is not None and active_attempt.status in {
+            "pending_comparison",
+            COMPLETING_COMPARISON_STATUS,
+        }:
             if _mark_stale_pending_attempt_failed(session, active_attempt, now=utcnow()):
                 return _failed_revision_response(active_attempt)
             return _pending_revision_response(active_attempt)
@@ -722,6 +796,16 @@ async def retry_revision_attempt(
         )
         if conflict_response is not None:
             return conflict_response
+        claimed_attempt = _claim_pending_attempt_for_completion(
+            session,
+            attempt_id=attempt_id,
+            essay_id=essay_id,
+            base_version_id=base_version_id,
+            target_round_index=target_round_index,
+        )
+        if isinstance(claimed_attempt, JSONResponse):
+            return claimed_attempt
+        attempt = claimed_attempt
         ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
         if ability is None:
             raise HTTPException(status_code=404, detail="student not found")
