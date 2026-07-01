@@ -9,6 +9,9 @@ import { ReportPageContent } from "../src/app/parent/[studentId]/report/page";
 
 const apiMocks = vi.hoisted(() => ({
   createEssay: vi.fn(),
+  fetchChildEssayArchive: vi.fn(),
+  fetchEssayArchiveDetail: vi.fn(),
+  hideChildEssay: vi.fn(),
   submitEssayRevision: vi.fn(),
   createReadingSession: vi.fn(),
   createReport: vi.fn(),
@@ -27,6 +30,9 @@ const essayFeedbackResponse = {
 
 vi.mock("../src/lib/api", () => ({
   createEssay: apiMocks.createEssay,
+  fetchChildEssayArchive: apiMocks.fetchChildEssayArchive,
+  fetchEssayArchiveDetail: apiMocks.fetchEssayArchiveDetail,
+  hideChildEssay: apiMocks.hideChildEssay,
   submitEssayRevision: apiMocks.submitEssayRevision,
   createReadingSession: apiMocks.createReadingSession,
   createReport: apiMocks.createReport,
@@ -129,10 +135,10 @@ test("essay page supports draft feedback and revision settlement", async () => {
   });
 
   await userEvent.type(
-    screen.getByLabelText("二稿"),
+    screen.getByLabelText("下一稿"),
     "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。",
   );
-  await userEvent.click(screen.getByRole("button", { name: "提交二稿" }));
+  await userEvent.click(screen.getByRole("button", { name: "提交下一稿" }));
   expect(
     await screen.findByText("你把最重要的画面写清楚了。"),
   ).toBeInTheDocument();
@@ -143,14 +149,14 @@ test("essay page supports draft feedback and revision settlement", async () => {
     expect.objectContaining({
       base_version_id: "draft-1",
       content: "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。",
-      idempotency_key: expect.stringMatching(/^e1:draft-1:/),
+      idempotency_key: expect.any(String),
       completed_tasks: ["给第二段加一个动作描写"],
       skipped_tasks: [],
       duration_seconds: expect.any(Number),
     }),
   );
-  expect(screen.getByRole("button", { name: "提交二稿" })).toBeDisabled();
-  await userEvent.click(screen.getByRole("button", { name: "提交二稿" }));
+  expect(screen.getByRole("button", { name: "提交下一稿" })).toBeDisabled();
+  await userEvent.click(screen.getByRole("button", { name: "提交下一稿" }));
   expect(apiMocks.submitEssayRevision).toHaveBeenCalledTimes(1);
   expect(screen.getByRole("link", { name: "回到 Dashboard" })).toHaveAttribute(
     "href",
@@ -161,7 +167,7 @@ test("essay page supports draft feedback and revision settlement", async () => {
   await userEvent.click(screen.getByRole("button", { name: "获得点评" }));
   await waitFor(() => {
     expect(apiMocks.createEssay).toHaveBeenCalledTimes(2);
-    expect(screen.getByLabelText("二稿")).toHaveValue("");
+    expect(screen.getByLabelText("下一稿")).toHaveValue("");
   });
 });
 

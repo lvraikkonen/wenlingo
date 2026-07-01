@@ -72,6 +72,9 @@ const apiMocks = vi.hoisted(() => ({
   completeSentenceChallenge: vi.fn(),
   createSentenceTraining: vi.fn(),
   createEssay: vi.fn(),
+  fetchChildEssayArchive: vi.fn(),
+  fetchEssayArchiveDetail: vi.fn(),
+  hideChildEssay: vi.fn(),
   submitEssayRevision: vi.fn(),
   getAlphaChildren: vi.fn(),
   getDashboard: vi.fn(),
@@ -102,6 +105,9 @@ vi.mock("../src/lib/api", () => ({
   completeSentenceChallenge: apiMocks.completeSentenceChallenge,
   createSentenceTraining: apiMocks.createSentenceTraining,
   createEssay: apiMocks.createEssay,
+  fetchChildEssayArchive: apiMocks.fetchChildEssayArchive,
+  fetchEssayArchiveDetail: apiMocks.fetchEssayArchiveDetail,
+  hideChildEssay: apiMocks.hideChildEssay,
   submitEssayRevision: apiMocks.submitEssayRevision,
   getAlphaChildren: apiMocks.getAlphaChildren,
   getDashboard: apiMocks.getDashboard,
@@ -1218,11 +1224,11 @@ test("essay page renders draft and revision feedback reactions with persisted id
   });
 
   await userEvent.type(
-    screen.getByLabelText("二稿"),
+    screen.getByLabelText("下一稿"),
     "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。",
   );
-  await userEvent.click(screen.getByRole("button", { name: "提交二稿" }));
-  const comparison = await screen.findByLabelText("二稿对比");
+  await userEvent.click(screen.getByRole("button", { name: "提交下一稿" }));
+  const comparison = await screen.findByLabelText("修改对比");
   await userEvent.click(
     within(comparison).getByRole("button", { name: "没帮助" }),
   );
@@ -1295,12 +1301,12 @@ test("essay page passes persisted reactions from draft and revision responses", 
   ).toHaveAttribute("aria-pressed", "true");
 
   await userEvent.type(
-    screen.getByLabelText("二稿"),
+    screen.getByLabelText("下一稿"),
     "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。",
   );
-  await userEvent.click(screen.getByRole("button", { name: "提交二稿" }));
+  await userEvent.click(screen.getByRole("button", { name: "提交下一稿" }));
 
-  const comparison = await screen.findByLabelText("二稿对比");
+  const comparison = await screen.findByLabelText("修改对比");
   expect(
     within(comparison).getByRole("button", { name: "没帮助" }),
   ).toHaveAttribute("aria-pressed", "true");
@@ -1380,10 +1386,10 @@ test("essay page ignores stale revision comparison after student route changes",
   await screen.findByText("作文点评");
 
   await userEvent.type(
-    screen.getByLabelText("二稿"),
+    screen.getByLabelText("下一稿"),
     "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。",
   );
-  await userEvent.click(screen.getByRole("button", { name: "提交二稿" }));
+  await userEvent.click(screen.getByRole("button", { name: "提交下一稿" }));
 
   await act(async () => {
     rerender(
@@ -1417,7 +1423,7 @@ test("essay page ignores stale revision comparison after student route changes",
     });
   });
 
-  expect(screen.queryByLabelText("二稿对比")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("修改对比")).not.toBeInTheDocument();
   expect(screen.queryByText("旧孩子的二稿对比。")).not.toBeInTheDocument();
   expect(screen.queryByText("这次 AI 教练的提示对你有帮助吗？")).not.toBeInTheDocument();
 });

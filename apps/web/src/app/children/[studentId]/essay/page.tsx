@@ -3,19 +3,21 @@
 import Link from "next/link";
 import { use, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { CheckCircle2, Loader2, Sparkles } from "lucide-react";
+import { Archive, CheckCircle2, Loader2, Sparkles } from "lucide-react";
 import { AssessmentRecommendationCard } from "../../../../components/AssessmentRecommendationCard";
 import { FamilyTopbar } from "../../../../components/FamilyTopbar";
 import { FeedbackReaction } from "../../../../components/FeedbackReaction";
 import { SettlementPanel } from "../../../../components/SettlementPanel";
 import { AiTopicIdeaFlow } from "../../../../components/writing-castle/AiTopicIdeaFlow";
 import { ClassroomPrewritingWizard } from "../../../../components/writing-castle/ClassroomPrewritingWizard";
+import { EssayArchiveDrawer } from "../../../../components/writing-castle/EssayArchiveDrawer";
 import {
   WritingCastleModeShell,
   type WritingCastleMode,
 } from "../../../../components/writing-castle/WritingCastleModeShell";
 import {
   createEssay,
+  fetchEssayArchiveDetail,
   submitEssayRevision,
   type EssayResponse,
   type EssayRevisionResponse,
@@ -34,8 +36,24 @@ export default function EssayPage({
   return <EssayPageContent key={studentId} studentId={studentId} />;
 }
 
+function getCurrentTimeMs() {
+  return Date.now();
+}
+
 function EssayPageContent({ studentId }: { studentId: string }) {
   const activeStudentId = useRef<string | null>(studentId);
+  const archiveSelectionRequestId = useRef(0);
+  const feedbackRequestId = useRef(0);
+  const revisionRequestId = useRef(0);
+  const isRevisionSubmitting = useRef(false);
+  const revisionSubmitKeyRef = useRef<string | null>(null);
+  const pendingRevisionPayload = useRef<{
+    content: string;
+    completedTasks: string[];
+    skippedTasks: string[];
+  } | null>(null);
+  const loadedDirectInput = useRef({ title: "", draft: "" });
+  const loadedRevision = useRef("");
   const {
     shouldShowAssessmentRecommendation,
     dismissAssessmentRecommendation,
@@ -49,6 +67,14 @@ function EssayPageContent({ studentId }: { studentId: string }) {
   const [revision, setRevision] = useState("");
   const [essayId, setEssayId] = useState<string | null>(null);
   const [firstDraftId, setFirstDraftId] = useState<string | null>(null);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [baseVersionId, setBaseVersionId] = useState<string | null>(null);
+  const [currentRoundIndex, setCurrentRoundIndex] = useState<number | null>(null);
+  const [revisionSubmitKey, setRevisionSubmitKey] = useState<string | null>(null);
+  const [hasUnsubmittedRevisionInput, setHasUnsubmittedRevisionInput] =
+    useState(false);
+  const [hasUnsubmittedDirectInput, setHasUnsubmittedDirectInput] =
+    useState(false);
   const [firstDraftReaction, setFirstDraftReaction] = useState<
     EssayResponse["first_draft"]["reaction"]
   >(null);
@@ -80,15 +106,69 @@ function EssayPageContent({ studentId }: { studentId: string }) {
   }, [studentId]);
 
   function toggleTask(instruction: string) {
-    setSelectedTasks((current) =>
-      current.includes(instruction)
-        ? current.filter((item) => item !== instruction)
-        : [...current, instruction],
-    );
+    const nextSelectedTasks = selectedTasks.includes(instruction)
+      ? selectedTasks.filter((item) => item !== instruction)
+      : [...selectedTasks, instruction];
+    clearStaleRevisionAttemptForPayload(revision, nextSelectedTasks);
+    setSelectedTasks(nextSelectedTasks);
+  }
+
+  function buildRevisionPayloadSnapshot(content: string, completedTasks: string[]) {
+    const allTasks =
+      feedback?.revision_tasks.map((task) => task.instruction) ?? [];
+
+    return {
+      content,
+      completedTasks,
+      skippedTasks: allTasks.filter((task) => !completedTasks.includes(task)),
+    };
+  }
+
+  function arraysEqual(left: string[], right: string[]) {
+    return left.length === right.length && left.every((item, index) => item === right[index]);
+  }
+
+  function clearRevisionSubmitAttempt() {
+    revisionSubmitKeyRef.current = null;
+    pendingRevisionPayload.current = null;
+    setRevisionSubmitKey(null);
+  }
+
+  function clearStaleRevisionAttemptForPayload(
+    content: string,
+    completedTasks: string[],
+  ) {
+    if (!revisionSubmitKeyRef.current) {
+      if (error) {
+        setError("");
+      }
+      return;
+    }
+
+    const pendingPayload = pendingRevisionPayload.current;
+    const nextPayload = buildRevisionPayloadSnapshot(content, completedTasks);
+    const isSamePayload =
+      pendingPayload !== null &&
+      pendingPayload.content === nextPayload.content &&
+      arraysEqual(pendingPayload.completedTasks, nextPayload.completedTasks) &&
+      arraysEqual(pendingPayload.skippedTasks, nextPayload.skippedTasks);
+
+    if (!isSamePayload) {
+      clearRevisionSubmitAttempt();
+      if (error) {
+        setError("");
+      }
+    }
   }
 
   async function handleFeedbackSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const requestId = feedbackRequestId.current + 1;
+    feedbackRequestId.current = requestId;
+    revisionRequestId.current += 1;
+    isRevisionSubmitting.current = false;
+    setIsRevisionPending(false);
+    clearRevisionSubmitAttempt();
     setIsFeedbackPending(true);
     setError("");
     const requestStudentId = studentId;
@@ -100,29 +180,45 @@ function EssayPageContent({ studentId }: { studentId: string }) {
         entry: "existing_draft",
       });
 
-      if (activeStudentId.current !== requestStudentId) {
+      if (
+        activeStudentId.current !== requestStudentId ||
+        feedbackRequestId.current !== requestId
+      ) {
         return;
       }
       setEssayId(result.essay.id);
       setFirstDraftId(result.first_draft?.id ?? null);
+      setBaseVersionId(result.first_draft?.id ?? null);
+      setCurrentRoundIndex(2);
+      clearRevisionSubmitAttempt();
       setFirstDraftReaction(result.first_draft?.reaction ?? null);
       setFeedback(result.feedback);
       setSelectedTasks(
         result.feedback.revision_tasks.map((task) => task.instruction),
       );
-      setRevisionStartedAt(Date.now());
+      setRevisionStartedAt(getCurrentTimeMs());
       setRevision("");
+      loadedDirectInput.current = { title, draft };
+      loadedRevision.current = "";
+      setHasUnsubmittedRevisionInput(false);
+      setHasUnsubmittedDirectInput(false);
       setComparison(null);
       setSettlement(null);
       setRevisionResultId(null);
       setRevisionResultReaction(null);
     } catch {
-      if (activeStudentId.current !== requestStudentId) {
+      if (
+        activeStudentId.current !== requestStudentId ||
+        feedbackRequestId.current !== requestId
+      ) {
         return;
       }
       setError("这次提交没有成功。先别急，检查一下网络后再试一次。");
     } finally {
-      if (activeStudentId.current === requestStudentId) {
+      if (
+        activeStudentId.current === requestStudentId &&
+        feedbackRequestId.current === requestId
+      ) {
         setIsFeedbackPending(false);
       }
     }
@@ -131,13 +227,20 @@ function EssayPageContent({ studentId }: { studentId: string }) {
   function handlePrewritingFeedback(result: EssayResponse) {
     setEssayId(result.essay.id);
     setFirstDraftId(result.first_draft?.id ?? null);
+    setBaseVersionId(result.first_draft?.id ?? null);
+    setCurrentRoundIndex(2);
+    clearRevisionSubmitAttempt();
     setFirstDraftReaction(result.first_draft?.reaction ?? null);
     setFeedback(result.feedback);
     setSelectedTasks(
       result.feedback.revision_tasks.map((task) => task.instruction),
     );
-    setRevisionStartedAt(Date.now());
+    setRevisionStartedAt(getCurrentTimeMs());
     setRevision("");
+    loadedDirectInput.current = { title, draft };
+    loadedRevision.current = "";
+    setHasUnsubmittedRevisionInput(false);
+    setHasUnsubmittedDirectInput(false);
     setComparison(null);
     setSettlement(null);
     setRevisionResultId(null);
@@ -147,39 +250,55 @@ function EssayPageContent({ studentId }: { studentId: string }) {
 
   async function handleRevisionSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isRevisionSubmitting.current) {
+      return;
+    }
     if (!essayId || settlement) {
       return;
     }
-    if (!firstDraftId) {
+    if (!baseVersionId) {
       setError("这次提交没有成功。先别急，检查一下网络后再试一次。");
       return;
     }
 
+    isRevisionSubmitting.current = true;
+    const requestId = revisionRequestId.current + 1;
+    revisionRequestId.current = requestId;
+    const submittedEssayId = essayId;
+    const submittedBaseVersionId = baseVersionId;
+    const submittedRevision = revision;
     setIsRevisionPending(true);
     setIsFeedbackPending(false);
     setError("");
     const requestStudentId = studentId;
 
     try {
-      const allTasks =
-        feedback?.revision_tasks.map((task) => task.instruction) ?? [];
-      const skippedTasks = allTasks.filter(
-        (task) => !selectedTasks.includes(task),
+      const submittedPayload = buildRevisionPayloadSnapshot(
+        submittedRevision,
+        selectedTasks,
       );
       const durationSeconds =
         revisionStartedAt === null
           ? null
-          : Math.max(0, Math.round((Date.now() - revisionStartedAt) / 1000));
-      const result = await submitEssayRevision(essayId, {
-        base_version_id: firstDraftId,
-        content: revision,
-        idempotency_key: createRevisionIdempotencyKey(essayId, firstDraftId),
-        completed_tasks: selectedTasks,
-        skipped_tasks: skippedTasks,
+          : Math.max(0, Math.round((getCurrentTimeMs() - revisionStartedAt) / 1000));
+      const idempotencyKey =
+        revisionSubmitKeyRef.current ?? globalThis.crypto.randomUUID();
+      revisionSubmitKeyRef.current = idempotencyKey;
+      pendingRevisionPayload.current = submittedPayload;
+      setRevisionSubmitKey(idempotencyKey);
+      const result = await submitEssayRevision(submittedEssayId, {
+        base_version_id: submittedBaseVersionId,
+        content: submittedPayload.content,
+        idempotency_key: idempotencyKey,
+        completed_tasks: submittedPayload.completedTasks,
+        skipped_tasks: submittedPayload.skippedTasks,
         duration_seconds: durationSeconds,
       });
 
-      if (activeStudentId.current !== requestStudentId) {
+      if (
+        activeStudentId.current !== requestStudentId ||
+        revisionRequestId.current !== requestId
+      ) {
         return;
       }
       if (!("revision" in result)) {
@@ -190,21 +309,169 @@ function EssayPageContent({ studentId }: { studentId: string }) {
       setSettlement(result.settlement);
       setRevisionResultId(result.revision.id);
       setRevisionResultReaction(result.revision.reaction ?? null);
+      clearRevisionSubmitAttempt();
+      loadedRevision.current = submittedRevision;
+      setHasUnsubmittedRevisionInput(false);
     } catch {
-      if (activeStudentId.current !== requestStudentId) {
+      if (
+        activeStudentId.current !== requestStudentId ||
+        revisionRequestId.current !== requestId
+      ) {
         return;
       }
       setError("这次提交没有成功。先别急，检查一下网络后再试一次。");
     } finally {
-      if (activeStudentId.current === requestStudentId) {
+      if (
+        activeStudentId.current === requestStudentId &&
+        revisionRequestId.current === requestId
+      ) {
+        isRevisionSubmitting.current = false;
         setIsRevisionPending(false);
       }
     }
   }
 
+  async function handleArchiveSelect(selectedEssayId: string) {
+    const hasUnsavedRevisionInput = revision !== loadedRevision.current;
+    const hasUnsavedDirectInput = hasUnsubmittedDirectInput;
+    if (hasUnsavedRevisionInput || hasUnsavedDirectInput) {
+      const confirmed = window.confirm("这段还没有提交，要先打开另一篇作文吗？");
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    setError("");
+    feedbackRequestId.current += 1;
+    setIsFeedbackPending(false);
+    revisionRequestId.current += 1;
+    isRevisionSubmitting.current = false;
+    setIsRevisionPending(false);
+    const requestId = archiveSelectionRequestId.current + 1;
+    archiveSelectionRequestId.current = requestId;
+    try {
+      const detail = await fetchEssayArchiveDetail(selectedEssayId);
+      if (
+        archiveSelectionRequestId.current !== requestId ||
+        detail.essay_id !== selectedEssayId ||
+        activeStudentId.current !== studentId
+      ) {
+        return;
+      }
+      if (!detail.can_continue_revision || !detail.continue_revision) {
+        setArchiveOpen(false);
+        setError("这篇作文现在还不能继续修改。");
+        return;
+      }
+      setEssayId(detail.essay_id);
+      setTitle(detail.title);
+      setDraft("");
+      setFirstDraftId(null);
+      setFirstDraftReaction(null);
+      setRevision(detail.continue_revision.latest_content);
+      loadedDirectInput.current = { title: detail.title, draft: "" };
+      loadedRevision.current = detail.continue_revision.latest_content;
+      setBaseVersionId(detail.continue_revision.latest_version_id);
+      setCurrentRoundIndex(detail.continue_revision.next_round_index);
+      setFeedback({
+        strengths: [detail.continue_revision.previous_ai_guidance],
+        improvements: [],
+        problem_monsters: [],
+        sentence_notes: [],
+        revision_tasks: [],
+      });
+      setSelectedTasks([]);
+      setRevisionStartedAt(getCurrentTimeMs());
+      setSettlement(null);
+      setComparison(null);
+      setRevisionResultId(null);
+      setRevisionResultReaction(null);
+      clearRevisionSubmitAttempt();
+      setHasUnsubmittedRevisionInput(false);
+      setHasUnsubmittedDirectInput(false);
+      setAiTopicEssay(null);
+      setArchiveOpen(false);
+    } catch {
+      if (
+        archiveSelectionRequestId.current !== requestId ||
+        activeStudentId.current !== studentId
+      ) {
+        return;
+      }
+      setArchiveOpen(false);
+      setError("这篇作文暂时没有打开成功，可以再试一次。");
+    }
+  }
+
+  function resetForNewEssay() {
+    feedbackRequestId.current += 1;
+    revisionRequestId.current += 1;
+    isRevisionSubmitting.current = false;
+    setTitle("");
+    setDraft("");
+    setRevision("");
+    loadedDirectInput.current = { title: "", draft: "" };
+    loadedRevision.current = "";
+    setEssayId(null);
+    setBaseVersionId(null);
+    setCurrentRoundIndex(null);
+    setFeedback(null);
+    setComparison(null);
+    setSettlement(null);
+    setAiTopicEssay(null);
+    clearRevisionSubmitAttempt();
+    setFirstDraftId(null);
+    setFirstDraftReaction(null);
+    setRevisionResultId(null);
+    setRevisionResultReaction(null);
+    setSelectedTasks([]);
+    setHasUnsubmittedRevisionInput(false);
+    setHasUnsubmittedDirectInput(false);
+    setIsFeedbackPending(false);
+    setIsRevisionPending(false);
+    setError("");
+  }
+
+  function handleTitleChange(value: string) {
+    setTitle(value);
+    setHasUnsubmittedDirectInput(
+      value !== loadedDirectInput.current.title ||
+        draft !== loadedDirectInput.current.draft,
+    );
+  }
+
+  function handleDraftChange(value: string) {
+    setDraft(value);
+    setHasUnsubmittedDirectInput(
+      title !== loadedDirectInput.current.title ||
+        value !== loadedDirectInput.current.draft,
+    );
+  }
+
+  function handleRevisionChange(value: string) {
+    setRevision(value);
+    const isDirty = value !== loadedRevision.current;
+    setHasUnsubmittedRevisionInput(isDirty);
+    clearStaleRevisionAttemptForPayload(value, selectedTasks);
+  }
+
   return (
     <>
       <FamilyTopbar currentStudentId={studentId} />
+      <button
+        className="fixed right-4 top-24 z-20 inline-flex items-center gap-2 rounded-lg border border-[var(--wen-border)] bg-white px-4 py-2 font-semibold shadow-sm"
+        type="button"
+        onClick={() => setArchiveOpen(true)}
+      >
+        <Archive size={18} aria-hidden="true" />
+        作文档案
+      </button>
+      <EssayArchiveDrawer
+        studentId={studentId}
+        open={archiveOpen}
+        onOpenChange={setArchiveOpen}
+        onSelectEssay={handleArchiveSelect}
+      />
       <main className="min-h-screen px-5 py-8 sm:px-8">
       <div className="mx-auto max-w-4xl space-y-6">
         <nav
@@ -274,7 +541,7 @@ function EssayPageContent({ studentId }: { studentId: string }) {
               <input
                 className="mt-2 w-full rounded-lg border border-[var(--wen-border)] px-3 py-2 font-normal"
                 value={title}
-                onChange={(event) => setTitle(event.target.value)}
+                onChange={(event) => handleTitleChange(event.target.value)}
               />
             </label>
             <label className="block font-semibold">
@@ -282,7 +549,7 @@ function EssayPageContent({ studentId }: { studentId: string }) {
               <textarea
                 className="mt-2 w-full rounded-lg border border-[var(--wen-border)] px-3 py-2 font-normal"
                 value={draft}
-                onChange={(event) => setDraft(event.target.value)}
+                onChange={(event) => handleDraftChange(event.target.value)}
               />
             </label>
             <button
@@ -353,18 +620,31 @@ function EssayPageContent({ studentId }: { studentId: string }) {
                 initialReaction={firstDraftReaction ?? null}
               />
             ) : null}
+            <button
+              className="mt-4 rounded-lg border border-[var(--wen-border)] px-4 py-2 font-semibold"
+              type="button"
+              onClick={resetForNewEssay}
+            >
+              写新的作文
+            </button>
           </section>
         ) : null}
 
         {mode === "direct" || feedback ? (
         <section className="rounded-lg border border-[var(--wen-border)] bg-white p-6 shadow-sm">
+          {currentRoundIndex ? (
+            <p className="mb-3 text-sm font-semibold text-[var(--wen-muted)]">
+              正在写第 {currentRoundIndex} 稿
+            </p>
+          ) : null}
           <form className="space-y-4" onSubmit={handleRevisionSubmit}>
             <label className="block font-semibold">
-              二稿
+              下一稿
               <textarea
                 className="mt-2 w-full rounded-lg border border-[var(--wen-border)] px-3 py-2 font-normal"
+                disabled={isRevisionPending}
                 value={revision}
-                onChange={(event) => setRevision(event.target.value)}
+                onChange={(event) => handleRevisionChange(event.target.value)}
               />
             </label>
             <button
@@ -379,7 +659,7 @@ function EssayPageContent({ studentId }: { studentId: string }) {
                   className="animate-spin"
                 />
               ) : null}
-              提交二稿
+              提交下一稿
             </button>
           </form>
         </section>
@@ -387,10 +667,10 @@ function EssayPageContent({ studentId }: { studentId: string }) {
 
         {comparison ? (
           <section
-            aria-label="二稿对比"
+            aria-label="修改对比"
             className="rounded-lg border border-[var(--wen-border)] bg-white p-6 shadow-sm"
           >
-            <h2 className="text-xl font-bold">二稿对比</h2>
+            <h2 className="text-xl font-bold">修改对比</h2>
             <p className="mt-3">{comparison.encouragement}</p>
             <div className="mt-4 flex flex-wrap gap-2">
               {comparison.improved_dimensions.map((dimension) => (
@@ -413,6 +693,13 @@ function EssayPageContent({ studentId }: { studentId: string }) {
                 />
               </div>
             ) : null}
+            <button
+              className="mt-5 rounded-lg border border-[var(--wen-border)] px-4 py-2 font-semibold"
+              type="button"
+              onClick={resetForNewEssay}
+            >
+              写新的作文
+            </button>
           </section>
         ) : null}
         {settlement ? <SettlementPanel settlement={settlement} /> : null}
@@ -420,7 +707,7 @@ function EssayPageContent({ studentId }: { studentId: string }) {
           <p role="status">AI 教练正在读你的初稿</p>
         ) : null}
         {isRevisionPending ? (
-          <p role="status">AI 教练正在比较两次作文</p>
+          <p role="status">AI 教练正在比较这次修改</p>
         ) : null}
         {error ? (
           <p
@@ -434,13 +721,4 @@ function EssayPageContent({ studentId }: { studentId: string }) {
       </main>
     </>
   );
-}
-
-function createRevisionIdempotencyKey(
-  essayId: string,
-  baseVersionId: string,
-): string {
-  return `${essayId}:${baseVersionId}:${
-    globalThis.crypto?.randomUUID?.() ?? Date.now().toString()
-  }`;
 }
