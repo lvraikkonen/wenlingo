@@ -157,7 +157,7 @@ def _mark_reserved_attempt_failed(
 ) -> None:
     session.rollback()
     attempt = session.get(EssayRevisionAttempt, attempt_id)
-    if attempt is None or attempt.status == "completed":
+    if attempt is None or attempt.status not in {"pending_comparison", COMPLETING_COMPARISON_STATUS}:
         return
     attempt.status = "comparison_failed"
     attempt.error_code = error_code
@@ -538,14 +538,11 @@ async def submit_revision(
             student_id=student_id,
         )
     except Exception:
-        session.rollback()
-        failed_attempt = session.get(EssayRevisionAttempt, attempt_id)
-        if failed_attempt is not None:
-            failed_attempt.status = "comparison_failed"
-            failed_attempt.error_code = "comparison_failed"
-            failed_attempt.updated_at = utcnow()
-            session.add(failed_attempt)
-            session.commit()
+        _mark_reserved_attempt_failed(
+            session,
+            attempt_id,
+            error_code="comparison_failed",
+        )
         raise _comparison_failed_http_exception()
     comparison = comparison_result.output
     comparison_log_id = comparison_result.log.id if comparison_result.log else None
@@ -762,14 +759,11 @@ async def retry_revision_attempt(
             student_id=student_id,
         )
     except Exception:
-        session.rollback()
-        failed_attempt = session.get(EssayRevisionAttempt, attempt_id)
-        if failed_attempt is not None:
-            failed_attempt.status = "comparison_failed"
-            failed_attempt.error_code = "comparison_failed"
-            failed_attempt.updated_at = utcnow()
-            session.add(failed_attempt)
-            session.commit()
+        _mark_reserved_attempt_failed(
+            session,
+            attempt_id,
+            error_code="comparison_failed",
+        )
         raise _comparison_failed_http_exception()
 
     comparison = comparison_result.output

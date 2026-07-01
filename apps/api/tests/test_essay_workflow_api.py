@@ -731,6 +731,50 @@ def test_ai_comparison_failure_preserves_revision_attempt_content(session, clien
     assert attempt.submitted_content == ROUND_3_CONTENT
 
 
+def test_late_submit_comparison_failure_preserves_attempt_timeout_error_code(session, client):
+    class TimeoutThenFailRunner(RecordingEssayRunner):
+        fail_after_timeout = False
+
+        async def run(self, **kwargs):
+            if self.fail_after_timeout and kwargs["task_name"] == "essay_revision_comparison":
+                task_session = kwargs["session"]
+                timed_out_attempt = task_session.exec(
+                    select(EssayRevisionAttempt).where(
+                        EssayRevisionAttempt.idempotency_key == "client-key-round-3"
+                    )
+                ).one()
+                timed_out_attempt.status = "comparison_failed"
+                timed_out_attempt.error_code = "attempt_timeout"
+                timed_out_attempt.updated_at = utcnow()
+                task_session.add(timed_out_attempt)
+                task_session.commit()
+                raise RuntimeError("late comparison failure")
+            return await super().run(**kwargs)
+
+    runner = TimeoutThenFailRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    runner.fail_after_timeout = True
+    runner.calls.clear()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(
+            round_2,
+            content=ROUND_3_CONTENT,
+            key="client-key-round-3",
+        ),
+    )
+
+    assert response.status_code == 502
+    attempt = session.exec(
+        select(EssayRevisionAttempt).where(EssayRevisionAttempt.idempotency_key == "client-key-round-3")
+    ).one()
+    assert attempt.status == "comparison_failed"
+    assert attempt.error_code == "attempt_timeout"
+    assert attempt.submitted_content == ROUND_3_CONTENT
+
+
 def test_ai_validation_failure_preserves_attempt_without_revision_or_settlement(session, client):
     runner = RecordingEssayRunner(
         comparison_validation_ok=False,
@@ -806,6 +850,55 @@ def test_retry_failed_revision_attempt_appends_next_version(session, client):
     assert round_3.llm_call_log_id is not None
     assert saved_essay is not None
     assert saved_essay.last_version_submitted_at == round_3.created_at
+
+
+def test_late_retry_comparison_failure_preserves_attempt_timeout_error_code(session, client):
+    class TimeoutThenFailRunner(RecordingEssayRunner):
+        fail_after_timeout = False
+
+        async def run(self, **kwargs):
+            if self.fail_after_timeout and kwargs["task_name"] == "essay_revision_comparison":
+                task_session = kwargs["session"]
+                timed_out_attempt = task_session.exec(
+                    select(EssayRevisionAttempt).where(
+                        EssayRevisionAttempt.idempotency_key == "client-key-retry-round-3"
+                    )
+                ).one()
+                timed_out_attempt.status = "comparison_failed"
+                timed_out_attempt.error_code = "attempt_timeout"
+                timed_out_attempt.updated_at = utcnow()
+                task_session.add(timed_out_attempt)
+                task_session.commit()
+                raise RuntimeError("late retry comparison failure")
+            return await super().run(**kwargs)
+
+    runner = TimeoutThenFailRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    attempt = EssayRevisionAttempt(
+        essay_id=essay_id,
+        base_version_id=round_2.id,
+        target_round_index=3,
+        submitted_content=ROUND_3_CONTENT,
+        submitted_content_hash=_content_hash(ROUND_3_CONTENT),
+        idempotency_key="client-key-retry-round-3",
+        status="comparison_failed",
+        error_code="comparison_failed",
+    )
+    session.add(attempt)
+    session.commit()
+    runner.fail_after_timeout = True
+    runner.calls.clear()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision-attempts/{attempt.id}/retry-comparison",
+    )
+
+    assert response.status_code == 502
+    session.refresh(attempt)
+    assert attempt.status == "comparison_failed"
+    assert attempt.error_code == "attempt_timeout"
+    assert attempt.submitted_content == ROUND_3_CONTENT
 
 
 def test_completion_phase_failure_marks_attempt_failed_after_llm(session, client, monkeypatch):
