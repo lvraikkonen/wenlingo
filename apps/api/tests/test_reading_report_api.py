@@ -271,6 +271,49 @@ def test_stage_report_uses_latest_round_three_revision(session, client):
     assert "二稿未完成任务" not in str(report["content"]["next_suggestions"])
 
 
+def test_stage_report_prefers_newer_revision_over_older_higher_round(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    now = datetime.now(timezone.utc)
+    older_essay = Essay(student_id=student.id, title="Older higher round", status="settled")
+    newer_essay = Essay(student_id=student.id, title="Newer lower round", status="settled")
+    session.add(older_essay)
+    session.add(newer_essay)
+    session.flush()
+    session.add(
+        EssayVersion(
+            essay_id=older_essay.id,
+            version_label="revision_round_4",
+            round_index=4,
+            content="OLDER_HIGHER_ROUND",
+            completed_tasks=["旧作文四稿任务"],
+            skipped_tasks=[],
+            ai_feedback={"evidence": ["OLDER_HIGHER_ROUND"]},
+            created_at=now - timedelta(days=2),
+        )
+    )
+    session.add(
+        EssayVersion(
+            essay_id=newer_essay.id,
+            version_label="revision",
+            round_index=2,
+            content="NEWER_LOWER_ROUND",
+            completed_tasks=["新作文二稿任务"],
+            skipped_tasks=[],
+            ai_feedback={"evidence": ["NEWER_LOWER_ROUND"]},
+            created_at=now,
+        )
+    )
+    session.commit()
+
+    response = client.post(f"/api/students/{student.id}/reports", json={"report_type": "stage"})
+
+    assert response.status_code == 201
+    report = response.json()
+    assert report["content"]["best_revision"] == "NEWER_LOWER_ROUND"
+    assert any("新作文二稿任务" in change for change in report["content"]["ability_changes"])
+
+
 def test_stage_report_handles_legacy_revision_null_task_metadata(session):
     family = create_authenticated_family(session)
     student = family["student"]

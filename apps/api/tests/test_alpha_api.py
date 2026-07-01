@@ -411,6 +411,9 @@ def test_alpha_summary_includes_writing_castle_process_summary(session, client):
         "first_draft_completed": False,
         "revision_completed": False,
         "settlement_completed": False,
+        "essay_id": essay_id,
+        "latest_version_id": None,
+        "last_version_submitted_at": None,
         "latest_round_index": None,
         "revision_round_count": 0,
         "status": "not_archived",
@@ -568,34 +571,35 @@ def test_parent_summary_includes_child_hidden_essay_restore_metadata(session, cl
     child = create_alpha_child(client, parent["id"])
     material, outline = _writing_castle_state()
     hidden_at = datetime.now(timezone.utc)
+    submitted_at = hidden_at - timedelta(minutes=1)
     essay = Essay(
         student_id=child["id"],
         title="孩子隐藏的作文",
         status="settled",
         material_card=material,
         outline=outline,
+        last_version_submitted_at=submitted_at,
         hidden_by="child",
         hidden_at=hidden_at,
         visibility_changed_at=hidden_at,
     )
     session.add(essay)
     session.flush()
-    session.add(
-        EssayVersion(
-            essay_id=essay.id,
-            version_label="first_draft",
-            round_index=1,
-            content="孩子隐藏的初稿完整内容。",
-        )
+    first_draft = EssayVersion(
+        essay_id=essay.id,
+        version_label="first_draft",
+        round_index=1,
+        content="孩子隐藏的初稿完整内容。",
     )
-    session.add(
-        EssayVersion(
-            essay_id=essay.id,
-            version_label="revision",
-            round_index=2,
-            content="孩子隐藏的二稿完整内容。",
-        )
+    revision = EssayVersion(
+        essay_id=essay.id,
+        version_label="revision",
+        round_index=2,
+        content="孩子隐藏的二稿完整内容。",
     )
+    expected_latest_version_id = revision.id
+    session.add(first_draft)
+    session.add(revision)
     session.commit()
 
     response = client.get(
@@ -604,6 +608,9 @@ def test_parent_summary_includes_child_hidden_essay_restore_metadata(session, cl
 
     assert response.status_code == 200
     hidden_item = response.json()["writing_castle_summary"]
+    assert hidden_item["essay_id"] == essay.id
+    assert hidden_item["latest_version_id"] == expected_latest_version_id
+    assert hidden_item["last_version_submitted_at"] is not None
     assert hidden_item["status"] == "hidden_by_child"
     assert hidden_item["hidden"] is True
     assert hidden_item["hidden_by"] == "child"
@@ -697,20 +704,19 @@ def test_alpha_summary_rejects_writing_castle_scaffold_ref_mismatch(session, cli
 def test_alpha_summary_tolerates_malformed_writing_castle_json(session, client):
     parent = create_alpha_parent(client, session)
     child = create_alpha_child(client, parent["id"])
-    session.add(
-        Essay(
-            student_id=child["id"],
-            title="旧数据题目",
-            material_card=["not", "a", "dict"],
-            outline={
-                "schema_version": "v0.6a.1",
-                "topic_analysis": "not-a-dict",
-                "child_topic_focus": ["not-a-dict"],
-                "step_state": "not-a-dict",
-                "sections": ["not-a-dict", {"child_edited": True}],
-            },
-        )
+    essay = Essay(
+        student_id=child["id"],
+        title="旧数据题目",
+        material_card=["not", "a", "dict"],
+        outline={
+            "schema_version": "v0.6a.1",
+            "topic_analysis": "not-a-dict",
+            "child_topic_focus": ["not-a-dict"],
+            "step_state": "not-a-dict",
+            "sections": ["not-a-dict", {"child_edited": True}],
+        },
     )
+    session.add(essay)
     session.commit()
 
     response = client.get(
@@ -739,6 +745,9 @@ def test_alpha_summary_tolerates_malformed_writing_castle_json(session, client):
         "first_draft_completed": False,
         "revision_completed": False,
         "settlement_completed": False,
+        "essay_id": essay.id,
+        "latest_version_id": None,
+        "last_version_submitted_at": None,
         "latest_round_index": None,
         "revision_round_count": 0,
         "status": "not_archived",

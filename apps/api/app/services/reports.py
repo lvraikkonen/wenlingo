@@ -16,8 +16,8 @@ def build_stage_report_content(session: Session, student_id: str) -> ReportConte
         .join(Essay)
         .where(Essay.student_id == student_id, EssayVersion.round_index >= 2)
         .order_by(
-            EssayVersion.round_index.desc(),
             EssayVersion.created_at.desc(),
+            EssayVersion.round_index.desc(),
             EssayVersion.id.desc(),
         )
     ).first()
