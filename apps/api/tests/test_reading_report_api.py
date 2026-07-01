@@ -227,6 +227,50 @@ def test_stage_report_mentions_revision_task_evidence(session, client):
     assert any("给第二段加一个动作描写" in change for change in content["ability_changes"])
 
 
+def test_stage_report_uses_latest_round_three_revision(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    now = datetime.now(timezone.utc)
+    essay = Essay(student_id=student.id, title="多轮修改作文", status="settled")
+    session.add(essay)
+    session.flush()
+    session.add(
+        EssayVersion(
+            essay_id=essay.id,
+            version_label="revision",
+            round_index=2,
+            content="ROUND_TWO_REVISION_CONTENT",
+            completed_tasks=["二稿任务"],
+            skipped_tasks=["二稿未完成任务"],
+            ai_feedback={"evidence": ["ROUND_TWO_EVIDENCE"]},
+            created_at=now - timedelta(minutes=2),
+        )
+    )
+    session.add(
+        EssayVersion(
+            essay_id=essay.id,
+            version_label="revision_round_3",
+            round_index=3,
+            content="ROUND_THREE_REVISION_CONTENT",
+            completed_tasks=["三稿任务"],
+            skipped_tasks=[],
+            ai_feedback={"evidence": ["ROUND_THREE_EVIDENCE"]},
+            created_at=now - timedelta(minutes=1),
+        )
+    )
+    session.commit()
+
+    response = client.post(f"/api/students/{student.id}/reports", json={"report_type": "stage"})
+
+    assert response.status_code == 201
+    report = response.json()
+    assert report["content"]["best_revision"]
+    assert report["content"]["best_revision"] == "ROUND_THREE_EVIDENCE"
+    assert "完成了 1 个修改任务" in report["content"]["practice_summary"]
+    assert any("三稿任务" in change for change in report["content"]["ability_changes"])
+    assert "二稿未完成任务" not in str(report["content"]["next_suggestions"])
+
+
 def test_stage_report_handles_legacy_revision_null_task_metadata(session):
     family = create_authenticated_family(session)
     student = family["student"]

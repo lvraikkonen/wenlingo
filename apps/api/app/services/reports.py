@@ -14,9 +14,24 @@ def build_stage_report_content(session: Session, student_id: str) -> ReportConte
     revision = session.exec(
         select(EssayVersion)
         .join(Essay)
-        .where(Essay.student_id == student_id, EssayVersion.version_label == "revision")
-        .order_by(EssayVersion.created_at.desc(), EssayVersion.id.desc())
+        .where(Essay.student_id == student_id, EssayVersion.round_index >= 2)
+        .order_by(
+            EssayVersion.round_index.desc(),
+            EssayVersion.created_at.desc(),
+            EssayVersion.id.desc(),
+        )
     ).first()
+    if revision is None:
+        revision = session.exec(
+            select(EssayVersion)
+            .join(Essay)
+            .where(
+                Essay.student_id == student_id,
+                EssayVersion.version_label == "revision",
+                EssayVersion.round_index.is_(None),
+            )
+            .order_by(EssayVersion.created_at.desc(), EssayVersion.id.desc())
+        ).first()
     completed_tasks = revision.completed_tasks if revision and isinstance(revision.completed_tasks, list) else []
     skipped_tasks = revision.skipped_tasks if revision and isinstance(revision.skipped_tasks, list) else []
     comparison_evidence = []

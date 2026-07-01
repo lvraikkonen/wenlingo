@@ -30,7 +30,6 @@ from app.domain.models import (
     AlphaInviteCode,
     Assessment,
     Essay,
-    EssayVersion,
     ParentAccount,
     ParentFeedback,
     ParentUser,
@@ -39,6 +38,11 @@ from app.domain.models import (
     StudentProfile,
 )
 from app.services.auth_security import mask_email, mask_phone
+from app.services.essay_archive import (
+    build_archive_item,
+    get_round_index,
+    ordered_essay_versions,
+)
 from app.services.writing_castle_state import (
     LEGACY_SCHEMA_VERSION,
     SCHEMA_VERSION,
@@ -551,18 +555,21 @@ def _writing_castle_summary(session: Session, student_id: str) -> dict[str, Any]
         source_categories = ["real_experience"]
     outline_state = _json_object(outline.get("step_state"))
     outline_sections = _json_object_list(outline.get("sections"))
-    first_draft = session.exec(
-        select(EssayVersion).where(
-            EssayVersion.essay_id == essay.id,
-            EssayVersion.version_label == "first_draft",
-        )
-    ).first()
-    revision = session.exec(
-        select(EssayVersion).where(
-            EssayVersion.essay_id == essay.id,
-            EssayVersion.version_label == "revision",
-        )
-    ).first()
+    versions = ordered_essay_versions(session, essay.id)
+    first_draft = next(
+        (version for version in versions if get_round_index(version) == 1),
+        None,
+    )
+    revision = next(
+        (version for version in reversed(versions) if get_round_index(version) >= 2),
+        None,
+    )
+    archive_item = build_archive_item(
+        session,
+        essay,
+        parent_visible=True,
+        child_surface=False,
+    )
     topic_origin = str(outline.get("topic_origin") or "teacher_provided")
     topic_origin_label = {
         "teacher_provided": "老师布置题目",
@@ -601,6 +608,16 @@ def _writing_castle_summary(session: Session, student_id: str) -> dict[str, Any]
         "first_draft_completed": first_draft is not None,
         "revision_completed": revision is not None,
         "settlement_completed": essay.status == "settled",
+        "latest_round_index": archive_item["latest_round_index"],
+        "revision_round_count": archive_item["latest_round_index"]
+        or archive_item["revision_round_count"],
+        "status": archive_item["status"],
+        "summary_label": archive_item["summary_label"],
+        "hidden": archive_item["hidden"],
+        "hidden_by": archive_item["hidden_by"],
+        "hidden_at": archive_item["hidden_at"],
+        "can_continue_revision": archive_item["can_continue_revision"],
+        "can_retry_revision_attempt": archive_item["can_retry_revision_attempt"],
     }
 
 

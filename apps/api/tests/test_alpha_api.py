@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from itertools import count
 
 from sqlmodel import select
@@ -9,6 +10,7 @@ from app.domain.models import (
     AbilityProfile,
     AlphaInviteCode,
     Essay,
+    EssayVersion,
     ParentUser,
     SentenceTraining,
     StudentProfile,
@@ -59,6 +61,21 @@ def create_alpha_child(client, parent_id: str, nickname: str = " 小文 ", grade
     )
     assert response.status_code == 201
     return response.json()["child"]
+
+
+def _writing_castle_state(
+    *,
+    topic_origin: str = "teacher_provided",
+    selected_topic_idea: dict | None = None,
+) -> tuple[dict, dict]:
+    material = {"schema_version": "v0.6a.1", "answers": [], "cards": []}
+    outline = {
+        "schema_version": "v0.6a.1",
+        "topic_origin": topic_origin,
+    }
+    if selected_topic_idea is not None:
+        outline["selected_topic_idea"] = selected_topic_idea
+    return material, outline
 
 
 def test_create_alpha_parent_persists_real_parent_and_returns_children_url(session, client):
@@ -394,6 +411,15 @@ def test_alpha_summary_includes_writing_castle_process_summary(session, client):
         "first_draft_completed": False,
         "revision_completed": False,
         "settlement_completed": False,
+        "latest_round_index": None,
+        "revision_round_count": 0,
+        "status": "not_archived",
+        "summary_label": "还没有提交初稿",
+        "hidden": False,
+        "hidden_by": "",
+        "hidden_at": None,
+        "can_continue_revision": False,
+        "can_retry_revision_attempt": False,
     }
 
 
@@ -464,6 +490,176 @@ def test_alpha_summary_marks_ai_topic_idea_origin(session, client):
     assert summary["topic_origin_label"] == "AI 出题灵感，孩子选择"
     assert summary["selected_topic_idea"]["id"] == ideas["ideas"][0]["id"]
     assert summary["copy_ready_ai_body_generated"] is False
+
+
+def test_parent_summary_uses_latest_round_and_collapsed_archive_summary(session, client):
+    parent = create_alpha_parent(client, session)
+    child = create_alpha_child(client, parent["id"])
+    material, outline = _writing_castle_state()
+    essay = Essay(
+        student_id=child["id"],
+        title="多轮修改",
+        status="settled",
+        material_card=material,
+        outline=outline,
+    )
+    session.add(essay)
+    session.flush()
+    now = datetime.now(timezone.utc)
+    first_draft_text = "FIRST_DRAFT_FULL_TEXT_孩子第一稿写了很多完整内容。"
+    round_two_text = "ROUND_2_FULL_DRAFT_TEXT_孩子第二稿补充了动作。"
+    round_three_text = "ROUND_3_FULL_DRAFT_TEXT_孩子第三稿继续修改了结尾感受。"
+    session.add(
+        EssayVersion(
+            essay_id=essay.id,
+            version_label="first_draft",
+            round_index=1,
+            content=first_draft_text,
+            created_at=now - timedelta(minutes=3),
+        )
+    )
+    session.add(
+        EssayVersion(
+            essay_id=essay.id,
+            version_label="revision",
+            round_index=2,
+            content=round_two_text,
+            created_at=now - timedelta(minutes=2),
+        )
+    )
+    session.add(
+        EssayVersion(
+            essay_id=essay.id,
+            version_label="revision_round_3",
+            round_index=3,
+            content=round_three_text,
+            ai_feedback={
+                "improvement": "第三稿把结尾感受写得更清楚。",
+                "next_step": "下次继续检查开头。",
+            },
+            created_at=now - timedelta(minutes=1),
+        )
+    )
+    session.commit()
+
+    response = client.get(
+        f"/api/alpha/parents/{parent['id']}/children/{child['id']}/summary"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    summary = payload["writing_castle_summary"]
+    assert summary["revision_round_count"] == 3
+    assert summary["latest_round_index"] == 3
+    assert summary["status"] == "multi_round_revision"
+    assert summary["summary_label"] == "已完成 3 稿"
+    assert summary["can_continue_revision"] is False
+    assert summary["can_retry_revision_attempt"] is False
+    assert summary["first_draft_completed"] is True
+    assert summary["revision_completed"] is True
+    assert first_draft_text not in str(payload)
+    assert round_two_text not in str(payload)
+    assert round_three_text not in str(payload)
+
+
+def test_parent_summary_includes_child_hidden_essay_restore_metadata(session, client):
+    parent = create_alpha_parent(client, session)
+    child = create_alpha_child(client, parent["id"])
+    material, outline = _writing_castle_state()
+    hidden_at = datetime.now(timezone.utc)
+    essay = Essay(
+        student_id=child["id"],
+        title="孩子隐藏的作文",
+        status="settled",
+        material_card=material,
+        outline=outline,
+        hidden_by="child",
+        hidden_at=hidden_at,
+        visibility_changed_at=hidden_at,
+    )
+    session.add(essay)
+    session.flush()
+    session.add(
+        EssayVersion(
+            essay_id=essay.id,
+            version_label="first_draft",
+            round_index=1,
+            content="孩子隐藏的初稿完整内容。",
+        )
+    )
+    session.add(
+        EssayVersion(
+            essay_id=essay.id,
+            version_label="revision",
+            round_index=2,
+            content="孩子隐藏的二稿完整内容。",
+        )
+    )
+    session.commit()
+
+    response = client.get(
+        f"/api/alpha/parents/{parent['id']}/children/{child['id']}/summary"
+    )
+
+    assert response.status_code == 200
+    hidden_item = response.json()["writing_castle_summary"]
+    assert hidden_item["status"] == "hidden_by_child"
+    assert hidden_item["hidden"] is True
+    assert hidden_item["hidden_by"] == "child"
+    assert hidden_item["hidden_at"] is not None
+    assert hidden_item["can_continue_revision"] is False
+    assert hidden_item["can_retry_revision_attempt"] is False
+
+
+def test_parent_summary_preserves_ai_topic_origin_for_archived_essay(session, client):
+    parent = create_alpha_parent(client, session)
+    child = create_alpha_child(client, parent["id"])
+    selected_topic_idea = {
+        "id": "idea-football",
+        "title": "一次足球比赛",
+    }
+    material, outline = _writing_castle_state(
+        topic_origin="ai_topic_idea",
+        selected_topic_idea=selected_topic_idea,
+    )
+    essay = Essay(
+        student_id=child["id"],
+        title="一次足球比赛",
+        status="settled",
+        material_card=material,
+        outline=outline,
+    )
+    session.add(essay)
+    session.flush()
+    session.add(
+        EssayVersion(
+            essay_id=essay.id,
+            version_label="first_draft",
+            round_index=1,
+            content="我参加了一次足球比赛。",
+        )
+    )
+    session.add(
+        EssayVersion(
+            essay_id=essay.id,
+            version_label="revision",
+            round_index=2,
+            content="我参加了一次足球比赛，还写清楚了进球时的动作。",
+        )
+    )
+    session.commit()
+
+    response = client.get(
+        f"/api/alpha/parents/{parent['id']}/children/{child['id']}/summary"
+    )
+
+    assert response.status_code == 200
+    summary = response.json()["writing_castle_summary"]
+    assert summary["topic_origin"] == "ai_topic_idea"
+    assert summary["topic_origin_label"] == "AI 出题灵感，孩子选择"
+    assert summary["selected_topic_idea"] == selected_topic_idea
+    assert summary["status"] == "revised_once"
+    assert summary["latest_round_index"] == 2
 
 
 def test_alpha_summary_rejects_writing_castle_scaffold_ref_mismatch(session, client):
@@ -542,6 +738,15 @@ def test_alpha_summary_tolerates_malformed_writing_castle_json(session, client):
         "first_draft_completed": False,
         "revision_completed": False,
         "settlement_completed": False,
+        "latest_round_index": None,
+        "revision_round_count": 0,
+        "status": "not_archived",
+        "summary_label": "还没有提交初稿",
+        "hidden": False,
+        "hidden_by": "",
+        "hidden_at": None,
+        "can_continue_revision": False,
+        "can_retry_revision_attempt": False,
     }
 
 
