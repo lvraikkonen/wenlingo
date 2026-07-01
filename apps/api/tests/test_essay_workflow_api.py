@@ -1,8 +1,8 @@
 from datetime import timedelta
 from hashlib import sha256
+import json
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
@@ -395,7 +395,8 @@ def test_third_draft_appends_round_three_without_full_settlement(session, client
     revision_history = session.exec(
         select(AbilityHistory).where(AbilityHistory.source_id == round_3.id)
     ).all()
-    assert all(row.ability_name == "revision" and row.delta <= 2 for row in revision_history)
+    # Round 3+ currently awards no ability growth; capped growth lands in Task 4F.
+    assert revision_history == []
 
 
 def test_lost_response_retry_returns_completed_attempt_even_after_latest_advances(session, client):
@@ -646,6 +647,41 @@ def test_different_idempotency_keys_same_target_round_different_content_returns_
     assert runner.calls == []
 
 
+def test_different_idempotency_key_completed_owner_returns_409_with_continue_payload(session, client):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    round_3 = _manual_version(session, essay_id, round_index=3)
+    attempt = EssayRevisionAttempt(
+        essay_id=essay_id,
+        base_version_id=round_2.id,
+        target_round_index=3,
+        submitted_content_hash=_content_hash(ROUND_3_CONTENT),
+        idempotency_key="client-key-round-3-a",
+        status="completed",
+        new_version_id=round_3.id,
+    )
+    session.add(attempt)
+    session.commit()
+    runner.calls.clear()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(
+            round_2,
+            content=DIFFERENT_ROUND_3_CONTENT,
+            key="client-key-round-3-b",
+        ),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["status"] == "target_round_completed"
+    assert response.json()["continue_revision"]["latest_version_id"] == round_3.id
+    assert response.json()["continue_revision"]["latest_content"] == ROUND_3_CONTENT
+    assert response.json()["continue_revision"]["next_round_index"] == 4
+    assert runner.calls == []
+
+
 def test_stale_pending_attempt_is_marked_failed_and_can_be_retried(session, client):
     runner = RecordingEssayRunner()
     _, essay_id, first_draft = _start_essay(session, client, runner)
@@ -682,6 +718,79 @@ def test_stale_pending_attempt_is_marked_failed_and_can_be_retried(session, clie
     assert attempt.error_code == "attempt_timeout"
     assert attempt.submitted_content == ROUND_3_CONTENT
     assert runner.calls == []
+
+
+def test_stuck_completing_attempt_self_heals_on_next_submit(session, client):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    stale_time = utcnow() - timedelta(seconds=REVISION_ATTEMPT_TIMEOUT_SECONDS + 1)
+    attempt = EssayRevisionAttempt(
+        essay_id=essay_id,
+        base_version_id=round_2.id,
+        target_round_index=3,
+        submitted_content="之前卡住的第三稿内容会保留给重试。",
+        submitted_content_hash=_content_hash("之前卡住的第三稿内容会保留给重试。"),
+        idempotency_key="client-key-stuck-completing-round-3",
+        status="completing_comparison",
+        created_at=stale_time,
+        updated_at=stale_time,
+    )
+    session.add(attempt)
+    session.commit()
+    runner.calls.clear()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision",
+        json=_revision_payload(
+            round_2,
+            content=ROUND_3_CONTENT,
+            key="client-key-round-3-after-stuck",
+        ),
+    )
+
+    assert response.status_code == 201
+    assert response.json()["revision"]["version_label"] == "revision_round_3"
+    session.refresh(attempt)
+    assert attempt.status == "comparison_failed"
+    assert attempt.error_code == "attempt_timeout"
+    assert attempt.submitted_content == "之前卡住的第三稿内容会保留给重试。"
+    assert runner.calls == ["essay_revision_comparison"]
+
+
+def test_retry_endpoint_marks_own_stale_completing_attempt_failed(session, client):
+    runner = RecordingEssayRunner()
+    _, essay_id, first_draft = _start_essay(session, client, runner)
+    round_2 = _submit_round_2(session, client, essay_id, first_draft)
+    stale_time = utcnow() - timedelta(seconds=REVISION_ATTEMPT_TIMEOUT_SECONDS + 1)
+    attempt = EssayRevisionAttempt(
+        essay_id=essay_id,
+        base_version_id=round_2.id,
+        target_round_index=3,
+        submitted_content=ROUND_3_CONTENT,
+        submitted_content_hash=_content_hash(ROUND_3_CONTENT),
+        idempotency_key="client-key-stale-completing-round-3",
+        status="completing_comparison",
+        created_at=stale_time,
+        updated_at=stale_time,
+    )
+    session.add(attempt)
+    session.commit()
+    runner.calls.clear()
+
+    response = client.post(
+        f"/api/essays/{essay_id}/revision-attempts/{attempt.id}/retry-comparison",
+    )
+
+    assert response.status_code == 409
+    assert response.json()["status"] == "comparison_failed"
+    assert response.json()["attempt_id"] == attempt.id
+    assert response.json()["error_code"] == "attempt_timeout"
+    assert runner.calls == []
+    session.refresh(attempt)
+    assert attempt.status == "comparison_failed"
+    assert attempt.error_code == "attempt_timeout"
+    assert attempt.submitted_content == ROUND_3_CONTENT
 
 
 def test_stale_base_version_returns_409_before_llm_call_after_idempotency_lookup(session, client):
@@ -1116,7 +1225,7 @@ def test_reservation_integrity_conflict_checks_content_hash_before_pending_respo
     assert runner.calls == []
 
 
-def test_reservation_integrity_conflict_checks_content_hash_before_completed_response(
+def test_reservation_integrity_conflict_completed_owner_returns_409_with_continue_payload(
     session,
     client,
     monkeypatch,
@@ -1173,7 +1282,10 @@ def test_reservation_integrity_conflict_checks_content_hash_before_completed_res
     )
 
     assert response.status_code == 409
-    assert response.json()["detail"] == "idempotency key content mismatch"
+    assert response.json()["status"] == "target_round_completed"
+    assert response.json()["continue_revision"]["latest_version_id"] == round_3.id
+    assert response.json()["continue_revision"]["latest_content"] == ROUND_3_CONTENT
+    assert response.json()["continue_revision"]["next_round_index"] == 4
     assert runner.calls == []
 
 
@@ -1322,20 +1434,22 @@ async def test_revision_integrity_conflict_returns_409_before_settlement(session
     session.commit()
     xp_before = student.xp
 
-    with pytest.raises(HTTPException) as exc_info:
-        await submit_revision(
-            essay.id,
-            EssayRevisionCreate(
-                base_version_id=first_draft.id,
-                content=ROUND_2_CONTENT,
-                idempotency_key="client-key-integrity-conflict",
-            ),
-            session,
-            AITaskRunner(settings=get_settings()),
-            get_settings(),
-        )
+    response = await submit_revision(
+        essay.id,
+        EssayRevisionCreate(
+            base_version_id=first_draft.id,
+            content=ROUND_2_CONTENT,
+            idempotency_key="client-key-integrity-conflict",
+        ),
+        session,
+        AITaskRunner(settings=get_settings()),
+        get_settings(),
+    )
 
-    assert exc_info.value.status_code == 409
+    assert response.status_code == 409
+    response_payload = json.loads(response.body)
+    assert response_payload["detail"] == "base version is stale"
+    assert response_payload["status"] == "base_version_stale"
     assert len(session.exec(select(GameEvent)).all()) == 0
     assert len(session.exec(select(AbilityHistory)).all()) == 0
     session.refresh(student)

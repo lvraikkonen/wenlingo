@@ -85,7 +85,7 @@ def mark_stale_pending_attempts_failed(session: Session, *, now: datetime) -> in
     cutoff = now - timedelta(seconds=REVISION_ATTEMPT_TIMEOUT_SECONDS)
     attempts = session.exec(
         select(EssayRevisionAttempt).where(
-            EssayRevisionAttempt.status == "pending_comparison",
+            EssayRevisionAttempt.status.in_(("pending_comparison", "completing_comparison")),
             EssayRevisionAttempt.updated_at < cutoff,
         )
     ).all()

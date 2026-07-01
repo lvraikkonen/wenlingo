@@ -104,6 +104,51 @@ def _pending_revision_response(attempt: EssayRevisionAttempt) -> JSONResponse:
     )
 
 
+def _continue_revision_payload_from_version(latest: EssayVersion) -> dict[str, Any]:
+    latest_feedback = latest.ai_feedback if isinstance(latest.ai_feedback, dict) else {}
+    next_step = latest_feedback.get("next_step")
+    return {
+        "latest_version_id": latest.id,
+        "latest_content": latest.content,
+        "previous_ai_guidance": next_step.strip() if isinstance(next_step, str) else "",
+        "next_round_index": get_round_index(latest) + 1,
+    }
+
+
+def _latest_continue_revision_payload(session: Session, essay_id: str) -> dict[str, Any] | None:
+    latest = latest_essay_version(session, essay_id)
+    if latest is None:
+        return None
+    return _continue_revision_payload_from_version(latest)
+
+
+def _base_version_stale_response(session: Session, essay: Essay) -> JSONResponse:
+    return JSONResponse(
+        status_code=409,
+        content={
+            "detail": "base version is stale",
+            "status": "base_version_stale",
+            "continue_revision": _latest_continue_revision_payload(session, essay.id),
+        },
+    )
+
+
+def _target_round_completed_response(
+    session: Session,
+    essay: Essay,
+    attempt: EssayRevisionAttempt,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=409,
+        content={
+            "detail": "target round already completed",
+            "status": "target_round_completed",
+            "attempt_id": attempt.id,
+            "continue_revision": _latest_continue_revision_payload(session, essay.id),
+        },
+    )
+
+
 def _attempt_is_stale(attempt: EssayRevisionAttempt, now) -> bool:
     updated_at = attempt.updated_at
     if updated_at.tzinfo is None:
@@ -172,7 +217,9 @@ def _mark_stale_pending_attempt_failed(
     *,
     now,
 ) -> bool:
-    if attempt.status != "pending_comparison" or not _attempt_is_stale(attempt, now):
+    if attempt.status not in {"pending_comparison", COMPLETING_COMPARISON_STATUS}:
+        return False
+    if not _attempt_is_stale(attempt, now):
         return False
     attempt.status = "comparison_failed"
     attempt.error_code = "attempt_timeout"
@@ -314,6 +361,21 @@ def _active_attempt_for_target(
     ).first()
 
 
+def _completed_attempt_for_base(
+    session: Session,
+    *,
+    essay_id: str,
+    base_version_id: str,
+) -> EssayRevisionAttempt | None:
+    return session.exec(
+        select(EssayRevisionAttempt).where(
+            EssayRevisionAttempt.essay_id == essay_id,
+            EssayRevisionAttempt.base_version_id == base_version_id,
+            EssayRevisionAttempt.status == "completed",
+        )
+    ).first()
+
+
 @router.post(
     "/api/students/{student_id}/essays",
     status_code=201,
@@ -449,17 +511,10 @@ async def submit_revision(
             return _completed_attempt_payload(session, attempt)
         if attempt.status == "comparison_failed":
             return _failed_revision_response(attempt)
-        if attempt.status == COMPLETING_COMPARISON_STATUS:
+        if attempt.status in {"pending_comparison", COMPLETING_COMPARISON_STATUS}:
+            if _mark_stale_pending_attempt_failed(session, attempt, now=now):
+                return _failed_revision_response(attempt)
             return _pending_revision_response(attempt)
-        if attempt.status == "pending_comparison":
-            if not _attempt_is_stale(attempt, now):
-                return _pending_revision_response(attempt)
-            attempt.status = "comparison_failed"
-            attempt.error_code = "attempt_timeout"
-            attempt.updated_at = now
-            session.add(attempt)
-            session.commit()
-            return _failed_revision_response(attempt)
     session.commit()
 
     mark_stale_pending_attempts_failed(session, now=utcnow())
@@ -471,7 +526,14 @@ async def submit_revision(
     if not any(get_round_index(version) == 1 for version in versions):
         raise HTTPException(status_code=409, detail="first draft not found")
     if latest.id != request.base_version_id:
-        raise HTTPException(status_code=409, detail="base version is stale")
+        completed_owner = _completed_attempt_for_base(
+            session,
+            essay_id=essay_id,
+            base_version_id=request.base_version_id,
+        )
+        if completed_owner is not None:
+            return _target_round_completed_response(session, essay, completed_owner)
+        return _base_version_stale_response(session, essay)
 
     target_round_index = get_round_index(latest) + 1
     active_attempt = _active_attempt_for_target(
@@ -484,7 +546,7 @@ async def submit_revision(
         _ensure_idempotency_content_matches(active_attempt, request_content_hash)
         if active_attempt.status in {"pending_comparison", COMPLETING_COMPARISON_STATUS}:
             return _pending_revision_response(active_attempt)
-        return _completed_attempt_payload(session, active_attempt)
+        return _target_round_completed_response(session, essay, active_attempt)
 
     student = session.get(StudentProfile, essay.student_id)
     ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == essay.student_id)).first()
@@ -523,6 +585,8 @@ async def submit_revision(
             _ensure_idempotency_content_matches(active_attempt, request_content_hash)
             return _pending_revision_response(active_attempt)
         if active_attempt is not None and active_attempt.status == "completed":
+            if active_attempt.idempotency_key != request.idempotency_key:
+                return _target_round_completed_response(session, essay, active_attempt)
             _ensure_idempotency_content_matches(active_attempt, request_content_hash)
             return _completed_attempt_payload(session, active_attempt)
         raise HTTPException(status_code=409, detail="revision attempt conflict")
@@ -697,7 +761,7 @@ async def retry_revision_attempt(
     if latest is None:
         raise HTTPException(status_code=409, detail="first draft not found")
     if latest.id != attempt.base_version_id:
-        raise HTTPException(status_code=409, detail="base version is stale")
+        return _base_version_stale_response(session, essay)
     student = session.get(StudentProfile, essay.student_id)
     ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == essay.student_id)).first()
     if not student or not ability:

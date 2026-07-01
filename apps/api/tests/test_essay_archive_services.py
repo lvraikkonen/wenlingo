@@ -313,6 +313,38 @@ def test_archive_status_without_first_draft_ignores_failed_attempt(session):
     assert item["can_retry_revision_attempt"] is False
 
 
+def test_stale_completing_attempt_is_marked_failed_by_sweeper(session):
+    essay = _add_essay_with_versions(
+        session,
+        essay_id="stale-completing",
+        title="完成中卡住",
+        rounds=2,
+    )
+    stale_time = utcnow() - timedelta(seconds=essay_archive.REVISION_ATTEMPT_TIMEOUT_SECONDS + 1)
+    attempt = EssayRevisionAttempt(
+        essay_id=essay.id,
+        base_version_id="stale-completing-v2",
+        target_round_index=3,
+        submitted_content="第三稿保留下来，方便孩子重试。",
+        submitted_content_hash="hash-stale-completing",
+        idempotency_key="idem-stale-completing",
+        status="completing_comparison",
+        created_at=stale_time,
+        updated_at=stale_time,
+    )
+    session.add(attempt)
+    session.commit()
+
+    swept_count = essay_archive.mark_stale_pending_attempts_failed(session, now=utcnow())
+
+    assert swept_count == 1
+    session.commit()
+    session.refresh(attempt)
+    assert attempt.status == "comparison_failed"
+    assert attempt.error_code == "attempt_timeout"
+    assert attempt.submitted_content == "第三稿保留下来，方便孩子重试。"
+
+
 def test_child_archive_recency_uses_submission_time_and_preserves_topic_metadata(session):
     now = utcnow()
     older = _add_essay_with_versions(
