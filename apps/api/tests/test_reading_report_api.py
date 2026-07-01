@@ -314,6 +314,51 @@ def test_stage_report_prefers_newer_revision_over_older_higher_round(session, cl
     assert any("新作文二稿任务" in change for change in report["content"]["ability_changes"])
 
 
+def test_stage_report_prefers_newer_legacy_revision_over_older_round_aware_revision(
+    session, client
+):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    now = datetime.now(timezone.utc)
+    older_essay = Essay(student_id=student.id, title="Older round-aware", status="settled")
+    newer_essay = Essay(student_id=student.id, title="Newer legacy", status="settled")
+    session.add(older_essay)
+    session.add(newer_essay)
+    session.flush()
+    session.add(
+        EssayVersion(
+            essay_id=older_essay.id,
+            version_label="revision_round_3",
+            round_index=3,
+            content="OLDER_ROUND_AWARE_REVISION",
+            completed_tasks=["旧作文三稿任务"],
+            skipped_tasks=[],
+            ai_feedback={"evidence": ["OLDER_ROUND_AWARE_REVISION"]},
+            created_at=now - timedelta(days=1),
+        )
+    )
+    session.add(
+        EssayVersion(
+            essay_id=newer_essay.id,
+            version_label="revision",
+            round_index=None,
+            content="NEWER_LEGACY_REVISION",
+            completed_tasks=["新旧数据二稿任务"],
+            skipped_tasks=[],
+            ai_feedback={"evidence": ["NEWER_LEGACY_REVISION"]},
+            created_at=now,
+        )
+    )
+    session.commit()
+
+    response = client.post(f"/api/students/{student.id}/reports", json={"report_type": "stage"})
+
+    assert response.status_code == 201
+    report = response.json()
+    assert report["content"]["best_revision"] == "NEWER_LEGACY_REVISION"
+    assert any("新旧数据二稿任务" in change for change in report["content"]["ability_changes"])
+
+
 def test_stage_report_handles_legacy_revision_null_task_metadata(session):
     family = create_authenticated_family(session)
     student = family["student"]
