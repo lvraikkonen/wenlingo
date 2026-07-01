@@ -16,6 +16,7 @@ const apiMocks = vi.hoisted(() => ({
 
 const essayFeedbackResponse = {
   essay: { id: "e1" },
+  first_draft: { id: "draft-1" },
   feedback: {
     strengths: ["能写清楚发生了什么", "有一处心情表达"],
     revision_tasks: [
@@ -34,9 +35,18 @@ vi.mock("../src/lib/api", () => ({
 beforeEach(() => {
   apiMocks.createEssay.mockResolvedValue(essayFeedbackResponse);
   apiMocks.submitEssayRevision.mockResolvedValue({
+    revision: {
+      id: "revision-1",
+      completed_tasks: ["给第二段加一个动作描写"],
+      skipped_tasks: [],
+      duration_seconds: 120,
+      reaction: null,
+    },
     comparison: {
       encouragement: "你把最重要的画面写清楚了。",
       improved_dimensions: ["细节更多", "动作更具体"],
+      evidence: [],
+      next_step: "继续把心理感受写出来。",
     },
     settlement: {
       xp_delta: 60,
@@ -131,7 +141,9 @@ test("essay page supports draft feedback and revision settlement", async () => {
   expect(apiMocks.submitEssayRevision).toHaveBeenCalledWith(
     "e1",
     expect.objectContaining({
+      base_version_id: "draft-1",
       content: "我学会了骑车。刚开始我紧紧抓着车把，手心都出汗了。",
+      idempotency_key: expect.stringMatching(/^e1:draft-1:/),
       completed_tasks: ["给第二段加一个动作描写"],
       skipped_tasks: [],
       duration_seconds: expect.any(Number),

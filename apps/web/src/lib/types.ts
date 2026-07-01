@@ -353,6 +353,94 @@ export type WritingCastleTopicAnalysisResponse = WritingCastleEssayResponse & {
   topic_analysis: WritingCastleTopicAnalysis;
 };
 
+export type EssayArchiveItem = {
+  essay_id: string;
+  title: string;
+  status:
+    | "needs_revision"
+    | "revised_once"
+    | "multi_round_revision"
+    | "hidden_by_child"
+    | "needs_retry";
+  hidden: boolean;
+  hidden_by: "" | "child" | "parent";
+  hidden_at?: string | null;
+  latest_round_index: number;
+  latest_version_id: string;
+  last_version_submitted_at: string;
+  revision_round_count: number;
+  needs_revision: boolean;
+  can_continue_revision: boolean;
+  can_retry_revision_attempt: boolean;
+  summary_label: string;
+  topic_origin?: "teacher_provided" | "ai_topic_idea" | "direct_draft" | "";
+  topic_type?: TopicType | "" | null;
+  topic_variant?: TopicVariant | "" | null;
+  scaffold_template_version?: string | null;
+  selected_topic_idea?: Partial<AiTopicIdea> | null;
+  generated_topic_metadata?: Record<string, unknown> | null;
+};
+
+export type EssayArchiveVersion = {
+  version_id: string;
+  version_label: string;
+  round_index: number;
+  content: string;
+  ai_feedback: Record<string, unknown> | null;
+  duration_seconds: number | null;
+  completed_tasks: string[];
+  skipped_tasks: string[];
+  llm_call_log_id: string | null;
+  created_at: string;
+};
+
+export type EssayArchiveRevisionAttempt = {
+  attempt_id: string;
+  status: string;
+  base_version_id: string;
+  target_round_index: number;
+  submitted_content: string;
+  error_code: string | null;
+  can_retry: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EssayArchiveContinueRevision = {
+  latest_version_id: string;
+  latest_content: string;
+  previous_ai_guidance: string;
+  next_round_index: number;
+};
+
+export type EssayArchiveParentSummary = {
+  status: EssayArchiveItem["status"];
+  summary_label: string;
+  latest_round_index: number;
+  revision_round_count: number;
+  recent_improvement: string | null;
+  next_suggestion: string | null;
+};
+
+export type EssayArchiveDetailResponse = EssayArchiveItem & {
+  visibility: {
+    hidden: boolean;
+    hidden_by: EssayArchiveItem["hidden_by"];
+    hidden_at?: string | null;
+    visibility_changed_at?: string | null;
+  };
+  versions: EssayArchiveVersion[];
+  revision_attempt: EssayArchiveRevisionAttempt | null;
+  continue_revision: EssayArchiveContinueRevision | null;
+  parent_summary: EssayArchiveParentSummary | null;
+};
+
+export type RevisionAttemptPendingResponse = {
+  status: "pending_comparison";
+  attempt_id: string;
+  message: string;
+};
+
 export type WritingCastleSummaryMaterialSourceCategory =
   | "real_experience"
   | "imagined_setting"

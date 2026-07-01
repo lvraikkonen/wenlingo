@@ -5,6 +5,10 @@ import {
   createClassroomWritingCastleEssay,
   createSentenceChallenge,
   createSentenceTraining,
+  fetchChildEssayArchive,
+  fetchEssayArchiveDetail,
+  fetchParentEssayArchive,
+  fetchParentEssayArchiveDetail,
   generateMaterialCards,
   generateMaterialQuestions,
   generateOutline,
@@ -13,14 +17,22 @@ import {
   getAdminAlphaAIUsage,
   getActiveClassroomWritingCastleEssay,
   getDashboard,
+  hideChildEssay,
+  restoreParentEssay,
+  retryEssayRevisionAttempt,
   saveMaterialAnswers,
   saveMaterialCards,
   saveOutline,
   saveTopicFocus,
   selectWritingCastleScaffold,
+  submitEssayRevision,
   submitPrewritingFirstDraft,
 } from "../src/lib/api";
-import type { DashboardResponse } from "../src/lib/types";
+import type {
+  DashboardResponse,
+  EssayArchiveDetailResponse,
+  RevisionAttemptPendingResponse,
+} from "../src/lib/types";
 
 const fetchMock = vi.fn();
 
@@ -80,6 +92,59 @@ const dashboardResponse = {
   map: ["阅读", "表达", "修改"],
   coach_message: "今天先完成主线任务，再做快速练习。",
 } satisfies DashboardResponse;
+
+const archiveDetailTypeAssertion = {
+  essay_id: "essay-1",
+  title: "我学会了骑车",
+  status: "revised_once",
+  hidden: false,
+  hidden_by: "",
+  latest_round_index: 1,
+  latest_version_id: "version-2",
+  last_version_submitted_at: "2026-07-01T00:00:00Z",
+  revision_round_count: 1,
+  needs_revision: false,
+  can_continue_revision: true,
+  can_retry_revision_attempt: false,
+  summary_label: "已修改 1 次",
+  topic_type: "",
+  topic_variant: "",
+  selected_topic_idea: {
+    id: "idea-1",
+    title: "足球场边的小发现",
+  },
+  generated_topic_metadata: {
+    idea_id: "idea-1",
+  },
+  visibility: {
+    hidden: false,
+    hidden_by: "",
+    hidden_at: null,
+    visibility_changed_at: null,
+  },
+  versions: [],
+  revision_attempt: null,
+  continue_revision: {
+    latest_version_id: "version-2",
+    latest_content: "我把骑车过程写具体了。",
+    previous_ai_guidance: "下一轮可以继续补充心理感受。",
+    next_round_index: 2,
+  },
+  parent_summary: null,
+} satisfies EssayArchiveDetailResponse;
+
+void archiveDetailTypeAssertion;
+
+const pendingRevisionTypeAssertion: RevisionAttemptPendingResponse = {
+  status: "pending_comparison",
+  attempt_id: "attempt-1",
+  message: "这次修改正在保存，请不要重复提交。",
+};
+
+const submitEssayRevisionTypeAssertion:
+  Awaited<ReturnType<typeof submitEssayRevision>> = pendingRevisionTypeAssertion;
+
+void submitEssayRevisionTypeAssertion;
 
 describe("api client", () => {
   beforeEach(() => {
@@ -502,5 +567,157 @@ describe("api client", () => {
         cache: "no-store",
       }),
     ]);
+  });
+
+  test("essay archive helpers call child and parent archive endpoints", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ items: [] }));
+
+    await fetchChildEssayArchive("student-1");
+    await fetchParentEssayArchive("student-1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/students/student-1/essay-archive?limit=3",
+      expect.objectContaining({
+        credentials: "include",
+        cache: "no-store",
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/parents/students/student-1/essay-archive?include_hidden=true&limit=20",
+      expect.objectContaining({
+        credentials: "include",
+        cache: "no-store",
+      }),
+    );
+  });
+
+  test("essay archive detail helpers call child and parent detail endpoints", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ item: { essay_id: "essay-1" } }));
+
+    await fetchEssayArchiveDetail("essay-1");
+    await fetchParentEssayArchiveDetail("essay-1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/essays/essay-1/archive-detail",
+      expect.objectContaining({
+        credentials: "include",
+        cache: "no-store",
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/parents/essays/essay-1/archive-detail",
+      expect.objectContaining({
+        credentials: "include",
+        cache: "no-store",
+      }),
+    );
+  });
+
+  test("essay visibility helpers patch child hide and parent restore endpoints", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ essay_id: "essay-1" }));
+
+    await hideChildEssay("essay-1");
+    await restoreParentEssay("essay-1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/essays/essay-1/visibility",
+      expect.objectContaining({
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hidden: true }),
+        credentials: "include",
+        cache: "no-store",
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/parents/essays/essay-1/visibility",
+      expect.objectContaining({
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hidden: false }),
+        credentials: "include",
+        cache: "no-store",
+      }),
+    );
+  });
+
+  test("retryEssayRevisionAttempt posts to retry comparison endpoint", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        status: "pending_comparison",
+        attempt_id: "attempt-1",
+        message: "Retry queued.",
+      }),
+    );
+
+    await retryEssayRevisionAttempt("essay-1", "attempt-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/essays/essay-1/revision-attempts/attempt-1/retry-comparison",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+        credentials: "include",
+        cache: "no-store",
+      }),
+    );
+  });
+
+  test("submitEssayRevision posts base version and idempotency key", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        revision: { id: "revision-1" },
+        comparison: { encouragement: "修改得更清楚了。" },
+        settlement: { xp_delta: 20, level_after: 2 },
+      }),
+    );
+    const payload = {
+      base_version_id: "version-1",
+      content: "我把骑车过程写得更具体了。",
+      idempotency_key: "revision-key-1",
+      completed_tasks: ["加上动作"],
+      skipped_tasks: [],
+      duration_seconds: 180,
+    } satisfies Parameters<typeof submitEssayRevision>[1];
+
+    await submitEssayRevision("essay-1", payload);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/essays/essay-1/revision",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        credentials: "include",
+        cache: "no-store",
+      }),
+    );
+  });
+
+  test("submitEssayRevision returns successful pending comparison response", async () => {
+    const pendingResponse = {
+      status: "pending_comparison",
+      attempt_id: "attempt-1",
+      message: "这次修改正在保存，请不要重复提交。",
+    } satisfies RevisionAttemptPendingResponse;
+    fetchMock.mockResolvedValueOnce(jsonResponse(pendingResponse));
+
+    const result = await submitEssayRevision("essay-1", {
+      base_version_id: "version-1",
+      content: "我把骑车过程写得更具体了。",
+      idempotency_key: "revision-key-1",
+      completed_tasks: ["加上动作"],
+      skipped_tasks: [],
+      duration_seconds: 180,
+    });
+
+    expect(result).toEqual(pendingResponse);
   });
 });

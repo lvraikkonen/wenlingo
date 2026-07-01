@@ -20,11 +20,14 @@ import type {
   AdminAlphaTestAccountDeleteResponse,
   CreateClassroomEssayResponse,
   DashboardResponse,
+  EssayArchiveDetailResponse,
+  EssayArchiveItem,
   FeedbackReactionTargetType,
   FeedbackReactionValue,
   MaterialAnswer,
   MaterialCardSlot,
   ParentSummaryUsefulness,
+  RevisionAttemptPendingResponse,
   SavedFeedbackReaction,
   ScaffoldSelectionRequest,
   SentenceChallengeCompletionResponse,
@@ -445,17 +448,90 @@ export function submitPrewritingFirstDraft(
 export function submitEssayRevision(
   essayId: string,
   payload: {
+    base_version_id: string;
     content: string;
+    idempotency_key: string;
     completed_tasks: string[];
     skipped_tasks: string[];
     duration_seconds: number | null;
   },
-): Promise<EssayRevisionResponse> {
-  return requestJson<EssayRevisionResponse>(`/api/essays/${essayId}/revision`, {
-    method: "POST",
+): Promise<EssayRevisionResponse | RevisionAttemptPendingResponse> {
+  return requestJson<EssayRevisionResponse | RevisionAttemptPendingResponse>(
+    `/api/essays/${essayId}/revision`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function fetchChildEssayArchive(
+  studentId: string,
+  limit = 3,
+): Promise<{ items: EssayArchiveItem[] }> {
+  return requestJson<{ items: EssayArchiveItem[] }>(
+    `/api/students/${studentId}/essay-archive?limit=${limit}`,
+  );
+}
+
+export function fetchParentEssayArchive(
+  studentId: string,
+  includeHidden = true,
+  limit = 20,
+): Promise<{ items: EssayArchiveItem[] }> {
+  return requestJson<{ items: EssayArchiveItem[] }>(
+    `/api/parents/students/${studentId}/essay-archive?include_hidden=${includeHidden}&limit=${limit}`,
+  );
+}
+
+export function fetchEssayArchiveDetail(
+  essayId: string,
+): Promise<EssayArchiveDetailResponse> {
+  return requestJson<EssayArchiveDetailResponse>(
+    `/api/essays/${essayId}/archive-detail`,
+  );
+}
+
+export function fetchParentEssayArchiveDetail(
+  essayId: string,
+): Promise<EssayArchiveDetailResponse> {
+  return requestJson<EssayArchiveDetailResponse>(
+    `/api/parents/essays/${essayId}/archive-detail`,
+  );
+}
+
+export function hideChildEssay(essayId: string): Promise<EssayArchiveItem> {
+  return requestJson<EssayArchiveItem>(`/api/essays/${essayId}/visibility`, {
+    method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ hidden: true }),
   });
+}
+
+export function restoreParentEssay(essayId: string): Promise<EssayArchiveItem> {
+  return requestJson<EssayArchiveItem>(
+    `/api/parents/essays/${essayId}/visibility`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hidden: false }),
+    },
+  );
+}
+
+export function retryEssayRevisionAttempt(
+  essayId: string,
+  attemptId: string,
+): Promise<EssayRevisionResponse | RevisionAttemptPendingResponse> {
+  return requestJson<EssayRevisionResponse | RevisionAttemptPendingResponse>(
+    `/api/essays/${essayId}/revision-attempts/${attemptId}/retry-comparison`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
 }
 
 export function createReadingSession(

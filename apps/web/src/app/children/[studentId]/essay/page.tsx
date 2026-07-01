@@ -150,6 +150,10 @@ function EssayPageContent({ studentId }: { studentId: string }) {
     if (!essayId || settlement) {
       return;
     }
+    if (!firstDraftId) {
+      setError("这次提交没有成功。先别急，检查一下网络后再试一次。");
+      return;
+    }
 
     setIsRevisionPending(true);
     setIsFeedbackPending(false);
@@ -167,13 +171,19 @@ function EssayPageContent({ studentId }: { studentId: string }) {
           ? null
           : Math.max(0, Math.round((Date.now() - revisionStartedAt) / 1000));
       const result = await submitEssayRevision(essayId, {
+        base_version_id: firstDraftId,
         content: revision,
+        idempotency_key: createRevisionIdempotencyKey(essayId, firstDraftId),
         completed_tasks: selectedTasks,
         skipped_tasks: skippedTasks,
         duration_seconds: durationSeconds,
       });
 
       if (activeStudentId.current !== requestStudentId) {
+        return;
+      }
+      if (!("revision" in result)) {
+        setError(result.message);
         return;
       }
       setComparison(result.comparison);
@@ -424,4 +434,13 @@ function EssayPageContent({ studentId }: { studentId: string }) {
       </main>
     </>
   );
+}
+
+function createRevisionIdempotencyKey(
+  essayId: string,
+  baseVersionId: string,
+): string {
+  return `${essayId}:${baseVersionId}:${
+    globalThis.crypto?.randomUUID?.() ?? Date.now().toString()
+  }`;
 }
