@@ -9,6 +9,7 @@ from app.domain.models import (
     ProductEvent,
     WritingTopicIdeaBatch,
 )
+from app.services.essay_archive import get_version_label_for_round
 from app.services.writing_castle_state import (
     LEGACY_SCHEMA_VERSION,
     OUTLINE_READY_STATUS,
@@ -829,7 +830,9 @@ def test_prewriting_first_draft_sets_round_one_and_last_submitted_at(session, cl
     first_draft = session.exec(
         select(EssayVersion).where(EssayVersion.essay_id == essay_id)
     ).one()
+    assert first_draft.version_label == get_version_label_for_round(1)
     assert first_draft.round_index == 1
+    assert essay.updated_at == first_draft.created_at
     assert essay.last_version_submitted_at == first_draft.created_at
 
 

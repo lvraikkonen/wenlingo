@@ -5,7 +5,7 @@ from app.prompts.system import PRIMARY_COACH_SYSTEM_PROMPT
 ESSAY_REVISION_COMPARISON_PROMPT = register_prompt(
     PromptSpec(
         prompt_key="essay_revision_comparison",
-        version="v0.5b-2026-06-08",
+        version="v0.6d-2026-06-30",
         system_prompt_key="wenlingo_primary_coach",
         system_prompt=PRIMARY_COACH_SYSTEM_PROMPT,
         response_contract=(

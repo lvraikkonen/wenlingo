@@ -970,6 +970,8 @@ async def test_essay_revision_comparison_uses_runner_output_and_wraps_payload():
     assert runner.calls[0]["task_name"] == "essay_revision_comparison"
     assert runner.calls[0]["prompt_key"] == "essay_revision_comparison"
     assert runner.calls[0]["output_schema"] is EssayRevisionComparison
+    assert runner.calls[0]["input_summary"] == "这次修改对比；上一稿长度：26；这一稿长度：33"
+    assert "二稿" not in runner.calls[0]["input_summary"]
     assert runner.calls[0]["payload"] == {
         "first_draft": (
             "<student_first_draft>我学会了骑车。刚开始我很害怕。"
@@ -1020,7 +1022,17 @@ async def test_essay_revision_comparison_exposes_deterministic_fallback_factory(
     )
 
     fallback = runner.calls[0]["deterministic_fallback_factory"](None)
-    assert fallback.encouragement == "你完成了二稿，这一步本身就很值得肯定。"
+    fallback_text = " ".join(
+        [
+            fallback.encouragement,
+            *fallback.improved_dimensions,
+            *fallback.evidence,
+            fallback.next_step,
+        ]
+    )
+    assert "二稿" not in fallback_text
+    assert "这次修改" in fallback_text
+    assert "这一稿" in fallback_text
 
 
 @pytest.mark.asyncio

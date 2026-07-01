@@ -186,10 +186,10 @@ def fallback_essay_feedback() -> EssayFeedback:
 
 def fallback_revision_comparison() -> EssayRevisionComparison:
     return EssayRevisionComparison(
-        encouragement="你完成了二稿，这一步本身就很值得肯定。",
+        encouragement="你完成了这次修改，这一步本身就很值得肯定。",
         improved_dimensions=["完成了一次修改"],
-        evidence=["你提交了新的二稿内容"],
-        next_step="下一次可以继续挑一段，把动作、声音或心情写得更具体。",
+        evidence=["你提交了这一稿的新内容"],
+        next_step="下一次可以继续挑一段，让这一稿里的动作、声音或心情更具体。",
     )
 
 
@@ -894,6 +894,6 @@ async def essay_revision_comparison(
         },
         output_schema=EssayRevisionComparison,
         deterministic_fallback_factory=lambda _context: fallback_revision_comparison(),
-        input_summary=f"二稿对比；初稿长度：{len(first_draft)}；二稿长度：{len(revision)}",
+        input_summary=f"这次修改对比；上一稿长度：{len(first_draft)}；这一稿长度：{len(revision)}",
         prompt_version=effective_prompt_version,
     )
