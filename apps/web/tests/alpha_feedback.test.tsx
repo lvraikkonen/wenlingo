@@ -74,7 +74,10 @@ const apiMocks = vi.hoisted(() => ({
   createEssay: vi.fn(),
   fetchChildEssayArchive: vi.fn(),
   fetchEssayArchiveDetail: vi.fn(),
+  fetchParentEssayArchive: vi.fn(),
+  fetchParentEssayArchiveDetail: vi.fn(),
   hideChildEssay: vi.fn(),
+  restoreParentEssay: vi.fn(),
   submitEssayRevision: vi.fn(),
   getAlphaChildren: vi.fn(),
   getDashboard: vi.fn(),
@@ -107,7 +110,10 @@ vi.mock("../src/lib/api", () => ({
   createEssay: apiMocks.createEssay,
   fetchChildEssayArchive: apiMocks.fetchChildEssayArchive,
   fetchEssayArchiveDetail: apiMocks.fetchEssayArchiveDetail,
+  fetchParentEssayArchive: apiMocks.fetchParentEssayArchive,
+  fetchParentEssayArchiveDetail: apiMocks.fetchParentEssayArchiveDetail,
   hideChildEssay: apiMocks.hideChildEssay,
+  restoreParentEssay: apiMocks.restoreParentEssay,
   submitEssayRevision: apiMocks.submitEssayRevision,
   getAlphaChildren: apiMocks.getAlphaChildren,
   getDashboard: apiMocks.getDashboard,
@@ -196,6 +202,7 @@ beforeEach(() => {
     next_task: { kind: "sentence", title: "再练一句", focus: "动作描写", minutes: "5" },
   });
   apiMocks.createSentenceTraining.mockResolvedValue(existingFreeInputResponse);
+  apiMocks.fetchParentEssayArchive.mockResolvedValue({ items: [] });
   apiMocks.getDashboard.mockResolvedValue({
     student: {
       id: "s1",

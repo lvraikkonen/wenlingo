@@ -2,16 +2,21 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import { ParentSummaryFeedback } from "../../../../../components/ParentSummaryFeedback";
 import {
+  fetchParentEssayArchive,
+  fetchParentEssayArchiveDetail,
   getMyAlphaChildSummary,
   isUnauthorizedError,
   recordAlphaEvent,
+  restoreParentEssay,
 } from "../../../../../lib/api";
 import { getStoredAlphaSessionId } from "../../../../../lib/alphaSession";
 import type {
   AlphaChildSummary,
+  EssayArchiveDetailResponse,
+  EssayArchiveItem,
   ScaffoldSelectionSource,
 } from "../../../../../lib/types";
 
@@ -39,6 +44,26 @@ const materialSourceCategoryLabels: Record<
   child_confirmed: "孩子确认",
 };
 
+const topicOriginLabels: Record<
+  NonNullable<EssayArchiveItem["topic_origin"]>,
+  string
+> = {
+  ai_topic_idea: "AI 出题灵感",
+  teacher_provided: "课内/老师题目",
+  direct_draft: "直接写初稿",
+  "": "",
+};
+
+function getArchiveTopicOriginLabel(item: EssayArchiveItem) {
+  const metadataLabel =
+    item.generated_topic_metadata &&
+    typeof item.generated_topic_metadata.topic_origin_label === "string"
+      ? item.generated_topic_metadata.topic_origin_label
+      : "";
+
+  return metadataLabel || (item.topic_origin ? topicOriginLabels[item.topic_origin] : "");
+}
+
 export default function ParentChildSummaryPage({ params }: SummaryPageProps) {
   const { studentId } = use(params);
 
@@ -47,7 +72,19 @@ export default function ParentChildSummaryPage({ params }: SummaryPageProps) {
 
 function ParentChildSummaryPageContent({ studentId }: { studentId: string }) {
   const { replace } = useRouter();
+  const archiveRequestIdRef = useRef(0);
   const [data, setData] = useState<AlphaChildSummary | null>(null);
+  const [archiveItems, setArchiveItems] = useState<EssayArchiveItem[]>([]);
+  const [expandedEssayId, setExpandedEssayId] = useState("");
+  const [archiveDetails, setArchiveDetails] = useState<
+    Record<string, EssayArchiveDetailResponse>
+  >({});
+  const [detailLoadingByEssayId, setDetailLoadingByEssayId] = useState<
+    Record<string, boolean>
+  >({});
+  const [restoringByEssayId, setRestoringByEssayId] = useState<
+    Record<string, boolean>
+  >({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -88,6 +125,82 @@ function ParentChildSummaryPageContent({ studentId }: { studentId: string }) {
       isMounted = false;
     };
   }, [replace, studentId]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const requestId = archiveRequestIdRef.current + 1;
+    archiveRequestIdRef.current = requestId;
+
+    fetchParentEssayArchive(studentId, true, 20)
+      .then((response) => {
+        if (isMounted && requestId === archiveRequestIdRef.current) {
+          setArchiveItems(response.items);
+        }
+      })
+      .catch(() => {
+        if (isMounted && requestId === archiveRequestIdRef.current) {
+          setArchiveItems([]);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [studentId]);
+
+  async function reloadParentArchive() {
+    const requestId = archiveRequestIdRef.current + 1;
+    archiveRequestIdRef.current = requestId;
+    const response = await fetchParentEssayArchive(studentId, true, 20);
+    if (requestId === archiveRequestIdRef.current) {
+      setArchiveItems(response.items);
+    }
+  }
+
+  async function handleToggleEssayDetail(item: EssayArchiveItem) {
+    if (expandedEssayId === item.essay_id) {
+      setExpandedEssayId("");
+      return;
+    }
+
+    setExpandedEssayId(item.essay_id);
+    if (archiveDetails[item.essay_id]) {
+      return;
+    }
+
+    setDetailLoadingByEssayId((current) => ({
+      ...current,
+      [item.essay_id]: true,
+    }));
+    try {
+      const detail = await fetchParentEssayArchiveDetail(item.essay_id);
+      setArchiveDetails((current) => ({
+        ...current,
+        [item.essay_id]: detail,
+      }));
+    } finally {
+      setDetailLoadingByEssayId((current) => ({
+        ...current,
+        [item.essay_id]: false,
+      }));
+    }
+  }
+
+  async function handleRestoreEssay(item: EssayArchiveItem) {
+    setRestoringByEssayId((current) => ({
+      ...current,
+      [item.essay_id]: true,
+    }));
+    try {
+      await restoreParentEssay(item.essay_id);
+      await reloadParentArchive();
+    } finally {
+      setRestoringByEssayId((current) => ({
+        ...current,
+        [item.essay_id]: false,
+      }));
+    }
+  }
 
   const childName = data?.child.name || data?.child.nickname || "孩子";
   const emptyText =
@@ -317,6 +430,130 @@ function ParentChildSummaryPageContent({ studentId }: { studentId: string }) {
                   <p className="mt-3 text-[var(--wen-muted)]">
                     {data.next_suggestion}
                   </p>
+                </section>
+
+                <section className="rounded-lg border border-[var(--wen-border)] bg-white p-6 shadow-sm">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h2 className="text-xl font-bold">作文档案摘要</h2>
+                      <p className="mt-2 text-sm text-[var(--wen-muted)]">
+                        先看每篇作文的进展摘要，需要时再展开正文和修改记录。
+                      </p>
+                    </div>
+                    <p className="text-sm font-semibold text-[var(--wen-muted)]">
+                      共 {archiveItems.length} 篇
+                    </p>
+                  </div>
+
+                  {archiveItems.length > 0 ? (
+                    <div className="mt-5 space-y-3">
+                      {archiveItems.map((item) => {
+                        const isExpanded = expandedEssayId === item.essay_id;
+                        const detail = archiveDetails[item.essay_id];
+                        const isDetailLoading =
+                          detailLoadingByEssayId[item.essay_id] === true;
+                        const topicOriginLabel = getArchiveTopicOriginLabel(item);
+                        const isRestoring =
+                          restoringByEssayId[item.essay_id] === true;
+
+                        return (
+                          <article
+                            key={item.essay_id}
+                            className="rounded-lg border border-[var(--wen-border)] p-4"
+                          >
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div>
+                                <h3 className="font-bold">{item.title}</h3>
+                                <div className="mt-2 flex flex-wrap gap-2 text-sm font-semibold">
+                                  <span className="rounded-lg bg-[var(--wen-bg)] px-3 py-2">
+                                    {item.summary_label}
+                                  </span>
+                                  <span className="rounded-lg bg-[var(--wen-bg)] px-3 py-2">
+                                    最新第 {item.latest_round_index} 稿
+                                  </span>
+                                  {topicOriginLabel ? (
+                                    <span className="rounded-lg bg-[var(--wen-bg)] px-3 py-2">
+                                      题目来源：{topicOriginLabel}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {item.hidden_by === "child" ? (
+                                  <button
+                                    type="button"
+                                    aria-label={
+                                      isRestoring
+                                        ? `正在恢复：${item.title}`
+                                        : `恢复作文：${item.title}`
+                                    }
+                                    disabled={isRestoring}
+                                    onClick={() => void handleRestoreEssay(item)}
+                                    className="rounded-lg bg-[var(--wen-orange)] px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    {isRestoring ? "正在恢复" : "恢复"}
+                                  </button>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  aria-label={
+                                    isExpanded
+                                      ? `收起详情：${item.title}`
+                                      : `展开详情：${item.title}`
+                                  }
+                                  onClick={() => void handleToggleEssayDetail(item)}
+                                  className="rounded-lg border border-[var(--wen-border)] px-4 py-2 text-sm font-bold"
+                                >
+                                  {isExpanded ? "收起详情" : "展开详情"}
+                                </button>
+                              </div>
+                            </div>
+
+                            {isExpanded ? (
+                              <div className="mt-4 border-t border-[var(--wen-border)] pt-4">
+                                {isDetailLoading && !detail ? (
+                                  <p className="text-sm text-[var(--wen-muted)]">
+                                    正在加载作文详情...
+                                  </p>
+                                ) : null}
+                                {detail?.parent_summary?.recent_improvement ? (
+                                  <p className="font-semibold">
+                                    {detail.parent_summary.recent_improvement}
+                                  </p>
+                                ) : null}
+                                {detail?.parent_summary?.next_suggestion ? (
+                                  <p className="mt-2 text-[var(--wen-muted)]">
+                                    {detail.parent_summary.next_suggestion}
+                                  </p>
+                                ) : null}
+                                {detail?.versions?.length ? (
+                                  <div className="mt-4 space-y-3">
+                                    {detail.versions.map((version) => (
+                                      <section
+                                        key={version.version_id}
+                                        className="rounded-lg bg-[var(--wen-bg)] p-4"
+                                      >
+                                        <h4 className="font-bold">
+                                          {version.version_label}
+                                        </h4>
+                                        <p className="mt-2 whitespace-pre-wrap text-[var(--wen-muted)]">
+                                          {version.content}
+                                        </p>
+                                      </section>
+                                    ))}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="mt-5 rounded-lg bg-[var(--wen-bg)] px-4 py-3 text-[var(--wen-muted)]">
+                      还没有可查看的作文档案。
+                    </p>
+                  )}
                 </section>
               </>
             )}
