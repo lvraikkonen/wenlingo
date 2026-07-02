@@ -28,38 +28,31 @@ export function FamilyTopbar({
   useEffect(() => {
     let mounted = true;
 
-    try {
-      getMyAlphaChildren()
-        .then((result) => {
-          if (!mounted) {
-            return;
-          }
+    void (async () => {
+      try {
+        const result = await getMyAlphaChildren();
+        if (!mounted) {
+          return;
+        }
 
-          const currentChild = result.children.find(
-            (child) => child.id === currentStudentId,
-          );
+        const currentChild = result.children.find(
+          (child) => child.id === currentStudentId,
+        );
+        setTopbarState({
+          currentStudentId,
+          studentName: currentChild?.name ?? currentStudentId,
+          hasAlphaChildren: result.children.length > 0,
+        });
+      } catch {
+        if (mounted) {
           setTopbarState({
             currentStudentId,
-            studentName: currentChild?.name ?? currentStudentId,
-            hasAlphaChildren: result.children.length > 0,
+            studentName: currentStudentId,
+            hasAlphaChildren: false,
           });
-        })
-        .catch(() => {
-          if (mounted) {
-            setTopbarState({
-              currentStudentId,
-              studentName: currentStudentId,
-              hasAlphaChildren: false,
-            });
-          }
-        });
-    } catch {
-      setTopbarState({
-        currentStudentId,
-        studentName: currentStudentId,
-        hasAlphaChildren: false,
-      });
-    }
+        }
+      }
+    })();
 
     return () => {
       mounted = false;
