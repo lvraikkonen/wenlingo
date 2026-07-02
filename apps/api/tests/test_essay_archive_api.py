@@ -150,6 +150,50 @@ def test_child_archive_excludes_prewrite_only_and_hidden_essays(client, session,
     assert _ids(response) == ["visible-submitted"]
 
 
+def test_archive_lists_exclude_assessment_essays_even_when_backfilled(
+    client, session, monkeypatch
+):
+    monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
+    family = create_authenticated_family(session)
+    student_id = family["student"].id
+    now = utcnow()
+    _add_essay_with_versions(
+        session,
+        student_id=student_id,
+        essay_id="regular-submitted",
+        rounds=1,
+        submitted_at=now,
+    )
+    _add_essay_with_versions(
+        session,
+        student_id=student_id,
+        essay_id="assessment-backfilled",
+        rounds=1,
+        submitted_at=now + timedelta(minutes=1),
+        status="assessment_completed",
+    )
+
+    child = client.get(
+        f"/api/students/{student_id}/essay-archive",
+        cookies=family["cookie"],
+    )
+    parent = client.get(
+        f"/api/parents/students/{student_id}/essay-archive",
+        cookies=family["cookie"],
+    )
+    parent_with_hidden = client.get(
+        f"/api/parents/students/{student_id}/essay-archive?include_hidden=true",
+        cookies=family["cookie"],
+    )
+
+    assert child.status_code == 200
+    assert parent.status_code == 200
+    assert parent_with_hidden.status_code == 200
+    assert _ids(child) == ["regular-submitted"]
+    assert _ids(parent) == ["regular-submitted"]
+    assert _ids(parent_with_hidden) == ["regular-submitted"]
+
+
 def test_parent_archive_can_include_child_hidden_essays(client, session, monkeypatch):
     monkeypatch.setenv("AUTH_REQUIRED_FOR_ALPHA", "true")
     family = create_authenticated_family(session)

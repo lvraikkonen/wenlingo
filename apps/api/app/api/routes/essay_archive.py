@@ -81,6 +81,7 @@ def child_essay_archive(
         .where(
             Essay.student_id == student.id,
             Essay.hidden_by == "",
+            ~Essay.status.startswith("assessment_"),
             _submitted_filter(),
         )
         .order_by(Essay.last_version_submitted_at.desc(), Essay.id.desc())
@@ -107,7 +108,11 @@ def parent_essay_archive(
 ):
     student = require_student_for_auth_mode(session, settings, context, student_id)
     archive_limit = _clamped_limit(limit, 100)
-    statement = select(Essay).where(Essay.student_id == student.id, _submitted_filter())
+    statement = select(Essay).where(
+        Essay.student_id == student.id,
+        ~Essay.status.startswith("assessment_"),
+        _submitted_filter(),
+    )
     if not include_hidden:
         statement = statement.where(Essay.hidden_by == "")
     if include_hidden:
