@@ -261,3 +261,228 @@ def test_v06d_essay_archive_revision_attempts_migrates_existing_sqlite_rows(monk
                     "'2026-06-03 12:01:00+00:00')"
                 )
             )
+
+
+def test_v06e_streaming_reliability_migrates_existing_sqlite_rows(monkeypatch):
+    migration = importlib.import_module(
+        "app.db.migrations.versions.20260703_v06e_streaming_reliability"
+    )
+    engine = sa.create_engine("sqlite://")
+    metadata = sa.MetaData()
+    sa.Table(
+        "studentprofile",
+        metadata,
+        sa.Column("id", sa.String(), primary_key=True),
+    )
+    sa.Table(
+        "essay",
+        metadata,
+        sa.Column("id", sa.String(), primary_key=True),
+        sa.Column("student_id", sa.String(), nullable=False),
+    )
+    sa.Table(
+        "essayversion",
+        metadata,
+        sa.Column("id", sa.String(), primary_key=True),
+        sa.Column("essay_id", sa.String(), nullable=False),
+    )
+    sa.Table(
+        "llmcalllog",
+        metadata,
+        sa.Column("id", sa.String(), primary_key=True),
+        sa.Column("student_id", sa.String(), nullable=True),
+        sa.Column("task_type", sa.String(), nullable=False),
+        sa.Column("task_name", sa.String(), nullable=False, server_default="unknown"),
+        sa.Column("prompt_key", sa.String(), nullable=False, server_default="unknown"),
+        sa.Column("provider", sa.String(), nullable=False, server_default="mock"),
+        sa.Column("model", sa.String(), nullable=False, server_default="mock"),
+        sa.Column("resolved_provider", sa.String(), nullable=False, server_default=""),
+        sa.Column("resolved_model", sa.String(), nullable=False, server_default=""),
+        sa.Column("primary_provider", sa.String(), nullable=False, server_default=""),
+        sa.Column("primary_model", sa.String(), nullable=False, server_default=""),
+        sa.Column("fallback_provider", sa.String(), nullable=False, server_default=""),
+        sa.Column("fallback_model", sa.String(), nullable=False, server_default=""),
+        sa.Column("fallback_reason", sa.String(), nullable=False, server_default=""),
+        sa.Column("attempt_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("final_status", sa.String(), nullable=False, server_default=""),
+        sa.Column("pricing_status", sa.String(), nullable=False, server_default=""),
+        sa.Column("attempt_summaries", sa.JSON(), nullable=False, server_default="[]"),
+        sa.Column("prompt_version", sa.String(), nullable=False, server_default=""),
+        sa.Column("input_summary", sa.String(), nullable=False),
+        sa.Column("raw_response", sa.String(), nullable=False, server_default=""),
+        sa.Column("output_json", sa.JSON(), nullable=False, server_default="{}"),
+        sa.Column("validation_ok", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("error_message", sa.String(), nullable=False, server_default=""),
+        sa.Column("retry_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("prompt_tokens", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("completion_tokens", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("total_tokens", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("estimated_cost", sa.Float(), nullable=False, server_default="0"),
+        sa.Column("latency_ms", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("topic_type", sa.String(), nullable=False, server_default=""),
+        sa.Column("topic_variant", sa.String(), nullable=False, server_default=""),
+        sa.Column("scaffold_template_version", sa.String(), nullable=False, server_default=""),
+        sa.Column("source_policy_summary", sa.String(), nullable=False, server_default=""),
+        sa.Column("duration_ms", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("request_started_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("response_received_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    )
+
+    with engine.begin() as connection:
+        metadata.create_all(connection)
+        connection.execute(
+            sa.text(
+                "INSERT INTO llmcalllog "
+                "(id, task_type, task_name, prompt_key, input_summary, created_at) "
+                "VALUES "
+                "('log-1', 'essay', 'essay_feedback', 'essay_feedback', "
+                "'essay feedback draft length 24', '2026-07-03 09:00:00+00:00')"
+            )
+        )
+        context = MigrationContext.configure(connection)
+        monkeypatch.setattr(migration, "op", Operations(context))
+
+        migration.upgrade()
+
+        inspector = sa.inspect(connection)
+        llm_columns = {
+            column["name"]: column
+            for column in inspector.get_columns("llmcalllog")
+        }
+        expected_llm_columns = {
+            "streaming_enabled",
+            "stream_protocol",
+            "stream_started_at",
+            "first_provider_delta_at",
+            "first_visible_content_at",
+            "last_content_at",
+            "usage_received_at",
+            "client_disconnected_at",
+            "provider_stream_completed_at",
+            "usage_available",
+            "usage_source",
+            "usage_is_estimated",
+            "usage_details_json",
+            "stream_final_status",
+            "cost_source",
+            "cost_error_code",
+            "pricing_snapshot_id",
+            "pricing_snapshot_version",
+            "provider_reported_cost_usd",
+            "cost_calculation_version",
+            "provider_request_id",
+            "provider_generation_id",
+        }
+        assert expected_llm_columns <= set(llm_columns)
+        for column_name in (
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "estimated_cost",
+        ):
+            assert llm_columns[column_name]["nullable"] is True
+
+        llm_defaults = connection.execute(
+            sa.text(
+                "SELECT streaming_enabled, stream_protocol, usage_available, "
+                "usage_source, usage_is_estimated, usage_details_json, cost_source, "
+                "cost_error_code, stream_final_status, pricing_snapshot_version, "
+                "provider_reported_cost_usd, cost_calculation_version, "
+                "provider_request_id, provider_generation_id "
+                "FROM llmcalllog WHERE id = 'log-1'"
+            )
+        ).mappings().one()
+        assert llm_defaults["streaming_enabled"] in (False, 0)
+        assert llm_defaults["stream_protocol"] == "none"
+        assert llm_defaults["usage_available"] in (False, 0)
+        assert llm_defaults["usage_source"] == "unavailable"
+        assert llm_defaults["usage_is_estimated"] in (False, 0)
+        assert llm_defaults["usage_details_json"] in ({}, "{}")
+        assert llm_defaults["cost_source"] == "unavailable"
+        assert llm_defaults["cost_error_code"] == ""
+        assert llm_defaults["stream_final_status"] == "not_streaming"
+        assert llm_defaults["pricing_snapshot_version"] == ""
+        assert llm_defaults["provider_reported_cost_usd"] is None
+        assert llm_defaults["cost_calculation_version"] == "v0.6e.1"
+        assert llm_defaults["provider_request_id"] is None
+        assert llm_defaults["provider_generation_id"] is None
+
+        assert "prewritingaijob" in inspector.get_table_names()
+        assert "essayfeedbacksubmission" in inspector.get_table_names()
+        prewriting_columns = {
+            column["name"]
+            for column in inspector.get_columns("prewritingaijob")
+        }
+        assert {"llm_call_log_id", "started_at", "completed_at"} <= prewriting_columns
+        feedback_submission_columns = {
+            column["name"]
+            for column in inspector.get_columns("essayfeedbacksubmission")
+        }
+        assert {"route_scope", "payload_schema_version"} <= feedback_submission_columns
+
+        prewriting_unique_constraints = {
+            constraint["name"]
+            for constraint in inspector.get_unique_constraints("prewritingaijob")
+        }
+        feedback_unique_constraints = {
+            constraint["name"]
+            for constraint in inspector.get_unique_constraints("essayfeedbacksubmission")
+        }
+        assert "uq_prewriting_ai_job_idempotency" in prewriting_unique_constraints
+        assert "uq_essay_feedback_submission_idempotency" in feedback_unique_constraints
+
+        llm_indexes = {
+            index["name"]
+            for index in inspector.get_indexes("llmcalllog")
+        }
+        prewriting_indexes = {
+            index["name"]
+            for index in inspector.get_indexes("prewritingaijob")
+        }
+        feedback_submission_indexes = {
+            index["name"]
+            for index in inspector.get_indexes("essayfeedbacksubmission")
+        }
+        assert {
+            "ix_llmcalllog_streaming_enabled",
+            "ix_llmcalllog_stream_protocol",
+            "ix_llmcalllog_usage_available",
+            "ix_llmcalllog_usage_source",
+            "ix_llmcalllog_usage_is_estimated",
+            "ix_llmcalllog_stream_final_status",
+            "ix_llmcalllog_cost_source",
+            "ix_llmcalllog_cost_error_code",
+            "ix_llmcalllog_pricing_snapshot_id",
+            "ix_llmcalllog_provider_request_id",
+            "ix_llmcalllog_provider_generation_id",
+        } <= llm_indexes
+        assert {
+            "ix_prewritingaijob_student_id",
+            "ix_prewritingaijob_essay_id",
+            "ix_prewritingaijob_task_name",
+            "ix_prewritingaijob_idempotency_key",
+            "ix_prewritingaijob_status",
+            "ix_prewritingaijob_stage",
+            "ix_prewritingaijob_locked_by",
+            "ix_prewritingaijob_lease_expires_at",
+            "ix_prewritingaijob_result_ref_id",
+            "ix_prewritingaijob_error_code",
+            "ix_prewritingaijob_llm_call_log_id",
+        } <= prewriting_indexes
+        assert {
+            "ix_essayfeedbacksubmission_student_id",
+            "ix_essayfeedbacksubmission_essay_id",
+            "ix_essayfeedbacksubmission_idempotency_scope",
+            "ix_essayfeedbacksubmission_route_scope",
+            "ix_essayfeedbacksubmission_payload_schema_version",
+            "ix_essayfeedbacksubmission_task_name",
+            "ix_essayfeedbacksubmission_client_submission_id",
+            "ix_essayfeedbacksubmission_payload_hash",
+            "ix_essayfeedbacksubmission_status",
+            "ix_essayfeedbacksubmission_llm_call_log_id",
+            "ix_essayfeedbacksubmission_essay_version_id",
+            "ix_essayfeedbacksubmission_daily_limit_counter_id",
+            "ix_essayfeedbacksubmission_daily_limit_reservation_token",
+            "ix_essayfeedbacksubmission_error_code",
+        } <= feedback_submission_indexes
