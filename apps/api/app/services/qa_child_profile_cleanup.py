@@ -11,6 +11,7 @@ from app.domain.models import (
     Assessment,
     DailyTaskLimitCounter,
     Essay,
+    EssayRevisionAttempt,
     EssayVersion,
     FeedbackReaction,
     GameEvent,
@@ -21,6 +22,7 @@ from app.domain.models import (
     Report,
     SentenceTraining,
     StudentProfile,
+    WritingTopicIdeaBatch,
 )
 
 DELETE_QA_CHILD_PROFILES_CONFIRMATION = "DELETE QA CHILD PROFILES"
@@ -189,11 +191,23 @@ def _child_record_counts(
     essay_id_set = set(essay_ids)
     return {
         "Assessment": _count_where(session, Assessment, Assessment.student_id, student_id),
+        "EssayRevisionAttempt": _count_where_in(
+            session,
+            EssayRevisionAttempt,
+            EssayRevisionAttempt.essay_id,
+            essay_id_set,
+        ),
         "EssayVersion": _count_where_in(
             session,
             EssayVersion,
             EssayVersion.essay_id,
             essay_id_set,
+        ),
+        "WritingTopicIdeaBatch": _count_where(
+            session,
+            WritingTopicIdeaBatch,
+            WritingTopicIdeaBatch.student_id,
+            student_id,
         ),
         "Essay": _count_where(session, Essay, Essay.student_id, student_id),
         "SentenceTraining": _count_where(
@@ -266,7 +280,19 @@ def _delete_child_rows(session: Session, row: QAChildProfileCleanupChild) -> Non
     essay_ids = set(row.essay_ids)
 
     _delete_where(session, Assessment, Assessment.student_id, student_id)
+    _delete_where_in(
+        session,
+        EssayRevisionAttempt,
+        EssayRevisionAttempt.essay_id,
+        essay_ids,
+    )
     _delete_where_in(session, EssayVersion, EssayVersion.essay_id, essay_ids)
+    _delete_where(
+        session,
+        WritingTopicIdeaBatch,
+        WritingTopicIdeaBatch.student_id,
+        student_id,
+    )
     _delete_where(session, Essay, Essay.student_id, student_id)
     _delete_where(session, SentenceTraining, SentenceTraining.student_id, student_id)
     _delete_where(session, ReadingSession, ReadingSession.student_id, student_id)

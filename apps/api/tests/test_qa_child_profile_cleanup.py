@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 import pytest
+from sqlalchemy import text
 from sqlmodel import select
 
 from app.core.config import Settings
@@ -11,6 +12,7 @@ from app.domain.models import (
     Assessment,
     DailyTaskLimitCounter,
     Essay,
+    EssayRevisionAttempt,
     EssayVersion,
     FeedbackReaction,
     GameEvent,
@@ -24,6 +26,7 @@ from app.domain.models import (
     Report,
     SentenceTraining,
     StudentProfile,
+    WritingTopicIdeaBatch,
     utcnow,
 )
 from app.services.auth_security import hash_secret
@@ -163,6 +166,10 @@ def rows_for_essay(session, model, essay_id: str):
     return session.exec(select(model).where(model.essay_id == essay_id)).all()
 
 
+def rows_for_created_essay(session, model, essay_id: str):
+    return session.exec(select(model).where(model.created_essay_id == essay_id)).all()
+
+
 def test_qa_child_name_matcher_covers_any_qa_prefix():
     assert is_qa_child_name("QA v0.6b") is True
     assert is_qa_child_name("  QA   v0.6b  ") is True
@@ -256,6 +263,69 @@ def test_cleanup_execute_deletes_matched_child_data_and_keeps_parent_scoped_rows
     assert len(regular_child_events) == 1
     assert len(parent_level_events) == 2
     assert count_rows(session, ProductEvent) == 3
+
+
+def test_cleanup_execute_deletes_topic_idea_batches_before_created_essay(session):
+    session.exec(text("PRAGMA foreign_keys=ON"))
+    _account, parent = seed_parent(session)
+    qa_child, qa_essay, _qa_sentence, _qa_llm_log = seed_child_graph(
+        session, parent, child_id="qa-child", name="QA v0.6d 2026-07-03"
+    )
+    batch = WritingTopicIdeaBatch(
+        student_id=qa_child.id,
+        grade_label=qa_child.grade_label,
+        ideas=[],
+        expires_at=utcnow() + timedelta(minutes=30),
+        consumed_at=utcnow(),
+        selected_idea_id="idea-1",
+        created_essay_id=qa_essay.id,
+    )
+    session.add(batch)
+    session.commit()
+
+    result = cleanup_qa_child_profiles(
+        session,
+        confirm=DELETE_QA_CHILD_PROFILES_CONFIRMATION,
+        settings=Settings(environment="development"),
+    )
+
+    assert result.deleted_count == 1
+    assert result.children[0].record_counts["WritingTopicIdeaBatch"] == 1
+    assert rows_for_created_essay(session, WritingTopicIdeaBatch, qa_essay.id) == []
+    assert session.get(Essay, qa_essay.id) is None
+
+
+def test_cleanup_execute_deletes_revision_attempts_before_essay_versions(session):
+    session.exec(text("PRAGMA foreign_keys=ON"))
+    _account, parent = seed_parent(session)
+    qa_child, qa_essay, _qa_sentence, _qa_llm_log = seed_child_graph(
+        session, parent, child_id="qa-child", name="QA v0.6d 2026-07-03"
+    )
+    base_version = session.exec(
+        select(EssayVersion).where(EssayVersion.essay_id == qa_essay.id)
+    ).one()
+    attempt = EssayRevisionAttempt(
+        essay_id=qa_essay.id,
+        base_version_id=base_version.id,
+        target_round_index=2,
+        submitted_content="二稿内容",
+        idempotency_key="cleanup-qa-attempt",
+        status="pending_comparison",
+    )
+    session.add(attempt)
+    session.commit()
+
+    result = cleanup_qa_child_profiles(
+        session,
+        confirm=DELETE_QA_CHILD_PROFILES_CONFIRMATION,
+        settings=Settings(environment="development"),
+    )
+
+    assert result.deleted_count == 1
+    assert result.children[0].record_counts["EssayRevisionAttempt"] == 1
+    assert rows_for_essay(session, EssayRevisionAttempt, qa_essay.id) == []
+    assert rows_for_essay(session, EssayVersion, qa_essay.id) == []
+    assert session.get(Essay, qa_essay.id) is None
 
 
 def test_cleanup_execute_zero_matches_is_noop(session):
