@@ -72,10 +72,10 @@ def alpha_admin_ai_usage(
             row["deterministic_fallback_count"] += 1
         elif status == "failed":
             row["failure_count"] += 1
-        row["prompt_tokens"] += log.prompt_tokens
-        row["completion_tokens"] += log.completion_tokens
-        row["total_tokens"] += log.total_tokens
-        row["estimated_cost"] += log.estimated_cost
+        row["prompt_tokens"] += log.prompt_tokens or 0
+        row["completion_tokens"] += log.completion_tokens or 0
+        row["total_tokens"] += log.total_tokens or 0
+        row["estimated_cost"] += log.estimated_cost or 0.0
         row["latency_ms_total"] += log.latency_ms
 
     limit_hits: Counter[tuple[str, str]] = Counter()

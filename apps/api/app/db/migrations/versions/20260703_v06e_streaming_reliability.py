@@ -357,6 +357,13 @@ def downgrade() -> None:
     op.drop_index("ix_prewritingaijob_student_id", table_name="prewritingaijob")
     op.drop_table("prewritingaijob")
 
+    op.execute("UPDATE llmcalllog SET prompt_tokens = 0 WHERE prompt_tokens IS NULL")
+    op.execute(
+        "UPDATE llmcalllog SET completion_tokens = 0 WHERE completion_tokens IS NULL"
+    )
+    op.execute("UPDATE llmcalllog SET total_tokens = 0 WHERE total_tokens IS NULL")
+    op.execute("UPDATE llmcalllog SET estimated_cost = 0 WHERE estimated_cost IS NULL")
+
     with op.batch_alter_table("llmcalllog") as batch_op:
         batch_op.drop_index("ix_llmcalllog_provider_generation_id")
         batch_op.drop_index("ix_llmcalllog_provider_request_id")

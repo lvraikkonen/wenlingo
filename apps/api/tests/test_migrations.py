@@ -263,12 +263,7 @@ def test_v06d_essay_archive_revision_attempts_migrates_existing_sqlite_rows(monk
             )
 
 
-def test_v06e_streaming_reliability_migrates_existing_sqlite_rows(monkeypatch):
-    migration = importlib.import_module(
-        "app.db.migrations.versions.20260703_v06e_streaming_reliability"
-    )
-    engine = sa.create_engine("sqlite://")
-    metadata = sa.MetaData()
+def _define_v06e_base_tables(metadata: sa.MetaData) -> None:
     sa.Table(
         "studentprofile",
         metadata,
@@ -328,6 +323,15 @@ def test_v06e_streaming_reliability_migrates_existing_sqlite_rows(monkeypatch):
         sa.Column("response_received_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
+
+
+def test_v06e_streaming_reliability_migrates_existing_sqlite_rows(monkeypatch):
+    migration = importlib.import_module(
+        "app.db.migrations.versions.20260703_v06e_streaming_reliability"
+    )
+    engine = sa.create_engine("sqlite://")
+    metadata = sa.MetaData()
+    _define_v06e_base_tables(metadata)
 
     with engine.begin() as connection:
         metadata.create_all(connection)
@@ -486,3 +490,51 @@ def test_v06e_streaming_reliability_migrates_existing_sqlite_rows(monkeypatch):
             "ix_essayfeedbacksubmission_daily_limit_reservation_token",
             "ix_essayfeedbacksubmission_error_code",
         } <= feedback_submission_indexes
+
+
+def test_v06e_streaming_reliability_downgrade_backfills_nullable_usage(monkeypatch):
+    migration = importlib.import_module(
+        "app.db.migrations.versions.20260703_v06e_streaming_reliability"
+    )
+    engine = sa.create_engine("sqlite://")
+    metadata = sa.MetaData()
+    _define_v06e_base_tables(metadata)
+
+    with engine.begin() as connection:
+        metadata.create_all(connection)
+        context = MigrationContext.configure(connection)
+        monkeypatch.setattr(migration, "op", Operations(context))
+
+        migration.upgrade()
+        connection.execute(
+            sa.text(
+                "INSERT INTO llmcalllog "
+                "(id, task_type, task_name, prompt_key, input_summary, "
+                "prompt_tokens, completion_tokens, total_tokens, estimated_cost, created_at) "
+                "VALUES "
+                "('log-null-usage', 'essay', 'essay_feedback', 'essay_feedback', "
+                "'usage unavailable', NULL, NULL, NULL, NULL, "
+                "'2026-07-03 10:00:00+00:00')"
+            )
+        )
+
+        migration.downgrade()
+
+        llm_columns = {
+            column["name"]: column
+            for column in sa.inspect(connection).get_columns("llmcalllog")
+        }
+        for column_name in (
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "estimated_cost",
+        ):
+            assert llm_columns[column_name]["nullable"] is False
+        usage = connection.execute(
+            sa.text(
+                "SELECT prompt_tokens, completion_tokens, total_tokens, estimated_cost "
+                "FROM llmcalllog WHERE id = 'log-null-usage'"
+            )
+        ).one()
+        assert usage == (0, 0, 0, 0.0)
