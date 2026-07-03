@@ -12,7 +12,7 @@ from app.services.qa_child_profile_cleanup import (
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Clean up V0.6b Dev QA child profiles.")
+    parser = argparse.ArgumentParser(description="Clean up Dev QA child profiles.")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
         "--dry-run",

@@ -25,8 +25,7 @@ from app.domain.models import (
 
 DELETE_QA_CHILD_PROFILES_CONFIRMATION = "DELETE QA CHILD PROFILES"
 MAX_QA_CHILD_PROFILE_DELETE = 30
-QA_CHILD_EXACT_NAMES = {"QA v0.6b"}
-QA_CHILD_PREFIXES = ("QA06b-",)
+QA_CHILD_NAME_PREFIX = "QA"
 DEV_TEST_ENVIRONMENTS = {"development", "dev", "test"}
 
 
@@ -67,9 +66,13 @@ class QAChildProfileCleanupResult:
         return len(self.children)
 
 
-def is_v06b_qa_child_name(name: Any) -> bool:
+def is_qa_child_name(name: Any) -> bool:
     normalized = " ".join(str(name or "").split())
-    return normalized in QA_CHILD_EXACT_NAMES or normalized.startswith(QA_CHILD_PREFIXES)
+    return normalized.upper().startswith(QA_CHILD_NAME_PREFIX)
+
+
+def is_v06b_qa_child_name(name: Any) -> bool:
+    return is_qa_child_name(name)
 
 
 def detect_cleanup_environment(
@@ -156,7 +159,7 @@ def _matched_child_rows(session: Session) -> list[StudentProfile]:
     children = session.exec(
         select(StudentProfile).order_by(StudentProfile.created_at, StudentProfile.id)
     ).all()
-    return [child for child in children if is_v06b_qa_child_name(child.name)]
+    return [child for child in children if is_qa_child_name(child.name)]
 
 
 def _build_child_preview(
@@ -297,4 +300,3 @@ def _delete_where_in(session: Session, model, field, values: set[str]) -> int:
     for row in rows:
         session.delete(row)
     return len(rows)
-

@@ -32,7 +32,7 @@ from app.services.qa_child_profile_cleanup import (
     QAChildProfileCleanupError,
     cleanup_qa_child_profiles,
     detect_cleanup_environment,
-    is_v06b_qa_child_name,
+    is_qa_child_name,
     preview_qa_child_profile_cleanup,
 )
 
@@ -163,20 +163,36 @@ def rows_for_essay(session, model, essay_id: str):
     return session.exec(select(model).where(model.essay_id == essay_id)).all()
 
 
-def test_v06b_qa_child_name_matcher_is_narrow():
-    assert is_v06b_qa_child_name("QA v0.6b") is True
-    assert is_v06b_qa_child_name("  QA   v0.6b  ") is True
-    assert is_v06b_qa_child_name("QA06b-Happy2") is True
-    assert is_v06b_qa_child_name("QA06b-N1") is True
-    assert is_v06b_qa_child_name("QA v0.6c") is False
-    assert is_v06b_qa_child_name("小星") is False
-    assert is_v06b_qa_child_name("QA06") is False
+def test_qa_child_name_matcher_covers_any_qa_prefix():
+    assert is_qa_child_name("QA v0.6b") is True
+    assert is_qa_child_name("  QA   v0.6b  ") is True
+    assert is_qa_child_name("QA06b-Happy2") is True
+    assert is_qa_child_name("QA06b-N1") is True
+    assert is_qa_child_name("QA v0.6c") is True
+    assert is_qa_child_name("QA v0.6c 景物") is True
+    assert is_qa_child_name("QA v0.6c 直写") is True
+    assert is_qa_child_name("QA v0.6d") is True
+    assert is_qa_child_name("QA v0.6d 2026-07-03") is True
+    assert is_qa_child_name("QA06d-Retest") is True
+    assert is_qa_child_name("QA06") is True
+    assert is_qa_child_name("QA v0.6d家庭") is True
+    assert is_qa_child_name("QA v0.6e") is True
+    assert is_qa_child_name("QA 阶段临时孩子") is True
+    assert is_qa_child_name("qa lowercase smoke") is True
+    assert is_qa_child_name("小星") is False
+    assert is_qa_child_name("小 QA") is False
 
 
-def test_preview_matches_only_v06b_qa_children(session):
+def test_preview_matches_known_qa_children(session):
     _account, parent = seed_parent(session)
-    qa_child, _essay, _sentence, _llm_log = seed_child_graph(
+    v06b_child, _essay, _sentence, _llm_log = seed_child_graph(
         session, parent, child_id="qa-child", name="QA06b-Happy2"
+    )
+    v06d_child, _essay3, _sentence3, _llm_log3 = seed_child_graph(
+        session,
+        parent,
+        child_id="qa-child-v06d",
+        name="QA v0.6d 2026-07-03",
     )
     regular_child, _essay2, _sentence2, _llm_log2 = seed_child_graph(
         session, parent, child_id="real-child", name="小星"
@@ -184,15 +200,18 @@ def test_preview_matches_only_v06b_qa_children(session):
 
     result = preview_qa_child_profile_cleanup(session)
 
-    assert [row.student_id for row in result.children] == [qa_child.id]
-    assert result.matched_count == 1
+    assert [row.student_id for row in result.children] == [
+        v06b_child.id,
+        v06d_child.id,
+    ]
+    assert result.matched_count == 2
     assert session.get(StudentProfile, regular_child.id) is not None
 
 
 def test_cleanup_execute_deletes_matched_child_data_and_keeps_parent_scoped_rows(session):
     account, parent = seed_parent(session)
     qa_child, qa_essay, qa_sentence, qa_llm_log = seed_child_graph(
-        session, parent, child_id="qa-child", name="QA v0.6b"
+        session, parent, child_id="qa-child", name="QA v0.6d 2026-07-03"
     )
     regular_child, regular_essay, _regular_sentence, regular_llm_log = seed_child_graph(
         session, parent, child_id="real-child", name="小星"
