@@ -26,6 +26,7 @@ from app.services.llm_contracts import (
 )
 from app.services.ai_routing import TaskFinalStatus
 from app.services.llm_provider import LLMProvider
+from app.services.llm_usage_accounting import normalize_usage_and_cost
 from app.services.llm_usage import llm_daily_limit_reached
 from app.services.sentence_challenges import (
     fallback_challenge,
@@ -123,10 +124,10 @@ def log_llm_result(
     retry_count: int,
     final_status: str = "",
     prompt_key: str | None = None,
-    prompt_tokens: int = 0,
-    completion_tokens: int = 0,
-    total_tokens: int = 0,
-    estimated_cost: float = 0.0,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
+    total_tokens: int | None = None,
+    estimated_cost: float | None = None,
     latency_ms: int = 0,
     topic_type: str = "",
     topic_variant: str = "",
@@ -135,7 +136,38 @@ def log_llm_result(
     duration_ms: int | None = None,
     request_started_at: datetime | None = None,
     response_received_at: datetime | None = None,
+    usage_available: bool | None = None,
+    usage_source: str | None = None,
+    usage_is_estimated: bool = False,
+    usage_details_json: dict[str, Any] | None = None,
+    cost_source: str | None = None,
+    cost_error_code: str = "",
+    pricing_snapshot_id: str | None = None,
+    pricing_snapshot_version: str = "",
+    provider_reported_cost_usd: float | None = None,
 ) -> LLMCallLog:
+    has_usage_fields = any(
+        value is not None
+        for value in (prompt_tokens, completion_tokens, total_tokens)
+    )
+    resolved_usage_available = (
+        usage_available if usage_available is not None else has_usage_fields
+    )
+    resolved_usage_source = usage_source or (
+        "legacy_usage_fields" if resolved_usage_available else "unavailable"
+    )
+    resolved_usage_details = usage_details_json
+    if resolved_usage_details is None and resolved_usage_available:
+        resolved_usage_details = {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+        }
+    elif resolved_usage_details is None:
+        resolved_usage_details = {}
+    resolved_cost_source = cost_source or (
+        "legacy_estimated_cost" if estimated_cost is not None else "unavailable"
+    )
     log = LLMCallLog(
         student_id=student_id,
         task_type=task_type,
@@ -163,6 +195,15 @@ def log_llm_result(
         duration_ms=duration_ms or 0,
         request_started_at=request_started_at,
         response_received_at=response_received_at,
+        usage_available=resolved_usage_available,
+        usage_source=resolved_usage_source,
+        usage_is_estimated=usage_is_estimated,
+        usage_details_json=resolved_usage_details,
+        cost_source=resolved_cost_source,
+        cost_error_code=cost_error_code,
+        pricing_snapshot_id=pricing_snapshot_id,
+        pricing_snapshot_version=pricing_snapshot_version,
+        provider_reported_cost_usd=provider_reported_cost_usd,
     )
     session.add(log)
     session.flush()
@@ -201,12 +242,6 @@ def fallback_sentence_feedback() -> SentenceFeedback:
         ability_delta={"expression": 2, "observation": 2},
         problem_monsters=["空泛表达"],
     )
-
-
-def _token_count(usage: dict[str, int] | None, key: str) -> int:
-    if not usage:
-        return 0
-    return int(usage.get(key) or 0)
 
 
 def _validate_sentence_challenge_grade_label(grade_label: str) -> None:
@@ -507,15 +542,39 @@ async def run_validated_llm_task(
             started_at = perf_counter()
             response = await provider.complete_json(task_name, payload)
             latency_ms = int((perf_counter() - started_at) * 1000)
-            prompt_tokens = _token_count(response.usage, "prompt_tokens")
-            completion_tokens = _token_count(response.usage, "completion_tokens")
-            total_tokens = _token_count(response.usage, "total_tokens")
-            estimated_cost = estimate_llm_cost(
-                prompt_tokens,
-                completion_tokens,
-                input_cost_per_1k_tokens,
-                output_cost_per_1k_tokens,
+            usage_record = normalize_usage_and_cost(
+                provider=response.provider,
+                model=response.model,
+                role="primary",
+                provider_usage=response.usage,
+                usage_source=(
+                    "provider_generation_stats" if response.usage else "unavailable"
+                ),
+                tokenizer_estimate=None,
+                provider_reported_cost_usd=response.provider_reported_cost_usd,
+                pricing=None,
             )
+            estimated_cost = usage_record.estimated_cost_usd
+            cost_source = usage_record.cost_source
+            cost_error_code = usage_record.cost_error_code
+            usage_details_json = usage_record.usage_details_json
+            if (
+                usage_record.usage_available
+                and input_cost_per_1k_tokens > 0
+                and output_cost_per_1k_tokens > 0
+            ):
+                estimated_cost = estimate_llm_cost(
+                    usage_record.prompt_tokens or 0,
+                    usage_record.completion_tokens or 0,
+                    input_cost_per_1k_tokens,
+                    output_cost_per_1k_tokens,
+                )
+                cost_source = "legacy_explicit_cost_rates"
+                cost_error_code = ""
+                usage_details_json = {
+                    **usage_details_json,
+                    "legacy_pricing_source": "explicit_cost_parameters",
+                }
             raw_response = response.raw_response
             latest_response_provider = response.provider
             latest_response_model = response.model
@@ -540,11 +599,20 @@ async def run_validated_llm_task(
                     final_status=TaskFinalStatus.PRIMARY_SUCCESS,
                     error_message="",
                     retry_count=attempt_index,
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    total_tokens=total_tokens,
+                    prompt_tokens=usage_record.prompt_tokens,
+                    completion_tokens=usage_record.completion_tokens,
+                    total_tokens=usage_record.total_tokens,
                     estimated_cost=estimated_cost,
                     latency_ms=latency_ms,
+                    usage_available=usage_record.usage_available,
+                    usage_source=usage_record.usage_source,
+                    usage_is_estimated=usage_record.usage_is_estimated,
+                    usage_details_json=usage_details_json,
+                    cost_source=cost_source,
+                    cost_error_code=cost_error_code,
+                    pricing_snapshot_id=None,
+                    pricing_snapshot_version="",
+                    provider_reported_cost_usd=usage_record.provider_reported_cost_usd,
                 )
             return LLMTaskResult(output=output, log=log)
         except ValidationError as exc:

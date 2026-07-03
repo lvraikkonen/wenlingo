@@ -21,7 +21,8 @@ class LLMProviderResponse(Mapping[str, Any]):
     raw_response: str
     provider: str
     model: str
-    usage: dict[str, int] | None = None
+    usage: dict[str, Any] | None = None
+    provider_reported_cost_usd: float | None = None
 
     def __getitem__(self, key: str) -> Any:
         return self.parsed_json[key]
@@ -46,6 +47,46 @@ class LLMProvider(Protocol):
 
     async def complete_json(self, task_name: str, payload: dict[str, Any]) -> LLMProviderResponse:
         ...
+
+
+def _int_or_none(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _openai_compatible_usage(usage: Any) -> dict[str, Any] | None:
+    if not isinstance(usage, dict):
+        return None
+
+    normalized_usage: dict[str, Any] = {"provider_raw_usage": dict(usage)}
+    for source_key, target_key in (
+        ("prompt_tokens", "prompt_tokens"),
+        ("completion_tokens", "completion_tokens"),
+        ("total_tokens", "total_tokens"),
+    ):
+        if source_key in usage:
+            token_count = _int_or_none(usage.get(source_key))
+            if token_count is not None:
+                normalized_usage[target_key] = token_count
+
+    prompt_details = usage.get("prompt_tokens_details")
+    if isinstance(prompt_details, dict) and "cached_tokens" in prompt_details:
+        cached_tokens = _int_or_none(prompt_details.get("cached_tokens"))
+        if cached_tokens is not None:
+            normalized_usage["cached_input_tokens"] = cached_tokens
+            normalized_usage["cached_input_tokens_included_in_prompt_tokens"] = True
+
+    completion_details = usage.get("completion_tokens_details")
+    if isinstance(completion_details, dict) and "reasoning_tokens" in completion_details:
+        reasoning_tokens = _int_or_none(completion_details.get("reasoning_tokens"))
+        if reasoning_tokens is not None:
+            normalized_usage["reasoning_tokens"] = reasoning_tokens
+
+    return normalized_usage
 
 
 class MockLLMProvider:
@@ -247,14 +288,7 @@ class HttpJsonLLMProvider:
         response.raise_for_status()
         data = response.json()
         content = data["choices"][0]["message"]["content"]
-        usage = data.get("usage")
-        normalized_usage = None
-        if isinstance(usage, dict):
-            normalized_usage = {
-                "prompt_tokens": int(usage.get("prompt_tokens") or 0),
-                "completion_tokens": int(usage.get("completion_tokens") or 0),
-                "total_tokens": int(usage.get("total_tokens") or 0),
-            }
+        normalized_usage = _openai_compatible_usage(data.get("usage"))
         if isinstance(content, str):
             return LLMProviderResponse(
                 parsed_json=json.loads(content),

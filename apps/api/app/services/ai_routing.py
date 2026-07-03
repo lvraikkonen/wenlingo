@@ -79,6 +79,10 @@ class ModelPricing:
     input_cost_per_1k_tokens: float
     output_cost_per_1k_tokens: float
     effective_date: str
+    cached_input_cost_per_1k_tokens: float | None = None
+    reasoning_cost_per_1k_tokens: float | None = None
+    thoughts_cost_per_1k_tokens: float | None = None
+    delegates_to_provider_reported_cost: bool = False
 
 
 @dataclass(frozen=True)
@@ -360,12 +364,27 @@ def _environment(settings: Settings) -> str:
     return settings.environment.strip().lower()
 
 
+def _pricing_has_billable_rates(pricing: ModelPricing) -> bool:
+    return pricing.input_cost_per_1k_tokens > 0 and pricing.output_cost_per_1k_tokens > 0
+
+
+def _registry_pricing_is_configured_for_mode(
+    settings: Settings,
+    pricing: ModelPricing,
+) -> bool:
+    if _provider_mode(settings) != "http":
+        return True
+    if pricing.delegates_to_provider_reported_cost:
+        return True
+    return _pricing_has_billable_rates(pricing)
+
+
 def _pricing_for(
     settings: Settings,
     logical_model: LogicalModel,
 ) -> tuple[ModelPricing | None, str]:
     pricing = COST_REGISTRY.get(logical_model.pricing_key)
-    if pricing is not None:
+    if pricing is not None and _registry_pricing_is_configured_for_mode(settings, pricing):
         return pricing, PricingStatus.CONFIGURED
     profile_rates = {
         "primary_http": (

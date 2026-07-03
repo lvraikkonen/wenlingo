@@ -20,6 +20,7 @@ from app.services.ai_routing import (
     resolve_task_route,
 )
 from app.services.llm_provider import LLMProvider, LLMProviderResponse
+from app.services.llm_usage_accounting import normalize_usage_and_cost
 from app.services.llm_usage import (
     consume_daily_task_reservation,
     fail_daily_task_reservation,
@@ -54,11 +55,22 @@ class AttemptRecord:
     status: str
     error_class: str
     latency_ms: int
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
-    estimated_cost: float
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
+    estimated_cost: float | None
     pricing_status: str
+    provider_response_received: bool
+    usage_available: bool
+    usage_source: str
+    usage_is_estimated: bool
+    usage_details_json: dict[str, Any]
+    cost_source: str
+    cost_error_code: str
+    pricing_snapshot_id: str | None
+    pricing_snapshot_version: str
+    provider_reported_cost_usd: float | None
+    cost_calculation_version: str
     request_started_at: datetime | None = None
     response_received_at: datetime | None = None
     error_message: str = ""
@@ -78,6 +90,17 @@ class AttemptRecord:
             "total_tokens": self.total_tokens,
             "estimated_cost": self.estimated_cost,
             "pricing_status": self.pricing_status,
+            "provider_response_received": self.provider_response_received,
+            "usage_available": self.usage_available,
+            "usage_source": self.usage_source,
+            "usage_is_estimated": self.usage_is_estimated,
+            "usage_details_json": self.usage_details_json,
+            "cost_source": self.cost_source,
+            "cost_error_code": self.cost_error_code,
+            "pricing_snapshot_id": self.pricing_snapshot_id,
+            "pricing_snapshot_version": self.pricing_snapshot_version,
+            "provider_reported_cost_usd": self.provider_reported_cost_usd,
+            "cost_calculation_version": self.cost_calculation_version,
         }
         if self.error_message:
             summary["error_message"] = self.error_message
@@ -92,34 +115,6 @@ def _provider_name(provider: LLMProvider) -> str:
 
 def _model_name(provider: LLMProvider) -> str:
     return getattr(provider, "model_name", "unknown")
-
-
-def _usage_token(response: LLMProviderResponse | None, key: str) -> int:
-    if response is None or response.usage is None:
-        return 0
-    return int(response.usage.get(key) or 0)
-
-
-def _usage_total_tokens(
-    response: LLMProviderResponse | None,
-    prompt_tokens: int,
-    completion_tokens: int,
-) -> int:
-    total_tokens = _usage_token(response, "total_tokens")
-    return total_tokens or prompt_tokens + completion_tokens
-
-
-def _estimate_cost(
-    *,
-    prompt_tokens: int,
-    completion_tokens: int,
-    pricing: ModelPricing | None,
-) -> float:
-    if pricing is None:
-        return 0.0
-    return (prompt_tokens / 1000 * pricing.input_cost_per_1k_tokens) + (
-        completion_tokens / 1000 * pricing.output_cost_per_1k_tokens
-    )
 
 
 def _attempt_pricing_status(pricing: ModelPricing | None, route_status: str) -> str:
@@ -203,6 +198,159 @@ def _scaffold_observability_metadata(payload: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _sum_int_or_none(values: list[int | None]) -> int | None:
+    known_values = [value for value in values if value is not None]
+    if not known_values:
+        return None
+    return sum(known_values)
+
+
+def _sum_float_or_none(values: list[float | None]) -> float | None:
+    known_values = [value for value in values if value is not None]
+    if not known_values:
+        return None
+    return sum(known_values)
+
+
+def _usage_attempts(attempts: list[AttemptRecord]) -> list[AttemptRecord]:
+    return [attempt for attempt in attempts if attempt.usage_available]
+
+
+def _costable_attempts(attempts: list[AttemptRecord]) -> list[AttemptRecord]:
+    return [attempt for attempt in attempts if attempt.estimated_cost is not None]
+
+
+def _provider_response_attempts(attempts: list[AttemptRecord]) -> list[AttemptRecord]:
+    return [attempt for attempt in attempts if attempt.provider_response_received]
+
+
+def _has_missing_provider_response_usage(attempts: list[AttemptRecord]) -> bool:
+    return any(
+        attempt.provider_response_received and not attempt.usage_available
+        for attempt in attempts
+    )
+
+
+def _has_provider_response_cost_error(attempts: list[AttemptRecord]) -> bool:
+    return any(
+        attempt.provider_response_received and bool(attempt.cost_error_code)
+        for attempt in attempts
+    )
+
+
+def _aggregate_usage_source(attempts: list[AttemptRecord]) -> str:
+    if _has_missing_provider_response_usage(attempts):
+        return "unavailable"
+    available_attempts = _usage_attempts(attempts)
+    if not available_attempts:
+        if any(attempt.usage_is_estimated for attempt in attempts):
+            return "tokenizer_estimate"
+        return "unavailable"
+    sources = {attempt.usage_source for attempt in available_attempts}
+    if len(sources) == 1:
+        return available_attempts[0].usage_source
+    return "multiple_attempts"
+
+
+def _aggregate_usage_details(
+    *,
+    attempts: list[AttemptRecord],
+    prompt_tokens: int | None,
+    completion_tokens: int | None,
+    total_tokens: int | None,
+    usage_unavailable_reason: str | None,
+) -> dict[str, Any]:
+    if not attempts:
+        return {
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "total_tokens": None,
+            "usage_unavailable_reason": "no_provider_attempts",
+            "attempts": [],
+        }
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        **(
+            {"usage_unavailable_reason": usage_unavailable_reason}
+            if usage_unavailable_reason
+            else {}
+        ),
+        "attempts": [
+            {
+                "attempt_index": attempt.attempt_index,
+                "role": attempt.role,
+                "provider": attempt.provider,
+                "model": attempt.model,
+                "provider_response_received": attempt.provider_response_received,
+                "usage_available": attempt.usage_available,
+                "usage_source": attempt.usage_source,
+                "usage_is_estimated": attempt.usage_is_estimated,
+                "usage_details_json": attempt.usage_details_json,
+            }
+            for attempt in attempts
+        ],
+    }
+
+
+def _aggregate_estimated_cost(attempts: list[AttemptRecord]) -> float | None:
+    if _has_provider_response_cost_error(attempts):
+        return None
+    provider_response_attempts = _provider_response_attempts(attempts)
+    if not provider_response_attempts:
+        return None
+    if any(attempt.estimated_cost is None for attempt in provider_response_attempts):
+        return None
+    return sum(attempt.estimated_cost or 0.0 for attempt in provider_response_attempts)
+
+
+def _aggregate_cost_source(
+    attempts: list[AttemptRecord],
+    estimated_cost: float | None,
+) -> str:
+    costable_attempts = _costable_attempts(_provider_response_attempts(attempts))
+    if estimated_cost is None or not costable_attempts:
+        return "unavailable"
+    sources = {
+        attempt.cost_source
+        for attempt in costable_attempts
+        if attempt.estimated_cost is not None
+    }
+    if len(sources) == 1:
+        return next(iter(sources))
+    return "mixed"
+
+
+def _aggregate_cost_error_code(attempts: list[AttemptRecord]) -> str:
+    for attempt in _provider_response_attempts(attempts):
+        if attempt.cost_error_code:
+            return attempt.cost_error_code
+    return ""
+
+
+def _aggregate_pricing_snapshot_id(attempts: list[AttemptRecord]) -> str | None:
+    snapshot_ids = {
+        attempt.pricing_snapshot_id
+        for attempt in attempts
+        if attempt.pricing_snapshot_id is not None
+    }
+    if len(snapshot_ids) == 1:
+        return next(iter(snapshot_ids))
+    return None
+
+
+def _aggregate_pricing_snapshot_version(attempts: list[AttemptRecord]) -> str:
+    versions = {
+        attempt.pricing_snapshot_version
+        for attempt in attempts
+        if attempt.pricing_snapshot_version
+    }
+    if len(versions) == 1:
+        return next(iter(versions))
+    return ""
+
+
 def _record_log(
     *,
     session: Session | None,
@@ -226,10 +374,23 @@ def _record_log(
     if session is None:
         return None
 
-    prompt_tokens = sum(attempt.prompt_tokens for attempt in attempts)
-    completion_tokens = sum(attempt.completion_tokens for attempt in attempts)
-    total_tokens = sum(attempt.total_tokens for attempt in attempts)
-    estimated_cost = sum(attempt.estimated_cost for attempt in attempts)
+    has_missing_provider_response_usage = _has_missing_provider_response_usage(attempts)
+    available_usage_attempts = (
+        [] if has_missing_provider_response_usage else _usage_attempts(attempts)
+    )
+    prompt_tokens = _sum_int_or_none(
+        [attempt.prompt_tokens for attempt in available_usage_attempts]
+    )
+    completion_tokens = _sum_int_or_none(
+        [attempt.completion_tokens for attempt in available_usage_attempts]
+    )
+    total_tokens = _sum_int_or_none(
+        [attempt.total_tokens for attempt in available_usage_attempts]
+    )
+    estimated_cost = _aggregate_estimated_cost(attempts)
+    provider_reported_cost_usd = _sum_float_or_none(
+        [attempt.provider_reported_cost_usd for attempt in attempts]
+    )
     latency_ms = sum(attempt.latency_ms for attempt in attempts)
     request_started_at = min(
         (
@@ -297,6 +458,36 @@ def _record_log(
         duration_ms=latency_ms,
         request_started_at=request_started_at,
         response_received_at=response_received_at,
+        usage_available=bool(available_usage_attempts),
+        usage_source=_aggregate_usage_source(attempts),
+        usage_is_estimated=(
+            not available_usage_attempts
+            and any(attempt.usage_is_estimated for attempt in attempts)
+        ),
+        usage_details_json=_aggregate_usage_details(
+            attempts=attempts,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            usage_unavailable_reason=(
+                "partial_provider_usage_missing"
+                if has_missing_provider_response_usage
+                else None
+            ),
+        ),
+        cost_source=_aggregate_cost_source(attempts, estimated_cost),
+        cost_error_code=_aggregate_cost_error_code(attempts),
+        pricing_snapshot_id=(
+            _aggregate_pricing_snapshot_id(attempts)
+            if estimated_cost is not None
+            else None
+        ),
+        pricing_snapshot_version=(
+            _aggregate_pricing_snapshot_version(attempts)
+            if estimated_cost is not None
+            else ""
+        ),
+        provider_reported_cost_usd=provider_reported_cost_usd,
     )
     session.add(log)
     session.flush()
@@ -373,9 +564,22 @@ async def _attempt_provider(
                 error_class = ""
     latency_ms = int((perf_counter() - started_at) * 1000)
     response_received_at = utcnow()
-    prompt_tokens = _usage_token(response, "prompt_tokens")
-    completion_tokens = _usage_token(response, "completion_tokens")
-    total_tokens = _usage_total_tokens(response, prompt_tokens, completion_tokens)
+    usage_record = normalize_usage_and_cost(
+        provider=provider_name,
+        model=model_name,
+        role=role,
+        provider_usage=response.usage if response is not None else None,
+        usage_source=(
+            "provider_generation_stats"
+            if response is not None and response.usage
+            else "unavailable"
+        ),
+        tokenizer_estimate=None,
+        provider_reported_cost_usd=(
+            response.provider_reported_cost_usd if response is not None else None
+        ),
+        pricing=pricing,
+    )
     attempt = AttemptRecord(
         attempt_index=attempt_index,
         role=role,
@@ -384,15 +588,22 @@ async def _attempt_provider(
         status=reason,
         error_class=error_class,
         latency_ms=latency_ms,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=total_tokens,
-        estimated_cost=_estimate_cost(
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            pricing=pricing,
-        ),
+        prompt_tokens=usage_record.prompt_tokens,
+        completion_tokens=usage_record.completion_tokens,
+        total_tokens=usage_record.total_tokens,
+        estimated_cost=usage_record.estimated_cost_usd,
         pricing_status=_attempt_pricing_status(pricing, route_pricing_status),
+        provider_response_received=response is not None,
+        usage_available=usage_record.usage_available,
+        usage_source=usage_record.usage_source,
+        usage_is_estimated=usage_record.usage_is_estimated,
+        usage_details_json=usage_record.usage_details_json,
+        cost_source=usage_record.cost_source,
+        cost_error_code=usage_record.cost_error_code,
+        pricing_snapshot_id=usage_record.pricing_snapshot_id,
+        pricing_snapshot_version=usage_record.pricing_snapshot_version,
+        provider_reported_cost_usd=usage_record.provider_reported_cost_usd,
+        cost_calculation_version=usage_record.cost_calculation_version,
         request_started_at=request_started_at,
         response_received_at=response_received_at,
         error_message=error_message,

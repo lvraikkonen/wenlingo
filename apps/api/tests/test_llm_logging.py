@@ -1,10 +1,35 @@
 from datetime import datetime, timezone
 
+import pytest
+from pydantic import BaseModel
 from sqlmodel import select
 
 from app.domain.enums import TaskType
 from app.domain.models import LLMCallLog
-from app.services.ai_tasks import log_llm_result
+from app.services.ai_tasks import log_llm_result, run_validated_llm_task
+from app.services.llm_provider import LLMProviderResponse
+
+
+class LegacyOutput(BaseModel):
+    message: str
+
+
+class LegacyProvider:
+    provider_name = "legacy-http"
+    model_name = "legacy-model"
+
+    async def complete_json(self, task_name: str, payload: dict) -> LLMProviderResponse:
+        return LLMProviderResponse(
+            parsed_json={"message": "ok"},
+            raw_response='{"message":"ok"}',
+            provider=self.provider_name,
+            model=self.model_name,
+            usage={
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+                "total_tokens": 150,
+            },
+        )
 
 
 def test_log_llm_result_persists_structured_output(session):
@@ -38,6 +63,12 @@ def test_log_llm_result_persists_structured_output(session):
     assert saved.validation_ok is True
     assert saved.retry_count == 0
     assert saved.output_json["specific_improvement"] == improvement
+    assert saved.usage_available is False
+    assert saved.usage_source == "unavailable"
+    assert saved.prompt_tokens is None
+    assert saved.completion_tokens is None
+    assert saved.total_tokens is None
+    assert saved.estimated_cost is None
 
 
 def test_log_llm_result_persists_usage_latency_and_cost(session):
@@ -71,6 +102,40 @@ def test_log_llm_result_persists_usage_latency_and_cost(session):
     assert saved.total_tokens == 150
     assert saved.estimated_cost == 0.00025
     assert saved.latency_ms == 45
+    assert saved.usage_available is True
+    assert saved.usage_source == "legacy_usage_fields"
+    assert saved.usage_is_estimated is False
+    assert saved.usage_details_json["prompt_tokens"] == 100
+    assert saved.cost_source == "legacy_estimated_cost"
+    assert saved.cost_error_code == ""
+    assert saved.pricing_snapshot_id is None
+    assert saved.pricing_snapshot_version == ""
+
+
+@pytest.mark.asyncio
+async def test_run_validated_llm_task_marks_legacy_explicit_cost_inputs(session):
+    result = await run_validated_llm_task(
+        provider=LegacyProvider(),
+        session=session,
+        student_id="s1",
+        task_type=TaskType.sentence,
+        task_name="sentence_upgrade_feedback",
+        payload={},
+        output_model=LegacyOutput,
+        fallback=LegacyOutput(message="fallback"),
+        input_summary="legacy path",
+        prompt_version="legacy-v1",
+        input_cost_per_1k_tokens=0.01,
+        output_cost_per_1k_tokens=0.02,
+    )
+
+    saved = session.exec(select(LLMCallLog)).one()
+    assert result.output == LegacyOutput(message="ok")
+    assert saved.estimated_cost == 0.002
+    assert saved.cost_source == "legacy_explicit_cost_rates"
+    assert saved.usage_details_json["legacy_pricing_source"] == "explicit_cost_parameters"
+    assert saved.pricing_snapshot_id is None
+    assert saved.pricing_snapshot_version == ""
 
 
 def test_log_llm_result_persists_v06b_scaffold_metadata(session):

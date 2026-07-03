@@ -155,6 +155,22 @@ def test_http_route_uses_http_profiles_and_model_overrides():
     assert route.pricing_status == PricingStatus.UNCONFIGURED
 
 
+def test_default_http_route_treats_zero_registry_prices_as_unconfigured():
+    route = resolve_task_route(
+        settings=Settings(llm_provider="http"),
+        task_name="sentence_challenge_generation",
+        prompt_key="sentence_challenge_generation",
+    )
+
+    assert route.primary_model.provider_profile == "primary_http"
+    assert route.primary_model.pricing_key == "primary_http:cheap-fast"
+    assert route.fallback_model.provider_profile == "fallback_http"
+    assert route.fallback_model.pricing_key == "fallback_http:strong-default"
+    assert route.primary_pricing is None
+    assert route.fallback_pricing is None
+    assert route.pricing_status == PricingStatus.UNCONFIGURED
+
+
 def test_http_route_uses_env_cost_rates_for_overridden_models():
     route = resolve_task_route(
         settings=Settings(
@@ -262,7 +278,16 @@ def test_development_missing_pricing_is_allowed(monkeypatch):
 
 def test_production_requires_http_profile_credentials():
     with pytest.raises(RoutingConfigError, match="provider credentials"):
-        validate_ai_routing_startup(Settings(environment="production", llm_provider="http"))
+        validate_ai_routing_startup(
+            Settings(
+                environment="production",
+                llm_provider="http",
+                llm_primary_input_cost_per_1k_tokens=0.00014,
+                llm_primary_output_cost_per_1k_tokens=0.00028,
+                llm_fallback_input_cost_per_1k_tokens=0.001,
+                llm_fallback_output_cost_per_1k_tokens=0.002,
+            )
+        )
 
 
 def test_production_mock_provider_does_not_require_http_profile_credentials():
@@ -278,6 +303,10 @@ def test_production_accepts_configured_http_profiles():
             llm_primary_http_api_key="primary-key",
             llm_fallback_http_base_url="https://fallback.example/v1",
             llm_fallback_http_api_key="fallback-key",
+            llm_primary_input_cost_per_1k_tokens=0.00014,
+            llm_primary_output_cost_per_1k_tokens=0.00028,
+            llm_fallback_input_cost_per_1k_tokens=0.001,
+            llm_fallback_output_cost_per_1k_tokens=0.002,
         )
     )
 

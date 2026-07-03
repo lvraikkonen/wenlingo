@@ -168,22 +168,239 @@ async def test_run_ai_task_records_primary_success(session, monkeypatch):
     assert saved.completion_tokens == 25
     assert saved.total_tokens == 125
     assert saved.estimated_cost == pytest.approx(0.0003)
-    assert saved.attempt_summaries == [
-        {
-            "attempt_index": 1,
-            "role": "primary",
-            "provider": "primary",
-            "model": "cheap-fast",
-            "status": "success",
-            "error_class": "",
-            "latency_ms": saved.attempt_summaries[0]["latency_ms"],
-            "prompt_tokens": 100,
-            "completion_tokens": 25,
-            "total_tokens": 125,
-            "estimated_cost": pytest.approx(0.0003),
-            "pricing_status": "configured",
-        }
-    ]
+    assert saved.usage_available is True
+    assert saved.usage_source == "provider_generation_stats"
+    assert saved.usage_is_estimated is False
+    assert saved.cost_source == "provider_usage_x_pricing_snapshot"
+    assert saved.cost_error_code == ""
+    assert len(saved.attempt_summaries) == 1
+    attempt_summary = saved.attempt_summaries[0]
+    assert attempt_summary["attempt_index"] == 1
+    assert attempt_summary["role"] == "primary"
+    assert attempt_summary["provider"] == "primary"
+    assert attempt_summary["model"] == "cheap-fast"
+    assert attempt_summary["status"] == "success"
+    assert attempt_summary["error_class"] == ""
+    assert attempt_summary["prompt_tokens"] == 100
+    assert attempt_summary["completion_tokens"] == 25
+    assert attempt_summary["total_tokens"] == 125
+    assert attempt_summary["estimated_cost"] == pytest.approx(0.0003)
+    assert attempt_summary["pricing_status"] == "configured"
+    assert attempt_summary["usage_available"] is True
+    assert attempt_summary["usage_source"] == "provider_generation_stats"
+    assert attempt_summary["usage_is_estimated"] is False
+    assert attempt_summary["cost_source"] == "provider_usage_x_pricing_snapshot"
+    assert attempt_summary["cost_error_code"] == ""
+
+
+@pytest.mark.asyncio
+async def test_run_ai_task_aggregates_delegated_provider_cost_without_usage(
+    session,
+    monkeypatch,
+):
+    monkeypatch.setitem(
+        COST_REGISTRY,
+        "mock:cheap-fast",
+        ModelPricing(
+            "mock:cheap-fast",
+            "mock_primary",
+            "cheap-fast",
+            0.002,
+            0.004,
+            "test",
+            delegates_to_provider_reported_cost=True,
+        ),
+    )
+    primary = FakeProvider(
+        provider_name="primary",
+        model_name="cheap-fast",
+        actions=[
+            LLMProviderResponse(
+                parsed_json={"message": "hello child"},
+                raw_response='{"message":"hello child"}',
+                provider="primary",
+                model="cheap-fast",
+                usage=None,
+                provider_reported_cost_usd=0.1234,
+            )
+        ],
+    )
+    fallback = FakeProvider(
+        provider_name="fallback",
+        model_name="strong-default",
+        actions=[],
+    )
+
+    await run_ai_task(
+        settings=Settings(llm_provider="mock"),
+        session=session,
+        task_type=TaskType.sentence,
+        task_name="sentence_upgrade_feedback",
+        student_id="s1",
+        payload={"draft": "tiny draft"},
+        output_schema=TinyOutput,
+        prompt_key="sentence_upgrade_feedback",
+        input_summary="tiny test",
+        deterministic_fallback_factory=local_fallback,
+        primary_provider=primary,
+        fallback_provider=fallback,
+        prompt_version="test-v1",
+    )
+
+    saved = session.exec(select(LLMCallLog)).one()
+    assert saved.usage_available is False
+    assert saved.prompt_tokens is None
+    assert saved.estimated_cost == pytest.approx(0.1234)
+    assert saved.cost_source == "provider_reported_cost"
+    assert saved.cost_error_code == ""
+    assert saved.provider_reported_cost_usd == 0.1234
+    assert saved.attempt_summaries[0]["usage_available"] is False
+    assert saved.attempt_summaries[0]["estimated_cost"] == 0.1234
+    assert saved.attempt_summaries[0]["cost_source"] == "provider_reported_cost"
+    assert saved.attempt_summaries[0]["provider_reported_cost_usd"] == 0.1234
+
+
+@pytest.mark.asyncio
+async def test_run_ai_task_aggregates_mixed_provider_reported_and_formula_costs(
+    session,
+    monkeypatch,
+):
+    monkeypatch.setitem(
+        COST_REGISTRY,
+        "mock:cheap-fast",
+        ModelPricing(
+            "mock:cheap-fast",
+            "mock_primary",
+            "cheap-fast",
+            0.002,
+            0.004,
+            "test",
+            delegates_to_provider_reported_cost=True,
+        ),
+    )
+    monkeypatch.setitem(
+        COST_REGISTRY,
+        "mock:strong-default",
+        ModelPricing(
+            "mock:strong-default",
+            "mock_fallback",
+            "strong-default",
+            0.01,
+            0.02,
+            "test",
+        ),
+    )
+    primary = FakeProvider(
+        provider_name="primary",
+        model_name="cheap-fast",
+        actions=[
+            LLMProviderResponse(
+                parsed_json={"message": "no"},
+                raw_response='{"message":"no"}',
+                provider="primary",
+                model="cheap-fast",
+                usage=None,
+                provider_reported_cost_usd=0.1234,
+            )
+        ],
+    )
+    fallback = FakeProvider(
+        provider_name="fallback",
+        model_name="strong-default",
+        actions=[
+            response(
+                message="fallback valid",
+                provider="fallback",
+                model="strong-default",
+                prompt_tokens=20,
+                completion_tokens=10,
+            )
+        ],
+    )
+
+    await run_ai_task(
+        settings=Settings(llm_provider="mock"),
+        session=session,
+        task_type=TaskType.sentence,
+        task_name="sentence_upgrade_feedback",
+        student_id="s1",
+        payload={"draft": "tiny draft"},
+        output_schema=TinyOutput,
+        prompt_key="sentence_upgrade_feedback",
+        input_summary="tiny test",
+        deterministic_fallback_factory=local_fallback,
+        primary_provider=primary,
+        fallback_provider=fallback,
+        prompt_version="test-v1",
+    )
+
+    saved = session.exec(select(LLMCallLog)).one()
+    assert saved.usage_available is False
+    assert saved.prompt_tokens is None
+    assert saved.completion_tokens is None
+    assert saved.total_tokens is None
+    assert saved.estimated_cost == pytest.approx(0.1238)
+    assert saved.cost_source == "mixed"
+    assert saved.cost_error_code == ""
+    assert saved.attempt_summaries[0]["cost_source"] == "provider_reported_cost"
+    assert saved.attempt_summaries[0]["estimated_cost"] == 0.1234
+    assert saved.attempt_summaries[1]["cost_source"] == "provider_usage_x_pricing_snapshot"
+    assert saved.attempt_summaries[1]["estimated_cost"] == pytest.approx(0.0004)
+
+
+@pytest.mark.asyncio
+async def test_run_ai_task_records_missing_usage_as_unknown_not_zero(session):
+    primary = FakeProvider(
+        provider_name="http",
+        model_name="unpriced-model",
+        actions=[
+            LLMProviderResponse(
+                parsed_json={"message": "hello child"},
+                raw_response='{"message":"hello child"}',
+                provider="http",
+                model="unpriced-model",
+                usage=None,
+            )
+        ],
+    )
+    fallback = FakeProvider(
+        provider_name="fallback",
+        model_name="unpriced-fallback",
+        actions=[],
+    )
+
+    await run_ai_task(
+        settings=Settings(
+            llm_provider="http",
+            llm_primary_http_model="unpriced-model",
+            llm_fallback_http_model="unpriced-fallback",
+        ),
+        session=session,
+        task_type=TaskType.sentence,
+        task_name="sentence_upgrade_feedback",
+        student_id="s1",
+        payload={"draft": "tiny draft"},
+        output_schema=TinyOutput,
+        prompt_key="sentence_upgrade_feedback",
+        input_summary="tiny test",
+        deterministic_fallback_factory=local_fallback,
+        primary_provider=primary,
+        fallback_provider=fallback,
+        prompt_version="test-v1",
+    )
+
+    saved = session.exec(select(LLMCallLog)).one()
+    assert saved.usage_available is False
+    assert saved.usage_source == "unavailable"
+    assert saved.prompt_tokens is None
+    assert saved.estimated_cost is None
+    assert saved.cost_source == "unavailable"
+    assert saved.cost_error_code == "PRICING_UNCONFIGURED"
+    assert saved.attempt_summaries[0]["usage_available"] is False
+    assert saved.attempt_summaries[0]["usage_source"] == "unavailable"
+    assert saved.attempt_summaries[0]["prompt_tokens"] is None
+    assert saved.attempt_summaries[0]["estimated_cost"] is None
+    assert saved.attempt_summaries[0]["cost_error_code"] == "PRICING_UNCONFIGURED"
 
 
 @pytest.mark.asyncio
@@ -341,6 +558,56 @@ async def test_run_ai_task_uses_fallback_after_primary_api_error(session):
 
 
 @pytest.mark.asyncio
+async def test_fallback_success_does_not_inherit_primary_no_response_cost_error(session):
+    primary = FakeProvider(
+        provider_name="http",
+        model_name="cheap-fast",
+        actions=[RuntimeError("primary exploded before response")],
+    )
+    fallback = FakeProvider(
+        provider_name="fallback-http",
+        model_name="strong-default",
+        actions=[
+            response(
+                message="fallback ok",
+                provider="fallback-http",
+                model="strong-default",
+                prompt_tokens=20,
+                completion_tokens=10,
+            )
+        ],
+    )
+
+    await run_ai_task(
+        settings=Settings(
+            llm_provider="http",
+            llm_fallback_input_cost_per_1k_tokens=0.001,
+            llm_fallback_output_cost_per_1k_tokens=0.002,
+        ),
+        session=session,
+        task_type=TaskType.sentence,
+        task_name="sentence_upgrade_feedback",
+        student_id="s1",
+        payload={"draft": "tiny draft"},
+        output_schema=TinyOutput,
+        prompt_key="sentence_upgrade_feedback",
+        input_summary="tiny test",
+        deterministic_fallback_factory=local_fallback,
+        primary_provider=primary,
+        fallback_provider=fallback,
+    )
+
+    saved = session.exec(select(LLMCallLog)).one()
+    assert saved.final_status == TaskFinalStatus.FALLBACK_SUCCESS
+    assert saved.estimated_cost == pytest.approx(0.00004)
+    assert saved.cost_error_code == ""
+    assert saved.attempt_summaries[0]["provider_response_received"] is False
+    assert saved.attempt_summaries[0]["cost_error_code"] == "PRICING_UNCONFIGURED"
+    assert saved.attempt_summaries[1]["provider_response_received"] is True
+    assert saved.attempt_summaries[1]["cost_error_code"] == ""
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("primary_error", "expected_reason"),
     [
@@ -463,6 +730,70 @@ async def test_schema_validation_failure_falls_back_and_keeps_primary_usage(sess
     assert saved.attempt_summaries[0]["prompt_tokens"] == 11
     assert saved.attempt_summaries[0]["completion_tokens"] == 7
     assert saved.attempt_summaries[1]["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_provider_response_missing_usage_makes_top_level_usage_unavailable(session):
+    primary = FakeProvider(
+        provider_name="primary",
+        model_name="cheap-fast",
+        actions=[
+            LLMProviderResponse(
+                parsed_json={"message": "no"},
+                raw_response='{"message":"no"}',
+                provider="primary",
+                model="cheap-fast",
+                usage=None,
+            )
+        ],
+    )
+    fallback = FakeProvider(
+        provider_name="fallback",
+        model_name="strong-default",
+        actions=[
+            response(
+                message="fallback valid",
+                provider="fallback",
+                model="strong-default",
+                prompt_tokens=13,
+                completion_tokens=5,
+            )
+        ],
+    )
+
+    result = await run_ai_task(
+        settings=Settings(llm_provider="mock"),
+        session=session,
+        task_type=TaskType.sentence,
+        task_name="sentence_upgrade_feedback",
+        student_id="s1",
+        payload={"draft": "tiny draft"},
+        output_schema=TinyOutput,
+        prompt_key="sentence_upgrade_feedback",
+        input_summary="tiny test",
+        deterministic_fallback_factory=local_fallback,
+        primary_provider=primary,
+        fallback_provider=fallback,
+    )
+
+    saved = session.exec(select(LLMCallLog)).one()
+    assert result.output == TinyOutput(message="fallback valid")
+    assert saved.final_status == TaskFinalStatus.FALLBACK_SUCCESS
+    assert saved.usage_available is False
+    assert saved.usage_source == "unavailable"
+    assert saved.prompt_tokens is None
+    assert saved.completion_tokens is None
+    assert saved.total_tokens is None
+    assert saved.estimated_cost is None
+    assert saved.cost_source == "unavailable"
+    assert saved.usage_details_json["usage_unavailable_reason"] == (
+        "partial_provider_usage_missing"
+    )
+    assert saved.attempt_summaries[0]["usage_available"] is False
+    assert saved.attempt_summaries[1]["usage_available"] is True
+    assert saved.attempt_summaries[1]["prompt_tokens"] == 13
+    assert saved.attempt_summaries[1]["estimated_cost"] is None
+    assert saved.attempt_summaries[1]["cost_error_code"] == "PRICING_UNCONFIGURED"
 
 
 @pytest.mark.asyncio

@@ -28,6 +28,36 @@ class FakeUsageResponse:
         }
 
 
+class FakeNestedUsageResponse:
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return {
+            "choices": [{"message": {"content": '{"ok": true}'}}],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+                "total_tokens": 180,
+                "prompt_tokens_details": {"cached_tokens": 40},
+                "completion_tokens_details": {"reasoning_tokens": 30},
+            },
+        }
+
+
+class FakeSparseUsageResponse:
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return {
+            "choices": [{"message": {"content": '{"ok": true}'}}],
+            "usage": {
+                "prompt_tokens": 11,
+            },
+        }
+
+
 class FakeAsyncClient:
     last_request = None
 
@@ -144,9 +174,71 @@ async def test_http_json_provider_returns_openai_compatible_usage(monkeypatch):
     result = await provider.complete_json("sentence_upgrade_feedback", {})
 
     assert result.usage == {
+        "provider_raw_usage": {
+            "prompt_tokens": 11,
+            "completion_tokens": 7,
+            "total_tokens": 18,
+        },
         "prompt_tokens": 11,
         "completion_tokens": 7,
         "total_tokens": 18,
+    }
+
+
+@pytest.mark.asyncio
+async def test_http_json_provider_preserves_nested_openai_usage_details(monkeypatch):
+    class UsageClient(FakeAsyncClient):
+        async def post(self, url, headers, json):
+            self.__class__.last_request = {"url": url, "headers": headers, "json": json}
+            return FakeNestedUsageResponse()
+
+    monkeypatch.setattr("app.services.llm_provider.httpx.AsyncClient", UsageClient)
+    provider = HttpJsonLLMProvider(
+        api_key="test-key",
+        model="test-model",
+        base_url="https://example.test/",
+    )
+
+    result = await provider.complete_json("sentence_upgrade_feedback", {})
+
+    assert result.usage == {
+        "provider_raw_usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 180,
+            "prompt_tokens_details": {"cached_tokens": 40},
+            "completion_tokens_details": {"reasoning_tokens": 30},
+        },
+        "prompt_tokens": 100,
+        "completion_tokens": 50,
+        "total_tokens": 180,
+        "cached_input_tokens": 40,
+        "cached_input_tokens_included_in_prompt_tokens": True,
+        "reasoning_tokens": 30,
+    }
+
+
+@pytest.mark.asyncio
+async def test_http_json_provider_does_not_coerce_missing_usage_keys_to_zero(monkeypatch):
+    class UsageClient(FakeAsyncClient):
+        async def post(self, url, headers, json):
+            self.__class__.last_request = {"url": url, "headers": headers, "json": json}
+            return FakeSparseUsageResponse()
+
+    monkeypatch.setattr("app.services.llm_provider.httpx.AsyncClient", UsageClient)
+    provider = HttpJsonLLMProvider(
+        api_key="test-key",
+        model="test-model",
+        base_url="https://example.test/",
+    )
+
+    result = await provider.complete_json("sentence_upgrade_feedback", {})
+
+    assert result.usage == {
+        "provider_raw_usage": {
+            "prompt_tokens": 11,
+        },
+        "prompt_tokens": 11,
     }
 
 
