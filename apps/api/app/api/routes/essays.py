@@ -3,7 +3,7 @@ from hashlib import sha256
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
@@ -15,7 +15,13 @@ from app.api.auth_deps import (
     require_essay_for_auth_mode,
     require_student_for_auth_mode,
 )
-from app.api.deps import AITaskRunner, get_ai_task_runner, get_db_session
+from app.api.deps import (
+    AITaskRunner,
+    SessionFactory,
+    get_ai_task_runner,
+    get_db_session,
+    get_session_factory,
+)
 from app.api.feedback_state import feedback_reaction_value
 from app.api.routes.alpha import record_product_event
 from app.core.config import Settings, get_settings
@@ -38,12 +44,19 @@ from app.services.essay_archive import (
     latest_essay_version,
     mark_stale_pending_attempts_failed,
 )
-from app.services.essay_feedback_submission import IdempotencyPayloadMismatch
+from app.services.essay_feedback_persistence import save_direct_draft_feedback_result
+from app.services.essay_feedback_streaming import (
+    active_submission_json_response,
+    build_direct_draft_feedback_stream,
+)
+from app.services.essay_feedback_submission import (
+    IdempotencyPayloadMismatch,
+    create_or_get_submission,
+    finalize_submission_with_reservation,
+)
 from app.services.essay_workflow import (
     ASSESSMENT_ESSAY_STATUS,
-    REVISION_REQUESTED_STATUS,
     SETTLED_ESSAY_STATUS,
-    draft_ability_deltas,
     revision_ability_deltas,
 )
 from app.services.gamification import settle_task
@@ -60,8 +73,9 @@ ACTIVE_REVISION_ATTEMPT_STATUSES = (
 
 class EssayCreate(BaseModel):
     title: str = Field(min_length=1, max_length=100)
-    draft: str = Field(min_length=20, max_length=3000)
+    draft: str = Field(min_length=1, max_length=3000)
     entry: str
+    client_submission_id: str = Field(default="", max_length=120)
 
 
 class EssayRevisionCreate(BaseModel):
@@ -393,6 +407,31 @@ async def create_essay(
     ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
     if not ability:
         raise HTTPException(status_code=404, detail="student not found")
+    submission = None
+    if request.client_submission_id.strip():
+        try:
+            submission = create_or_get_submission(
+                session=session,
+                student_id=student_id,
+                essay_id=None,
+                task_name="essay_feedback",
+                route_scope="direct_draft",
+                client_submission_id=request.client_submission_id,
+                payload=request.model_dump(),
+            )
+        except IdempotencyPayloadMismatch as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "IDEMPOTENCY_PAYLOAD_MISMATCH"},
+            ) from exc
+        try:
+            active_response = active_submission_json_response(submission)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if active_response is not None and active_response["status"] == "IN_PROGRESS":
+            return JSONResponse(status_code=202, content=active_response)
+        if active_response is not None:
+            return active_response
     try:
         feedback_result = await essay_feedback(
             runner,
@@ -435,55 +474,61 @@ async def create_essay(
             )
         except Exception:
             pass
-    submitted_at = utcnow()
-    essay = Essay(
+    response_payload = save_direct_draft_feedback_result(
+        session=session,
         student_id=student_id,
         title=request.title,
-        status=REVISION_REQUESTED_STATUS,
-        updated_at=submitted_at,
-        last_version_submitted_at=submitted_at,
+        draft=request.draft,
+        feedback=feedback,
+        llm_log=feedback_result.log,
     )
-    session.add(essay)
-    session.flush()
-    version = EssayVersion(
-        essay_id=essay.id,
-        version_label=get_version_label_for_round(1),
-        round_index=1,
-        content=request.draft,
-        ai_feedback=feedback.model_dump(),
-        llm_call_log_id=feedback_result.log.id if feedback_result.log else None,
-        created_at=submitted_at,
-    )
-    session.add(version)
-    session.flush()
-    try:
-        record_product_event(
-            session,
-            "essay_draft_feedback_completed",
-            parent_id=student.parent_id,
-            student_id=student.id,
-            payload={
-                "target_type": "essay_draft",
-                "target_id": version.id,
-                "task_type": "essay",
-                "status": "completed",
-            },
+    if submission is not None:
+        essay_id = str(response_payload["essay"]["id"])
+        first_draft_id = str(response_payload["first_draft"]["id"])
+        finalize_submission_with_reservation(
+            session=session,
+            submission_id=submission.id,
+            terminal_status="completed",
+            saved_result=True,
+            essay_version_id=first_draft_id,
+            result_fetch_url=f"/api/essays/{essay_id}",
+            llm_call_log_id=feedback_result.log.id if feedback_result.log else None,
         )
-    except Exception:
-        pass
-    ability_deltas = draft_ability_deltas(len(feedback.improvements))
-    apply_ability_delta(session, ability, ability_deltas, TaskType.essay, version.id)
-    session.add(ability)
-    essay_payload = essay.model_dump()
-    version_payload = version.model_dump()
-    version_payload["reaction"] = feedback_reaction_value(
-        session,
-        student.id,
-        "essay_draft",
-        version.id,
-    )
     session.commit()
-    return {"essay": essay_payload, "first_draft": version_payload, "feedback": feedback}
+    return response_payload
+
+
+@router.post("/api/students/{student_id}/essays/stream-feedback")
+async def stream_create_essay_feedback(
+    student_id: str,
+    payload: EssayCreate,
+    session: Session = Depends(get_db_session),
+    session_factory: SessionFactory = Depends(get_session_factory),
+    runner: AITaskRunner = Depends(get_ai_task_runner),
+    settings: Settings = Depends(get_settings),
+    context: ParentContext | None = Depends(require_auth_mode_state_change),
+):
+    require_student_for_auth_mode(session, settings, context, student_id)
+    ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
+    if not ability:
+        raise HTTPException(status_code=404, detail="student not found")
+    stream = build_direct_draft_feedback_stream(
+        request_session=session,
+        session_factory=session_factory,
+        runner=runner,
+        settings=settings,
+        student_id=student_id,
+        payload=payload,
+    )
+    return StreamingResponse(
+        stream,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post(

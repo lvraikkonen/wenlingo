@@ -1,11 +1,11 @@
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException
 from sqlmodel import Session
 
 from app.core.config import Settings, get_settings
-from app.db.session import get_session
+from app.db.session import engine, get_session
 from app.services.ai_routing import LogicalModel, ProviderProfile, resolve_task_route
 from app.services.ai_runner import run_ai_task
 from app.services.llm_provider import HttpJsonLLMProvider, LLMProvider, MockLLMProvider
@@ -13,6 +13,16 @@ from app.services.llm_provider import HttpJsonLLMProvider, LLMProvider, MockLLMP
 
 def get_db_session() -> Generator[Session, None, None]:
     yield from get_session()
+
+
+SessionFactory = Callable[[], Session]
+
+
+def get_session_factory() -> SessionFactory:
+    def factory() -> Session:
+        return Session(engine)
+
+    return factory
 
 
 def get_llm_provider(settings: Settings = Depends(get_settings)) -> LLMProvider:

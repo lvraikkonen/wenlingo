@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     sentence_challenge_daily_limit_per_student: int = 10
     sentence_feedback_daily_limit_per_student: int = 10
     llm_daily_limit_timezone: str = "Asia/Shanghai"
+    essay_feedback_streaming_enabled: bool = False
+    prewriting_progress_jobs_enabled: bool = False
+    streaming_first_event_timeout_seconds: int = 8
+    streaming_section_timeout_seconds: int = 20
+    streaming_backend_continuation_timeout_seconds: int = 60
+    streaming_heartbeat_seconds: int = 12
     llm_input_cost_per_1k_tokens: float = 0.0
     llm_output_cost_per_1k_tokens: float = 0.0
     llm_primary_input_cost_per_1k_tokens: float = 0.0

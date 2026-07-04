@@ -3,9 +3,8 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.api.auth_deps import (
@@ -14,11 +13,15 @@ from app.api.auth_deps import (
     require_essay_for_auth_mode,
     require_student_for_auth_mode,
 )
-from app.api.deps import AITaskRunner, get_ai_task_runner, get_db_session
-from app.api.feedback_state import feedback_reaction_value
+from app.api.deps import (
+    AITaskRunner,
+    SessionFactory,
+    get_ai_task_runner,
+    get_db_session,
+    get_session_factory,
+)
 from app.api.routes.alpha import record_product_event
 from app.core.config import Settings, get_settings
-from app.domain.enums import TaskType
 from app.domain.models import (
     AbilityProfile,
     Essay,
@@ -27,7 +30,6 @@ from app.domain.models import (
     WritingTopicIdeaBatch,
     utcnow,
 )
-from app.services.abilities import apply_ability_delta
 from app.services.ai_tasks import (
     essay_feedback,
     material_card_generation,
@@ -36,9 +38,16 @@ from app.services.ai_tasks import (
     writing_topic_idea_generation,
     writing_topic_analysis,
 )
-from app.services.essay_archive import get_version_label_for_round
-from app.services.essay_feedback_submission import IdempotencyPayloadMismatch
-from app.services.essay_workflow import draft_ability_deltas
+from app.services.essay_feedback_persistence import save_prewriting_first_draft_feedback_result
+from app.services.essay_feedback_streaming import (
+    active_submission_json_response,
+    build_prewriting_first_draft_feedback_stream,
+)
+from app.services.essay_feedback_submission import (
+    IdempotencyPayloadMismatch,
+    create_or_get_submission,
+    finalize_submission_with_reservation,
+)
 from app.services.writing_castle_state import (
     LEGACY_SCHEMA_VERSION,
     MATERIALS_READY_STATUS,
@@ -150,6 +159,7 @@ class OutlineSave(BaseModel):
 
 class FirstDraftSubmit(BaseModel):
     draft: str = Field(min_length=20, max_length=3000)
+    client_submission_id: str = Field(default="", max_length=120)
 
 
 def _is_ai_feedback_failure(log) -> bool:
@@ -1003,7 +1013,32 @@ async def submit_first_draft(
     if existing_first_draft:
         raise HTTPException(status_code=409, detail="first draft already submitted")
 
-    student, ability = _student_and_ability(session, essay.student_id)
+    student, _ability = _student_and_ability(session, essay.student_id)
+    submission = None
+    if request.client_submission_id.strip():
+        try:
+            submission = create_or_get_submission(
+                session=session,
+                student_id=essay.student_id,
+                essay_id=essay.id,
+                task_name="essay_feedback",
+                route_scope="prewriting_first_draft",
+                client_submission_id=request.client_submission_id,
+                payload=request.model_dump(),
+            )
+        except IdempotencyPayloadMismatch as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "IDEMPOTENCY_PAYLOAD_MISMATCH"},
+            ) from exc
+        try:
+            active_response = active_submission_json_response(submission)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if active_response is not None and active_response["status"] == "IN_PROGRESS":
+            return JSONResponse(status_code=202, content=active_response)
+        if active_response is not None:
+            return active_response
     try:
         feedback_result = await essay_feedback(
             runner,
@@ -1047,52 +1082,62 @@ async def submit_first_draft(
         except Exception:
             pass
 
-    submitted_at = utcnow()
-    essay.status = REVISION_REQUESTED_STATUS
-    essay.updated_at = submitted_at
-    essay.last_version_submitted_at = submitted_at
-    version = EssayVersion(
-        essay_id=essay.id,
-        version_label=get_version_label_for_round(1),
-        round_index=1,
-        content=request.draft,
-        ai_feedback=feedback.model_dump(),
-        llm_call_log_id=feedback_result.log.id if feedback_result.log else None,
-        created_at=submitted_at,
-    )
-    session.add(essay)
-    session.add(version)
-    try:
-        session.flush()
-    except IntegrityError as exc:
-        session.rollback()
-        raise HTTPException(status_code=409, detail="first draft already submitted") from exc
-    try:
-        scaffold = resolve_essay_scaffold(essay)
-    except (KeyError, TypeError, ValueError):
-        scaffold = None
-    _record_event(
-        session,
-        "prewriting_first_draft_submitted",
+    response_payload = save_prewriting_first_draft_feedback_result(
+        session=session,
         essay=essay,
-        student=student,
-        payload={"step": "first_draft", **_scaffold_event_payload(scaffold)},
+        draft=request.draft,
+        feedback=feedback,
+        llm_log=feedback_result.log,
     )
-    apply_ability_delta(
-        session,
-        ability,
-        draft_ability_deltas(len(feedback.improvements)),
-        TaskType.essay,
-        version.id,
-    )
-    session.add(ability)
-    essay_payload = _essay_payload(essay)
-    version_payload = version.model_dump()
-    version_payload["reaction"] = feedback_reaction_value(
-        session,
-        student.id,
-        "essay_draft",
-        version.id,
-    )
+    if submission is not None:
+        first_draft_id = str(response_payload["first_draft"]["id"])
+        finalize_submission_with_reservation(
+            session=session,
+            submission_id=submission.id,
+            terminal_status="completed",
+            saved_result=True,
+            essay_version_id=first_draft_id,
+            result_fetch_url=f"/api/essays/{essay.id}",
+            llm_call_log_id=feedback_result.log.id if feedback_result.log else None,
+        )
     session.commit()
-    return {"essay": essay_payload, "first_draft": version_payload, "feedback": feedback}
+    return response_payload
+
+
+@router.post("/api/essays/{essay_id}/first-draft/stream-feedback")
+async def stream_submit_first_draft_feedback(
+    essay_id: str,
+    payload: FirstDraftSubmit,
+    session: Session = Depends(get_db_session),
+    session_factory: SessionFactory = Depends(get_session_factory),
+    runner: AITaskRunner = Depends(get_ai_task_runner),
+    settings: Settings = Depends(get_settings),
+    context: ParentContext | None = Depends(require_auth_mode_state_change),
+):
+    essay = require_essay_for_auth_mode(session, settings, context, essay_id)
+    _prewriting_open(essay)
+    existing_first_draft = session.exec(
+        select(EssayVersion).where(
+            EssayVersion.essay_id == essay_id,
+            EssayVersion.version_label == "first_draft",
+        )
+    ).first()
+    if existing_first_draft:
+        raise HTTPException(status_code=409, detail="first draft already submitted")
+    stream = build_prewriting_first_draft_feedback_stream(
+        request_session=session,
+        session_factory=session_factory,
+        runner=runner,
+        settings=settings,
+        essay=essay,
+        payload=payload,
+    )
+    return StreamingResponse(
+        stream,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
