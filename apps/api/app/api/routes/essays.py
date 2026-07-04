@@ -38,6 +38,7 @@ from app.services.essay_archive import (
     latest_essay_version,
     mark_stale_pending_attempts_failed,
 )
+from app.services.essay_feedback_submission import IdempotencyPayloadMismatch
 from app.services.essay_workflow import (
     ASSESSMENT_ESSAY_STATUS,
     REVISION_REQUESTED_STATUS,
@@ -402,6 +403,11 @@ async def create_essay(
             student_id=student_id,
         )
         feedback = feedback_result.output
+    except IdempotencyPayloadMismatch as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "IDEMPOTENCY_PAYLOAD_MISMATCH"},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception:

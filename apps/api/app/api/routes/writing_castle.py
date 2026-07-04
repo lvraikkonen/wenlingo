@@ -37,6 +37,7 @@ from app.services.ai_tasks import (
     writing_topic_analysis,
 )
 from app.services.essay_archive import get_version_label_for_round
+from app.services.essay_feedback_submission import IdempotencyPayloadMismatch
 from app.services.essay_workflow import draft_ability_deltas
 from app.services.writing_castle_state import (
     LEGACY_SCHEMA_VERSION,
@@ -1013,6 +1014,11 @@ async def submit_first_draft(
             student_id=essay.student_id,
         )
         feedback = feedback_result.output
+    except IdempotencyPayloadMismatch as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "IDEMPOTENCY_PAYLOAD_MISMATCH"},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception:
