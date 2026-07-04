@@ -28,7 +28,6 @@ from app.domain.models import (
     Essay,
     EssayFeedbackSubmission,
     EssayVersion,
-    LLMCallLog,
     PrewritingAIJob,
     StudentProfile,
     WritingTopicIdeaBatch,
@@ -504,50 +503,7 @@ def _retained_material_card_count(cards: list[dict[str, Any]]) -> int:
     return sum(1 for card in cards if not card.get("deleted") and not card.get("placeholder"))
 
 
-def _latest_llm_call_log_id(
-    *,
-    session: Session,
-    student_id: str,
-    task_name: str,
-) -> str | None:
-    log = session.exec(
-        select(LLMCallLog)
-        .where(LLMCallLog.student_id == student_id)
-        .where(LLMCallLog.task_name == task_name)
-        .order_by(LLMCallLog.created_at.desc())
-    ).first()
-    return log.id if log is not None else None
-
-
-async def execute_material_card_generation(
-    *,
-    session: Session,
-    essay: Essay,
-    runner: AITaskRunner,
-    settings: Settings,
-    regenerate: bool = False,
-) -> str:
-    """Save complete validated material cards and return result_ref_id."""
-    _ = settings
-    scaffold = _resolved_scaffold_or_legacy(essay)
-    student, _ability = _student_and_ability(session, essay.student_id)
-    material = normalize_material_state(essay.material_card)
-    cards_status = material["step_state"].get("cards_status")
-    if cards_status == "generated" and not regenerate:
-        essay.material_card = material
-        session.add(essay)
-        session.flush()
-        return essay.id
-    if cards_status in {"edited", "confirmed"}:
-        raise HTTPException(status_code=409, detail="material cards already saved")
-
-    result = await material_card_generation(
-        runner,
-        material["answers"],
-        session=session,
-        student_id=essay.student_id,
-        scaffold=scaffold,
-    )
+def _material_card_generation_result_cards(result) -> list[dict[str, Any]]:
     cards = []
     for order, card in enumerate(result.output.cards, start=1):
         cards.append(
@@ -558,6 +514,87 @@ async def execute_material_card_generation(
                 "child_edited": False,
             }
         )
+    return cards
+
+
+def _outline_generation_result_sections(result) -> list[dict[str, Any]]:
+    return [
+        {**section.model_dump(), "child_edited": False}
+        for section in result.output.sections
+    ]
+
+
+def _prepare_material_card_generation_inputs(
+    *,
+    essay: Essay,
+    regenerate: bool = False,
+) -> dict[str, Any]:
+    _prewriting_open(essay)
+    scaffold = _resolved_scaffold_or_legacy(essay)
+    material = normalize_material_state(essay.material_card)
+    cards_status = material["step_state"].get("cards_status")
+    if cards_status == "generated" and not regenerate:
+        return {
+            "already_done": True,
+            "student_id": essay.student_id,
+            "material": material,
+            "scaffold": deepcopy(scaffold),
+        }
+    if cards_status in {"edited", "confirmed"}:
+        raise HTTPException(status_code=409, detail="material cards already saved")
+    return {
+        "already_done": False,
+        "student_id": essay.student_id,
+        "answers": deepcopy(material["answers"]),
+        "scaffold": deepcopy(scaffold),
+    }
+
+
+def _prepare_outline_generation_inputs(
+    *,
+    essay: Essay,
+    regenerate: bool = False,
+) -> dict[str, Any]:
+    _prewriting_open(essay)
+    scaffold = _resolved_scaffold_or_legacy(essay)
+    outline = normalize_outline_state(essay.outline)
+    outline_status = outline["step_state"].get("outline_status")
+    if outline_status == "generated" and not regenerate:
+        return {
+            "already_done": True,
+            "student_id": essay.student_id,
+            "outline": outline,
+            "scaffold": deepcopy(scaffold),
+        }
+    if outline_status in {"skipped", "edited", "confirmed"}:
+        raise HTTPException(status_code=409, detail="outline already saved")
+    material = normalize_material_state(essay.material_card)
+    return {
+        "already_done": False,
+        "student_id": essay.student_id,
+        "cards": deepcopy(material["cards"]),
+        "scaffold": deepcopy(scaffold),
+    }
+
+
+def _save_material_card_generation_result(
+    *,
+    session: Session,
+    essay: Essay,
+    cards: list[dict[str, Any]],
+    scaffold: dict[str, Any] | None,
+    regenerate: bool = False,
+) -> str:
+    student, _ability = _student_and_ability(session, essay.student_id)
+    material = normalize_material_state(essay.material_card)
+    cards_status = material["step_state"].get("cards_status")
+    if cards_status == "generated" and not regenerate:
+        essay.material_card = material
+        session.add(essay)
+        session.flush()
+        return essay.id
+    if cards_status in {"edited", "confirmed"}:
+        raise HTTPException(status_code=409, detail="material cards already saved")
     try:
         essay.material_card = merge_material_cards(
             material,
@@ -584,17 +621,14 @@ async def execute_material_card_generation(
     return essay.id
 
 
-async def execute_outline_generation(
+def _save_outline_generation_result(
     *,
     session: Session,
     essay: Essay,
-    runner: AITaskRunner,
-    settings: Settings,
+    sections: list[dict[str, Any]],
+    scaffold: dict[str, Any] | None,
     regenerate: bool = False,
 ) -> str:
-    """Save complete validated outline and return result_ref_id."""
-    _ = settings
-    scaffold = _resolved_scaffold_or_legacy(essay)
     student, _ability = _student_and_ability(session, essay.student_id)
     outline = normalize_outline_state(essay.outline)
     outline_status = outline["step_state"].get("outline_status")
@@ -605,19 +639,7 @@ async def execute_outline_generation(
         return essay.id
     if outline_status in {"skipped", "edited", "confirmed"}:
         raise HTTPException(status_code=409, detail="outline already saved")
-
     material = normalize_material_state(essay.material_card)
-    result = await outline_generation(
-        runner,
-        material["cards"],
-        session=session,
-        student_id=essay.student_id,
-        scaffold=scaffold,
-    )
-    sections = [
-        {**section.model_dump(), "child_edited": False}
-        for section in result.output.sections
-    ]
     try:
         essay.outline = merge_outline_sections(
             outline,
@@ -642,6 +664,72 @@ async def execute_outline_generation(
     session.add(essay)
     session.flush()
     return essay.id
+
+
+async def execute_material_card_generation(
+    *,
+    session: Session,
+    essay: Essay,
+    runner: AITaskRunner,
+    settings: Settings,
+    regenerate: bool = False,
+) -> str:
+    """Save complete validated material cards and return result_ref_id."""
+    _ = settings
+    inputs = _prepare_material_card_generation_inputs(essay=essay, regenerate=regenerate)
+    if inputs["already_done"]:
+        essay.material_card = inputs["material"]
+        session.add(essay)
+        session.flush()
+        return essay.id
+
+    result = await material_card_generation(
+        runner,
+        inputs["answers"],
+        session=session,
+        student_id=inputs["student_id"],
+        scaffold=inputs["scaffold"],
+    )
+    return _save_material_card_generation_result(
+        session=session,
+        essay=essay,
+        cards=_material_card_generation_result_cards(result),
+        scaffold=inputs["scaffold"],
+        regenerate=regenerate,
+    )
+
+
+async def execute_outline_generation(
+    *,
+    session: Session,
+    essay: Essay,
+    runner: AITaskRunner,
+    settings: Settings,
+    regenerate: bool = False,
+) -> str:
+    """Save complete validated outline and return result_ref_id."""
+    _ = settings
+    inputs = _prepare_outline_generation_inputs(essay=essay, regenerate=regenerate)
+    if inputs["already_done"]:
+        essay.outline = inputs["outline"]
+        session.add(essay)
+        session.flush()
+        return essay.id
+
+    result = await outline_generation(
+        runner,
+        inputs["cards"],
+        session=session,
+        student_id=inputs["student_id"],
+        scaffold=inputs["scaffold"],
+    )
+    return _save_outline_generation_result(
+        session=session,
+        essay=essay,
+        sections=_outline_generation_result_sections(result),
+        scaffold=inputs["scaffold"],
+        regenerate=regenerate,
+    )
 
 
 def _prewriting_job_response(job: PrewritingAIJob) -> dict[str, Any]:
@@ -709,7 +797,6 @@ async def _mark_prewriting_job_failed(
             error_message=error_message,
             llm_call_log_id=llm_call_log_id,
         )
-        next_progress_snapshot(session=session, job_id=job_id, stage="failed", status="failed")
 
 
 async def _run_prewriting_job(
@@ -723,6 +810,7 @@ async def _run_prewriting_job(
     settings: Settings,
 ) -> None:
     llm_call_log_id: str | None = None
+    result_ref_id: str | None = None
     try:
         with session_factory() as session:
             heartbeat = heartbeat_job(session=session, job_id=job_id, worker_id=worker_id)
@@ -742,36 +830,62 @@ async def _run_prewriting_job(
             essay = session.get(Essay, essay_id)
             if essay is None:
                 raise ValueError("writing castle essay not found")
-            _prewriting_open(essay)
-            before_log_id = _latest_llm_call_log_id(
-                session=session,
-                student_id=essay.student_id,
-                task_name=task_name,
-            )
             if task_name == "material_card_generation":
-                result_ref_id = await execute_material_card_generation(
-                    session=session,
-                    essay=essay,
-                    runner=runner,
-                    settings=settings,
-                )
+                inputs = _prepare_material_card_generation_inputs(essay=essay)
             elif task_name == "outline_generation":
-                result_ref_id = await execute_outline_generation(
-                    session=session,
-                    essay=essay,
-                    runner=runner,
-                    settings=settings,
-                )
+                inputs = _prepare_outline_generation_inputs(essay=essay)
             else:
                 raise ValueError("unsupported prewriting job task")
-            after_log_id = _latest_llm_call_log_id(
-                session=session,
-                student_id=essay.student_id,
-                task_name=task_name,
-            )
-            if after_log_id != before_log_id:
-                llm_call_log_id = after_log_id
-            session.commit()
+            if inputs["already_done"]:
+                result_ref_id = essay.id
+
+        if result_ref_id is None:
+            with session_factory() as session:
+                if task_name == "material_card_generation":
+                    result = await material_card_generation(
+                        runner,
+                        inputs["answers"],
+                        session=session,
+                        student_id=inputs["student_id"],
+                        scaffold=inputs["scaffold"],
+                    )
+                    complete_result = _material_card_generation_result_cards(result)
+                else:
+                    result = await outline_generation(
+                        runner,
+                        inputs["cards"],
+                        session=session,
+                        student_id=inputs["student_id"],
+                        scaffold=inputs["scaffold"],
+                    )
+                    complete_result = _outline_generation_result_sections(result)
+                log = getattr(result, "log", None)
+                llm_call_log_id = log.id if log is not None else None
+                session.commit()
+            with session_factory() as session:
+                job = session.get(PrewritingAIJob, job_id)
+                if job is None or job.status != "running" or job.locked_by != worker_id:
+                    return
+                essay = session.get(Essay, essay_id)
+                if essay is None:
+                    raise ValueError("writing castle essay not found")
+                _prewriting_open(essay)
+                if task_name == "material_card_generation":
+                    result_ref_id = _save_material_card_generation_result(
+                        session=session,
+                        essay=essay,
+                        cards=complete_result,
+                        scaffold=inputs["scaffold"],
+                    )
+                else:
+                    result_ref_id = _save_outline_generation_result(
+                        session=session,
+                        essay=essay,
+                        sections=complete_result,
+                        scaffold=inputs["scaffold"],
+                    )
+                session.commit()
+
         with session_factory() as session:
             complete_job(
                 session=session,
@@ -779,12 +893,6 @@ async def _run_prewriting_job(
                 result_ref_type=PREWRITING_JOB_RESULT_REF_TYPE,
                 result_ref_id=result_ref_id,
                 llm_call_log_id=llm_call_log_id,
-            )
-            next_progress_snapshot(
-                session=session,
-                job_id=job_id,
-                stage="completed",
-                status="completed",
             )
     except HTTPException as exc:
         await _mark_prewriting_job_failed(

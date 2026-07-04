@@ -140,8 +140,6 @@ def acquire_job_lease(
     if has_active_lease:
         return None
     job.status = "running"
-    if job.stage == "queued":
-        job.stage = "leased"
     job.locked_by = worker_id
     job.lease_expires_at = current_time + lease_ttl
     job.last_heartbeat_at = current_time
@@ -212,6 +210,7 @@ def complete_job(
         raise ValueError("prewriting job not found")
     job.status = "completed"
     job.stage = "completed"
+    job.progress_event_seq += 1
     job.completed_at = current_time
     job.result_ref_type = result_ref_type
     job.result_ref_id = result_ref_id
@@ -242,6 +241,7 @@ def fail_job(
         raise ValueError("prewriting job not found")
     job.status = "failed"
     job.stage = "failed"
+    job.progress_event_seq += 1
     job.completed_at = current_time
     job.error_code = error_code
     job.error_message = error_message
