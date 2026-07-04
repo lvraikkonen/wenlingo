@@ -5,6 +5,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from app.domain.models import DailyTaskLimitCounter, EssayFeedbackSubmission
 from app.services.essay_feedback_submission import (
     IdempotencyPayloadMismatch,
+    begin_submission_result_save,
     build_submission_payload_hash,
     cleanup_stale_submissions,
     create_or_get_submission,
@@ -222,6 +223,59 @@ def test_mark_submission_status_rejects_terminal_status_without_finalizing_reser
     assert counter.consumed_count == 0
     assert counter.released_count == 0
     assert counter.reserved_count == 1
+
+
+def test_begin_submission_result_save_marks_active_submission_saving_result(session):
+    submission = create_or_get_submission(
+        session=session,
+        student_id="student-1",
+        essay_id=None,
+        task_name="essay_feedback",
+        route_scope="direct_draft",
+        client_submission_id="submission-1",
+        payload={"title": "A", "draft": "draft A"},
+    )
+    mark_submission_status(
+        session=session,
+        submission_id=submission.id,
+        status="streaming_started",
+    )
+
+    updated = begin_submission_result_save(
+        session=session,
+        submission_id=submission.id,
+    )
+
+    assert updated.status == "saving_result"
+    assert updated.completed_at is None
+
+
+def test_begin_submission_result_save_rejects_terminal_submission(session):
+    submission = create_or_get_submission(
+        session=session,
+        student_id="student-1",
+        essay_id=None,
+        task_name="essay_feedback",
+        route_scope="direct_draft",
+        client_submission_id="submission-1",
+        payload={"title": "A", "draft": "draft A"},
+    )
+    finalize_submission_once(
+        session=session,
+        submission_id=submission.id,
+        status="expired_released",
+        essay_version_id=None,
+        result_fetch_url="",
+    )
+
+    with pytest.raises(ValueError, match="terminal"):
+        begin_submission_result_save(
+            session=session,
+            submission_id=submission.id,
+        )
+
+    session.refresh(submission)
+    assert submission.status == "expired_released"
 
 
 def test_finalize_submission_once_is_idempotent(session):

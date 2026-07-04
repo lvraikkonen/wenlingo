@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
@@ -22,6 +23,8 @@ from app.services.essay_feedback_persistence import (
 )
 from app.services.essay_feedback_submission import (
     IdempotencyPayloadMismatch,
+    SubmissionAlreadyTerminal,
+    begin_submission_result_save,
     create_or_get_submission,
     finalize_submission_with_reservation,
     mark_submission_status,
@@ -104,6 +107,10 @@ class StreamingAlreadyInProgress(Exception):
         super().__init__("essay feedback submission is already in progress")
         self.submission_id = submission_id
         self.fetch_url = fetch_url
+
+
+class EssayFeedbackDailyLimitReached(Exception):
+    """Raised when the essay-feedback ledger cannot reserve a daily-limit slot."""
 
 
 class StreamingSubmissionCompleted(Exception):
@@ -484,6 +491,12 @@ class StreamingBackendTask:
             if disconnect_task is not None and not disconnect_task.done():
                 disconnect_task.cancel()
             provider_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await provider_task
+            aclose = getattr(provider_iterator, "aclose", None)
+            if callable(aclose):
+                with suppress(Exception):
+                    await aclose()
             raise self._timeout_error(seen_provider_event=seen_provider_event)
 
     def _provider_wait_timeout(self, *, seen_provider_event: bool) -> float | None:
@@ -659,6 +672,22 @@ class StreamingBackendTask:
 
         if self.session_factory and self.save_context:
             with self.session_factory() as session:
+                try:
+                    begin_submission_result_save(
+                        session=session,
+                        submission_id=self.submission_id,
+                    )
+                except SubmissionAlreadyTerminal as exc:
+                    await self._finalize_failure(
+                        status=(
+                            "provider_failed_after_visible_content"
+                            if self.first_visible_content_at is not None
+                            else "provider_failed_before_visible_content"
+                        ),
+                        error_code="SUBMISSION_ALREADY_TERMINAL",
+                        error_message=str(exc),
+                    )
+                    return
                 log = self._create_llm_log(session, feedback=feedback, latency_ms=latency_ms)
                 save_result = self._save_feedback_result(session, feedback=feedback, llm_log=log)
                 first_draft = save_result.get("first_draft", {})
@@ -1048,7 +1077,7 @@ def _reserve_submission_limit(
         timezone_name=settings.llm_daily_limit_timezone,
     )
     if not reservation.reserved:
-        raise ValueError("daily limit reached")
+        raise EssayFeedbackDailyLimitReached("daily limit reached")
     row = session.get(EssayFeedbackSubmission, submission_id)
     if row is None:
         raise ValueError("essay feedback submission not found")
@@ -1213,6 +1242,11 @@ def build_direct_draft_feedback_stream(
             submission_id=active.submission_id,
             fetch_url=active.fetch_url,
         )
+    except EssayFeedbackDailyLimitReached as exc:
+        raise HTTPException(
+            status_code=429,
+            detail={"code": "DAILY_LIMIT_REACHED", "message": str(exc)},
+        ) from exc
 
     provider = _provider_for_stream(settings)
     backend_task = _build_backend_task(
@@ -1268,6 +1302,11 @@ def build_prewriting_first_draft_feedback_stream(
             submission_id=active.submission_id,
             fetch_url=active.fetch_url,
         )
+    except EssayFeedbackDailyLimitReached as exc:
+        raise HTTPException(
+            status_code=429,
+            detail={"code": "DAILY_LIMIT_REACHED", "message": str(exc)},
+        ) from exc
 
     provider = _provider_for_stream(settings)
     backend_task = _build_backend_task(

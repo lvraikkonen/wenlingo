@@ -1,7 +1,19 @@
 import asyncio
 
-from app.services.essay_feedback_streaming import SseMirror, StreamingBackendTask
+from sqlmodel import Session, select
+
+from app.domain.models import EssayVersion, LLMCallLog
+from app.services.essay_feedback_streaming import (
+    SseMirror,
+    StreamingBackendTask,
+    StreamingSaveContext,
+)
+from app.services.essay_feedback_submission import (
+    create_or_get_submission,
+    finalize_submission_once,
+)
 from app.services.llm_provider import LLMProviderStreamEvent
+from tests.conftest import create_authenticated_family
 
 
 VALID_STREAM_EVENTS = [
@@ -321,6 +333,58 @@ async def test_sse_mirror_disconnect_after_preview_does_not_cancel_backend_task(
         == "client_disconnected_after_visible_content_completed"
     )
     assert backend_task.official_result_saved is True
+
+
+async def test_terminal_submission_before_stream_save_does_not_create_official_result(
+    session,
+):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    payload = {
+        "title": "我的一天",
+        "draft": "今天我去了公园。后来我观察了一棵树。最后我很开心。",
+        "entry": "existing_draft",
+        "client_submission_id": "stream-terminal-before-save",
+    }
+    submission = create_or_get_submission(
+        session=session,
+        student_id=student.id,
+        essay_id=None,
+        task_name="essay_feedback",
+        route_scope="direct_draft",
+        client_submission_id="stream-terminal-before-save",
+        payload=payload,
+    )
+    finalize_submission_once(
+        session=session,
+        submission_id=submission.id,
+        status="expired_released",
+        essay_version_id=None,
+        result_fetch_url="",
+    )
+    session.commit()
+    bind = session.get_bind()
+    task = StreamingBackendTask(
+        provider=FakeStreamingProvider(VALID_STREAM_EVENTS),
+        payload={"title": payload["title"], "draft": payload["draft"]},
+        submission_id=submission.id,
+        save_context=StreamingSaveContext(
+            route_scope="direct_draft",
+            student_id=student.id,
+            title=payload["title"],
+            draft=payload["draft"],
+        ),
+        session_factory=lambda: Session(bind),
+    )
+
+    await task.run_to_terminal()
+
+    session.refresh(submission)
+    assert submission.status == "expired_released"
+    assert task.official_result_saved is False
+    assert task.error_code == "SUBMISSION_ALREADY_TERMINAL"
+    assert len(session.exec(select(EssayVersion)).all()) == 0
+    assert len(session.exec(select(LLMCallLog)).all()) == 1
 
 
 async def test_sse_mirror_disconnect_before_preview_cancels_or_releases():

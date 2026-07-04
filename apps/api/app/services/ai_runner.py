@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import json
 from time import perf_counter
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -29,6 +29,7 @@ from app.services.llm_usage import (
 
 
 T = TypeVar("T", bound=BaseModel)
+DailyLimitReservationOwner = Literal["runner", "submission_ledger"]
 ERROR_MESSAGE_MAX_CHARS = 300
 
 
@@ -628,9 +629,13 @@ async def run_ai_task(
     primary_provider: LLMProvider,
     fallback_provider: LLMProvider,
     daily_limit: int | None = None,
-    daily_limit_reservation_owner: str = "runner",
+    daily_limit_reservation_owner: DailyLimitReservationOwner = "runner",
     prompt_version: str = "",
 ) -> AITaskResult[T]:
+    if daily_limit_reservation_owner not in {"runner", "submission_ledger"}:
+        raise ValueError(
+            "daily_limit_reservation_owner must be 'runner' or 'submission_ledger'"
+        )
     route = resolve_task_route(settings, task_name, prompt_key)
     effective_limit = daily_limit if daily_limit is not None else route.task.daily_limit
     effective_prompt_version = prompt_version or route.prompt_key

@@ -1,7 +1,7 @@
 from copy import deepcopy
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
@@ -41,12 +41,15 @@ from app.services.ai_tasks import (
 )
 from app.services.essay_feedback_persistence import save_prewriting_first_draft_feedback_result
 from app.services.essay_feedback_streaming import (
+    EssayFeedbackDailyLimitReached,
     active_submission_json_response,
     build_prewriting_first_draft_feedback_stream,
     reserve_submission_daily_limit_if_needed,
 )
 from app.services.essay_feedback_submission import (
     IdempotencyPayloadMismatch,
+    SubmissionAlreadyTerminal,
+    begin_submission_result_save,
     build_submission_payload_hash,
     create_or_get_submission,
     finalize_submission_with_reservation,
@@ -205,6 +208,41 @@ def _prewriting_open(essay: Essay) -> None:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if essay.status not in OPEN_PREWRITING_STATUSES:
         raise HTTPException(status_code=404, detail="writing castle essay not found")
+
+
+def _daily_limit_reached_http_exception(exc: EssayFeedbackDailyLimitReached) -> HTTPException:
+    return HTTPException(
+        status_code=429,
+        detail={"code": "DAILY_LIMIT_REACHED", "message": str(exc)},
+    )
+
+
+def _release_submission_after_failed_json(
+    *,
+    session: Session,
+    submission_id: str | None,
+    error_code: str,
+    error_message: str,
+    llm_call_log_id: str | None = None,
+) -> None:
+    if submission_id is None:
+        return
+    try:
+        finalize_submission_with_reservation(
+            session=session,
+            submission_id=submission_id,
+            terminal_status="failed_released",
+            saved_result=False,
+            essay_version_id=None,
+            result_fetch_url="",
+            llm_call_log_id=llm_call_log_id,
+            error_code=error_code,
+            error_message=error_message,
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
 
 
 def _existing_feedback_submission_for_payload(
@@ -1087,12 +1125,16 @@ async def submit_first_draft(
                 status_code=409,
                 detail={"code": "IDEMPOTENCY_PAYLOAD_MISMATCH"},
             ) from exc
-    reserve_submission_daily_limit_if_needed(
-        session=session,
-        settings=settings,
-        student_id=essay.student_id,
-        submission=submission,
-    )
+    try:
+        reserve_submission_daily_limit_if_needed(
+            session=session,
+            settings=settings,
+            student_id=essay.student_id,
+            submission=submission,
+        )
+    except EssayFeedbackDailyLimitReached as exc:
+        session.rollback()
+        raise _daily_limit_reached_http_exception(exc) from exc
     if submission.status == "created":
         submission = mark_submission_status(
             session=session,
@@ -1123,9 +1165,22 @@ async def submit_first_draft(
             detail={"code": "IDEMPOTENCY_PAYLOAD_MISMATCH"},
         ) from exc
     except ValueError as exc:
+        session.rollback()
+        _release_submission_after_failed_json(
+            session=session,
+            submission_id=submission.id if submission is not None else None,
+            error_code="ESSAY_FEEDBACK_VALUE_ERROR",
+            error_message=str(exc),
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception:
         session.rollback()
+        _release_submission_after_failed_json(
+            session=session,
+            submission_id=submission.id if submission is not None else None,
+            error_code="ESSAY_FEEDBACK_PROVIDER_ERROR",
+            error_message="essay feedback provider failed",
+        )
         try:
             record_product_event(
                 session,
@@ -1150,13 +1205,35 @@ async def submit_first_draft(
         except Exception:
             pass
 
-    response_payload = save_prewriting_first_draft_feedback_result(
-        session=session,
-        essay=essay,
-        draft=request.draft,
-        feedback=feedback,
-        llm_log=feedback_result.log,
-    )
+    try:
+        if submission is not None:
+            begin_submission_result_save(
+                session=session,
+                submission_id=submission.id,
+            )
+        response_payload = save_prewriting_first_draft_feedback_result(
+            session=session,
+            essay=essay,
+            draft=request.draft,
+            feedback=feedback,
+            llm_log=feedback_result.log,
+        )
+    except SubmissionAlreadyTerminal as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "SUBMISSION_ALREADY_TERMINAL"},
+        ) from exc
+    except Exception:
+        session.rollback()
+        _release_submission_after_failed_json(
+            session=session,
+            submission_id=submission.id if submission is not None else None,
+            error_code="ESSAY_FEEDBACK_SAVE_FAILED",
+            error_message="essay feedback save failed",
+            llm_call_log_id=feedback_result.log.id if feedback_result.log else None,
+        )
+        raise
     if submission is not None:
         first_draft_id = str(response_payload["first_draft"]["id"])
         finalize_submission_with_reservation(
@@ -1176,66 +1253,67 @@ async def submit_first_draft(
 async def stream_submit_first_draft_feedback(
     essay_id: str,
     payload: FirstDraftSubmit,
-    session: Session = Depends(get_db_session),
+    request: Request,
     session_factory: SessionFactory = Depends(get_session_factory),
     runner: AITaskRunner = Depends(get_ai_task_runner),
     settings: Settings = Depends(get_settings),
-    context: ParentContext | None = Depends(require_auth_mode_state_change),
 ):
-    essay = require_essay_for_auth_mode(session, settings, context, essay_id)
-    try:
-        existing_submission = _existing_feedback_submission_for_payload(
-            session=session,
-            essay=essay,
-            route_scope="prewriting_first_draft",
-            client_submission_id=payload.client_submission_id,
-            payload=payload.model_dump(),
-        )
-    except IdempotencyPayloadMismatch as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "IDEMPOTENCY_PAYLOAD_MISMATCH"},
-        ) from exc
-    if existing_submission is not None:
+    with session_factory() as session:
+        context = require_auth_mode_state_change(request, db=session, settings=settings)
+        essay = require_essay_for_auth_mode(session, settings, context, essay_id)
         try:
-            existing_response = active_submission_json_response(existing_submission)
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        if existing_response is not None:
-            stream = build_prewriting_first_draft_feedback_stream(
-                request_session=session,
-                session_factory=session_factory,
-                runner=runner,
-                settings=settings,
+            existing_submission = _existing_feedback_submission_for_payload(
+                session=session,
                 essay=essay,
-                payload=payload,
+                route_scope="prewriting_first_draft",
+                client_submission_id=payload.client_submission_id,
+                payload=payload.model_dump(),
             )
-            return StreamingResponse(
-                stream,
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache, no-transform",
-                    "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no",
-                },
+        except IdempotencyPayloadMismatch as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "IDEMPOTENCY_PAYLOAD_MISMATCH"},
+            ) from exc
+        if existing_submission is not None:
+            try:
+                existing_response = active_submission_json_response(existing_submission)
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            if existing_response is not None:
+                stream = build_prewriting_first_draft_feedback_stream(
+                    request_session=session,
+                    session_factory=session_factory,
+                    runner=runner,
+                    settings=settings,
+                    essay=essay,
+                    payload=payload,
+                )
+                return StreamingResponse(
+                    stream,
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache, no-transform",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                    },
+                )
+        _prewriting_open(essay)
+        existing_first_draft = session.exec(
+            select(EssayVersion).where(
+                EssayVersion.essay_id == essay_id,
+                EssayVersion.version_label == "first_draft",
             )
-    _prewriting_open(essay)
-    existing_first_draft = session.exec(
-        select(EssayVersion).where(
-            EssayVersion.essay_id == essay_id,
-            EssayVersion.version_label == "first_draft",
+        ).first()
+        if existing_first_draft:
+            raise HTTPException(status_code=409, detail="first draft already submitted")
+        stream = build_prewriting_first_draft_feedback_stream(
+            request_session=session,
+            session_factory=session_factory,
+            runner=runner,
+            settings=settings,
+            essay=essay,
+            payload=payload,
         )
-    ).first()
-    if existing_first_draft:
-        raise HTTPException(status_code=409, detail="first draft already submitted")
-    stream = build_prewriting_first_draft_feedback_stream(
-        request_session=session,
-        session_factory=session_factory,
-        runner=runner,
-        settings=settings,
-        essay=essay,
-        payload=payload,
-    )
     return StreamingResponse(
         stream,
         media_type="text/event-stream",

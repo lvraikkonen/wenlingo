@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
-from app.api.deps import get_db_session
+from app.api.deps import get_db_session, get_session_factory
 from app.domain.enums import StudentPersona
 from app.domain.models import (
     AbilityProfile,
@@ -53,6 +53,9 @@ def force_test_auth_settings(monkeypatch, request):
 def client(session, force_mock_llm_provider):
     app = create_app()
     app.dependency_overrides[get_db_session] = lambda: session
+    app.dependency_overrides[get_session_factory] = lambda: (
+        lambda: Session(session.get_bind())
+    )
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()

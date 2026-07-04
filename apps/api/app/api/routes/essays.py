@@ -2,7 +2,7 @@ from datetime import timedelta, timezone
 from hashlib import sha256
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import update
@@ -46,12 +46,15 @@ from app.services.essay_archive import (
 )
 from app.services.essay_feedback_persistence import save_direct_draft_feedback_result
 from app.services.essay_feedback_streaming import (
+    EssayFeedbackDailyLimitReached,
     active_submission_json_response,
     build_direct_draft_feedback_stream,
     reserve_submission_daily_limit_if_needed,
 )
 from app.services.essay_feedback_submission import (
     IdempotencyPayloadMismatch,
+    SubmissionAlreadyTerminal,
+    begin_submission_result_save,
     create_or_get_submission,
     finalize_submission_with_reservation,
     mark_submission_status,
@@ -71,6 +74,41 @@ ACTIVE_REVISION_ATTEMPT_STATUSES = (
     COMPLETING_COMPARISON_STATUS,
     "completed",
 )
+
+
+def _daily_limit_reached_http_exception(exc: EssayFeedbackDailyLimitReached) -> HTTPException:
+    return HTTPException(
+        status_code=429,
+        detail={"code": "DAILY_LIMIT_REACHED", "message": str(exc)},
+    )
+
+
+def _release_submission_after_failed_json(
+    *,
+    session: Session,
+    submission_id: str | None,
+    error_code: str,
+    error_message: str,
+    llm_call_log_id: str | None = None,
+) -> None:
+    if submission_id is None:
+        return
+    try:
+        finalize_submission_with_reservation(
+            session=session,
+            submission_id=submission_id,
+            terminal_status="failed_released",
+            saved_result=False,
+            essay_version_id=None,
+            result_fetch_url="",
+            llm_call_log_id=llm_call_log_id,
+            error_code=error_code,
+            error_message=error_message,
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
 
 
 class EssayCreate(BaseModel):
@@ -434,12 +472,16 @@ async def create_essay(
             return JSONResponse(status_code=202, content=active_response)
         if active_response is not None:
             return JSONResponse(status_code=200, content=active_response)
-        reserve_submission_daily_limit_if_needed(
-            session=session,
-            settings=settings,
-            student_id=student_id,
-            submission=submission,
-        )
+        try:
+            reserve_submission_daily_limit_if_needed(
+                session=session,
+                settings=settings,
+                student_id=student_id,
+                submission=submission,
+            )
+        except EssayFeedbackDailyLimitReached as exc:
+            session.rollback()
+            raise _daily_limit_reached_http_exception(exc) from exc
         if submission.status == "created":
             submission = mark_submission_status(
                 session=session,
@@ -472,9 +514,22 @@ async def create_essay(
             detail={"code": "IDEMPOTENCY_PAYLOAD_MISMATCH"},
         ) from exc
     except ValueError as exc:
+        session.rollback()
+        _release_submission_after_failed_json(
+            session=session,
+            submission_id=submission.id if submission is not None else None,
+            error_code="ESSAY_FEEDBACK_VALUE_ERROR",
+            error_message=str(exc),
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception:
         session.rollback()
+        _release_submission_after_failed_json(
+            session=session,
+            submission_id=submission.id if submission is not None else None,
+            error_code="ESSAY_FEEDBACK_PROVIDER_ERROR",
+            error_message="essay feedback provider failed",
+        )
         try:
             record_product_event(
                 session,
@@ -498,14 +553,36 @@ async def create_essay(
             )
         except Exception:
             pass
-    response_payload = save_direct_draft_feedback_result(
-        session=session,
-        student_id=student_id,
-        title=request.title,
-        draft=request.draft,
-        feedback=feedback,
-        llm_log=feedback_result.log,
-    )
+    try:
+        if submission is not None:
+            begin_submission_result_save(
+                session=session,
+                submission_id=submission.id,
+            )
+        response_payload = save_direct_draft_feedback_result(
+            session=session,
+            student_id=student_id,
+            title=request.title,
+            draft=request.draft,
+            feedback=feedback,
+            llm_log=feedback_result.log,
+        )
+    except SubmissionAlreadyTerminal as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "SUBMISSION_ALREADY_TERMINAL"},
+        ) from exc
+    except Exception:
+        session.rollback()
+        _release_submission_after_failed_json(
+            session=session,
+            submission_id=submission.id if submission is not None else None,
+            error_code="ESSAY_FEEDBACK_SAVE_FAILED",
+            error_message="essay feedback save failed",
+            llm_call_log_id=feedback_result.log.id if feedback_result.log else None,
+        )
+        raise
     if submission is not None:
         essay_id = str(response_payload["essay"]["id"])
         first_draft_id = str(response_payload["first_draft"]["id"])
@@ -526,24 +603,27 @@ async def create_essay(
 async def stream_create_essay_feedback(
     student_id: str,
     payload: EssayCreate,
-    session: Session = Depends(get_db_session),
+    request: Request,
     session_factory: SessionFactory = Depends(get_session_factory),
     runner: AITaskRunner = Depends(get_ai_task_runner),
     settings: Settings = Depends(get_settings),
-    context: ParentContext | None = Depends(require_auth_mode_state_change),
 ):
-    require_student_for_auth_mode(session, settings, context, student_id)
-    ability = session.exec(select(AbilityProfile).where(AbilityProfile.student_id == student_id)).first()
-    if not ability:
-        raise HTTPException(status_code=404, detail="student not found")
-    stream = build_direct_draft_feedback_stream(
-        request_session=session,
-        session_factory=session_factory,
-        runner=runner,
-        settings=settings,
-        student_id=student_id,
-        payload=payload,
-    )
+    with session_factory() as session:
+        context = require_auth_mode_state_change(request, db=session, settings=settings)
+        require_student_for_auth_mode(session, settings, context, student_id)
+        ability = session.exec(
+            select(AbilityProfile).where(AbilityProfile.student_id == student_id)
+        ).first()
+        if not ability:
+            raise HTTPException(status_code=404, detail="student not found")
+        stream = build_direct_draft_feedback_stream(
+            request_session=session,
+            session_factory=session_factory,
+            runner=runner,
+            settings=settings,
+            student_id=student_id,
+            payload=payload,
+        )
     return StreamingResponse(
         stream,
         media_type="text/event-stream",

@@ -194,6 +194,40 @@ async def test_run_ai_task_records_primary_success(session, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_ai_task_rejects_invalid_daily_limit_reservation_owner_before_provider_call(
+    session,
+):
+    primary = FakeProvider(
+        provider_name="primary",
+        model_name="cheap-fast",
+        actions=[response(message="hello there", provider="primary", model="cheap-fast")],
+    )
+    fallback = FakeProvider(provider_name="fallback", model_name="strong-default", actions=[])
+
+    with pytest.raises(ValueError, match="daily_limit_reservation_owner"):
+        await run_ai_task(
+            settings=Settings(llm_provider="mock", llm_daily_limit_enabled=True),
+            session=session,
+            task_type=TaskType.sentence,
+            task_name="sentence_upgrade_feedback",
+            student_id="student-1",
+            payload={"text": "原句"},
+            output_schema=TinyOutput,
+            prompt_key="sentence_upgrade_feedback",
+            input_summary="invalid owner",
+            deterministic_fallback_factory=local_fallback,
+            primary_provider=primary,
+            fallback_provider=fallback,
+            daily_limit_reservation_owner="typo",
+        )
+
+    assert primary.calls == []
+    assert fallback.calls == []
+    assert len(session.exec(select(DailyTaskLimitCounter)).all()) == 0
+    assert len(session.exec(select(LLMCallLog)).all()) == 0
+
+
+@pytest.mark.asyncio
 async def test_run_ai_task_aggregates_delegated_provider_cost_without_usage(
     session,
     monkeypatch,

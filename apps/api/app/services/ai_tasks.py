@@ -24,6 +24,7 @@ from app.services.llm_contracts import (
     WritingTopicIdeasResult,
     WritingTopicAnalysis,
 )
+from app.services.ai_runner import DailyLimitReservationOwner
 from app.services.ai_routing import TaskFinalStatus
 from app.services.llm_provider import LLMProvider
 from app.services.llm_usage_accounting import normalize_usage_and_cost
@@ -917,7 +918,7 @@ async def essay_feedback(
     session: Session | None = None,
     prompt_version: str = "",
     student_id: str | None = None,
-    daily_limit_reservation_owner: str = "runner",
+    daily_limit_reservation_owner: DailyLimitReservationOwner = "runner",
 ) -> LLMTaskResult[EssayFeedback]:
     ghostwriting = convert_ghostwriting_request(draft)
     if ghostwriting.blocked:

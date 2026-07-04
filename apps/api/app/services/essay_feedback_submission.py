@@ -17,6 +17,10 @@ class IdempotencyPayloadMismatch(Exception):
     """Raised when the same client_submission_id is reused with different content."""
 
 
+class SubmissionAlreadyTerminal(ValueError):
+    """Raised when an official result save races with terminal submission cleanup."""
+
+
 TRANSPORT_FIELDS = {"client_submission_id", "timestamp", "auth", "session"}
 ACTIVE_STATUSES = {
     "created",
@@ -208,6 +212,21 @@ def mark_submission_status(
         submission.error_code = error_code
     if error_message:
         submission.error_message = error_message
+    session.add(submission)
+    session.flush()
+    return submission
+
+
+def begin_submission_result_save(
+    *,
+    session: Session,
+    submission_id: str,
+) -> EssayFeedbackSubmission:
+    submission = _get_submission_for_update(session=session, submission_id=submission_id)
+    if _is_terminal(submission):
+        raise SubmissionAlreadyTerminal("essay feedback submission is already terminal")
+    submission.status = "saving_result"
+    submission.updated_at = utcnow()
     session.add(submission)
     session.flush()
     return submission

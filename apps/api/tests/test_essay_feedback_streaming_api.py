@@ -1,7 +1,9 @@
 from datetime import timedelta
 
+import pytest
 from sqlmodel import select
 
+from app.api.deps import get_ai_task_runner, get_db_session
 from app.core.config import Settings, get_settings
 from app.domain.models import (
     DailyTaskLimitCounter,
@@ -24,7 +26,7 @@ def _attach_active_daily_limit_reservation(session, student_id, submission):
     counter = DailyTaskLimitCounter(
         student_id=student_id,
         task_name="essay_feedback",
-        product_day=local_product_day(utcnow(), "America/Los_Angeles"),
+        product_day=local_product_day(utcnow(), "Asia/Shanghai"),
         limit_value=5,
         reserved_count=1,
         consumed_count=0,
@@ -41,6 +43,27 @@ def _attach_active_daily_limit_reservation(session, student_id, submission):
     session.refresh(counter)
     session.refresh(submission)
     return counter
+
+
+def _exhaust_daily_limit(session, student_id, *, consumed_count: int = 999):
+    counter = DailyTaskLimitCounter(
+        student_id=student_id,
+        task_name="essay_feedback",
+        product_day=local_product_day(utcnow(), "Asia/Shanghai"),
+        limit_value=consumed_count,
+        reserved_count=0,
+        consumed_count=consumed_count,
+        active_reservations={},
+    )
+    session.add(counter)
+    session.commit()
+    session.refresh(counter)
+    return counter
+
+
+class RaisingRunner:
+    async def run(self, **kwargs):
+        raise RuntimeError("provider exploded")
 
 
 def test_direct_draft_json_requires_client_submission_id(session, client):
@@ -90,6 +113,34 @@ def test_direct_draft_stream_returns_previews_and_done(session, client):
     log = session.exec(select(LLMCallLog)).one()
     assert log.streaming_enabled is True
     assert log.stream_final_status == "completed"
+
+
+def test_direct_draft_stream_uses_session_factory_not_request_session_dependency(
+    session,
+    client,
+):
+    client.app.dependency_overrides[get_settings] = lambda: Settings(
+        llm_provider="mock",
+        essay_feedback_streaming_enabled=True,
+    )
+    client.app.dependency_overrides[get_db_session] = lambda: (_ for _ in ()).throw(
+        AssertionError("stream route must not depend on get_db_session")
+    )
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    response = client.post(
+        f"/api/students/{student.id}/essays/stream-feedback",
+        json={
+            "title": "我学会了骑车",
+            "draft": "刚开始我很害怕。后来我会了。我很开心。",
+            "entry": "existing_draft",
+            "client_submission_id": "stream-factory-only",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "event: done" in response.text
 
 
 def test_same_stream_submission_same_payload_returns_existing_result(session, client):
@@ -178,6 +229,65 @@ def test_direct_draft_json_uses_submission_ledger_as_daily_limit_owner(session, 
     assert submission.status == "completed"
     assert submission.daily_limit_counter_id == counter.id
     assert len(session.exec(select(LLMCallLog)).all()) == 1
+
+
+def test_direct_draft_json_provider_error_releases_ledger_reservation(session, client):
+    client.app.dependency_overrides[get_settings] = lambda: Settings(
+        llm_provider="mock",
+        llm_daily_limit_enabled=True,
+    )
+    client.app.dependency_overrides[get_ai_task_runner] = lambda: RaisingRunner()
+    family = create_authenticated_family(session)
+    student = family["student"]
+    payload = {
+        "title": "我的一天",
+        "draft": "今天我去了公园。后来我观察了一棵树。最后我很开心。",
+        "entry": "existing_draft",
+        "client_submission_id": "json-provider-error-release",
+    }
+
+    with pytest.raises(RuntimeError, match="provider exploded"):
+        client.post(f"/api/students/{student.id}/essays", json=payload)
+
+    submission = session.exec(select(EssayFeedbackSubmission)).one()
+    assert submission.status == "failed_released"
+    counter = session.exec(select(DailyTaskLimitCounter)).one()
+    assert counter.consumed_count == 0
+    assert counter.reserved_count == 0
+    assert counter.released_count == 1
+    assert len(session.exec(select(EssayVersion)).all()) == 0
+    assert len(session.exec(select(LLMCallLog)).all()) == 0
+
+
+def test_direct_draft_json_daily_limit_exhaustion_returns_429_without_provider_call(
+    session,
+    client,
+):
+    client.app.dependency_overrides[get_settings] = lambda: Settings(
+        llm_provider="mock",
+        llm_daily_limit_enabled=True,
+    )
+    family = create_authenticated_family(session)
+    student = family["student"]
+    counter = _exhaust_daily_limit(session, student.id)
+
+    response = client.post(
+        f"/api/students/{student.id}/essays",
+        json={
+            "title": "我的一天",
+            "draft": "今天我去了公园。后来我观察了一棵树。最后我很开心。",
+            "entry": "existing_draft",
+            "client_submission_id": "json-daily-limit-exhausted",
+        },
+    )
+
+    assert response.status_code == 429
+    assert response.json()["detail"]["code"] == "DAILY_LIMIT_REACHED"
+    session.refresh(counter)
+    assert counter.consumed_count == 999
+    assert counter.reserved_count == 0
+    assert len(session.exec(select(LLMCallLog)).all()) == 0
+    assert len(session.exec(select(EssayVersion)).all()) == 0
 
 
 def test_direct_draft_json_reserved_in_flight_returns_202_without_provider_call(
@@ -305,6 +415,38 @@ def test_reserved_streaming_reentry_returns_in_progress_without_second_reservati
     assert refreshed_counter.reserved_count == 1
     assert len(refreshed_counter.active_reservations) == 1
     assert len(session.exec(select(LLMCallLog)).all()) == 0
+
+
+def test_direct_draft_stream_daily_limit_exhaustion_returns_429_without_provider_call(
+    session,
+    client,
+):
+    client.app.dependency_overrides[get_settings] = lambda: Settings(
+        llm_provider="mock",
+        llm_daily_limit_enabled=True,
+        essay_feedback_streaming_enabled=True,
+    )
+    family = create_authenticated_family(session)
+    student = family["student"]
+    counter = _exhaust_daily_limit(session, student.id)
+
+    response = client.post(
+        f"/api/students/{student.id}/essays/stream-feedback",
+        json={
+            "title": "我的一天",
+            "draft": "今天我去了公园。后来我观察了一棵树。最后我很开心。",
+            "entry": "existing_draft",
+            "client_submission_id": "stream-daily-limit-exhausted",
+        },
+    )
+
+    assert response.status_code == 429
+    assert response.json()["detail"]["code"] == "DAILY_LIMIT_REACHED"
+    session.refresh(counter)
+    assert counter.consumed_count == 999
+    assert counter.reserved_count == 0
+    assert len(session.exec(select(LLMCallLog)).all()) == 0
+    assert len(session.exec(select(EssayVersion)).all()) == 0
 
 
 def test_prewriting_first_draft_stream_returns_previews_and_done(session, client):
