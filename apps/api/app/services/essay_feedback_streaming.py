@@ -317,6 +317,7 @@ class StreamingBackendTask:
         self.llm_log_id: str | None = None
         self.essay_version_id: str | None = None
         self.result_fetch_url = ""
+        self.section_open_started_perf: float | None = None
         self._task_handle: asyncio.Task[None] | None = None
         self._terminal = asyncio.Event()
         self._disconnect_event = asyncio.Event()
@@ -488,12 +489,21 @@ class StreamingBackendTask:
         timeouts: list[float] = []
         if not seen_provider_event and self.first_event_timeout_seconds > 0:
             timeouts.append(self.first_event_timeout_seconds)
+        section_remaining = self._section_remaining_seconds()
+        if section_remaining is not None:
+            timeouts.append(section_remaining)
         elif self.first_provider_delta_at is not None and self.section_timeout_seconds > 0:
             timeouts.append(self.section_timeout_seconds)
         continuation_remaining = self._backend_continuation_remaining_seconds()
         if continuation_remaining is not None:
             timeouts.append(continuation_remaining)
         return min(timeouts) if timeouts else None
+
+    def _section_remaining_seconds(self) -> float | None:
+        if self.section_open_started_perf is None or self.section_timeout_seconds <= 0:
+            return None
+        elapsed = perf_counter() - self.section_open_started_perf
+        return max(self.section_timeout_seconds - elapsed, 0.001)
 
     def _backend_continuation_remaining_seconds(self) -> float | None:
         if (
@@ -528,7 +538,7 @@ class StreamingBackendTask:
             "STREAM_SECTION_TIMEOUT",
             (
                 "provider_failed_after_visible_content"
-                if self.first_provider_delta_at is not None
+                if self.first_visible_content_at is not None
                 else "provider_failed_before_visible_content"
             ),
             "provider stream stalled before the next section completed",
@@ -541,7 +551,12 @@ class StreamingBackendTask:
         if self.first_provider_delta_at is None:
             self.first_provider_delta_at = now
         self.last_content_at = now
+        self._mark_section_open_if_needed()
+        self._raise_if_open_section_timed_out()
+        previous_index = self.parser.next_index
         previews = self.parser.feed(text_delta)
+        self._update_section_timer_after_parse(previous_index=previous_index)
+        self._raise_if_open_section_timed_out()
         for preview in previews:
             if self.first_visible_content_at is None:
                 self.first_visible_content_at = utcnow()
@@ -552,6 +567,31 @@ class StreamingBackendTask:
                     {"section": preview.section, "items": preview.items},
                 )
             )
+
+    def _mark_section_open_if_needed(self) -> None:
+        if self.section_open_started_perf is None:
+            self.section_open_started_perf = perf_counter()
+
+    def _update_section_timer_after_parse(self, *, previous_index: int) -> None:
+        if self.parser.next_index != previous_index:
+            self.section_open_started_perf = (
+                perf_counter() if self.parser.buffer.strip() else None
+            )
+
+    def _raise_if_open_section_timed_out(self) -> None:
+        if self.section_open_started_perf is None or self.section_timeout_seconds <= 0:
+            return
+        if perf_counter() - self.section_open_started_perf <= self.section_timeout_seconds:
+            return
+        raise StreamTimeoutError(
+            "STREAM_SECTION_TIMEOUT",
+            (
+                "provider_failed_after_visible_content"
+                if self.first_visible_content_at is not None
+                else "provider_failed_before_visible_content"
+            ),
+            "section remained incomplete past timeout",
+        )
 
     async def next_event_or_heartbeat(self) -> WenLingoStreamFrame:
         try:

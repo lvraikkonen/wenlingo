@@ -174,6 +174,41 @@ async def test_section_timeout_after_visible_content_releases_without_saving():
     assert task.reservation_final_action == "released"
 
 
+async def test_section_timeout_counts_open_section_wall_time_not_event_gap():
+    task = StreamingBackendTask.for_test(
+        provider=DelayedStreamingProvider(
+            [
+                (LLMProviderStreamEvent(event_type="text_delta", text_delta="<strengths>\n"), 0),
+                (LLMProviderStreamEvent(event_type="text_delta", text_delta="- 能"), 0.005),
+                (LLMProviderStreamEvent(event_type="text_delta", text_delta="写清"), 0.005),
+                (LLMProviderStreamEvent(event_type="text_delta", text_delta="楚发"), 0.005),
+                (LLMProviderStreamEvent(event_type="text_delta", text_delta="生了什么"), 0.005),
+                (LLMProviderStreamEvent(event_type="text_delta", text_delta="\n- 有一处"), 0.005),
+                (LLMProviderStreamEvent(event_type="text_delta", text_delta="心情表达"), 0.005),
+                (
+                    LLMProviderStreamEvent(
+                        event_type="text_delta",
+                        text_delta="\n</strengths>",
+                    ),
+                    0.005,
+                ),
+                (LLMProviderStreamEvent(event_type="provider_done"), 0),
+            ]
+        ),
+        section_timeout_seconds=0.01,
+        heartbeat_seconds=0.01,
+    )
+
+    await task.run_to_terminal()
+
+    assert task.first_provider_delta_at is not None
+    assert task.first_visible_content_at is None
+    assert task.stream_final_status == "provider_failed_before_visible_content"
+    assert task.error_code == "STREAM_SECTION_TIMEOUT"
+    assert task.official_result_saved is False
+    assert task.reservation_final_action == "released"
+
+
 async def test_backend_continuation_timeout_after_disconnect_releases_without_saving():
     backend_task = StreamingBackendTask.for_test(
         provider=DelayedStreamingProvider(
