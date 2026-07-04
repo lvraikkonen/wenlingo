@@ -147,7 +147,7 @@ async def test_first_provider_event_timeout_before_visible_content_releases():
     assert task.reservation_final_action == "released"
 
 
-async def test_section_timeout_after_visible_content_releases_without_saving():
+async def test_pause_after_completed_section_longer_than_section_timeout_completes():
     task = StreamingBackendTask.for_test(
         provider=DelayedStreamingProvider(
             [
@@ -158,7 +158,71 @@ async def test_section_timeout_after_visible_content_releases_without_saving():
                     ),
                     0,
                 ),
-                (LLMProviderStreamEvent(event_type="provider_done"), 0.05),
+                (
+                    LLMProviderStreamEvent(
+                        event_type="text_delta",
+                        text_delta=(
+                            "<improvements>\n- 第二段缺少动作细节\n</improvements>"
+                            "<problem_monsters>\n- 细节缺口\n</problem_monsters>"
+                            "<sentence_notes>\n- 把开心换成看到和做到的细节。\n</sentence_notes>"
+                            "<revision_tasks>\n- 给第二段加一个动作描写 | 第二段\n</revision_tasks>"
+                        ),
+                    ),
+                    0.05,
+                ),
+                (
+                    LLMProviderStreamEvent(
+                        event_type="usage_final",
+                        usage={
+                            "prompt_tokens": 10,
+                            "completion_tokens": 5,
+                            "total_tokens": 15,
+                        },
+                    ),
+                    0,
+                ),
+                (LLMProviderStreamEvent(event_type="provider_done"), 0),
+            ]
+        ),
+        section_timeout_seconds=0.01,
+        heartbeat_seconds=0.01,
+    )
+
+    await task.run_to_terminal()
+
+    assert task.first_visible_content_at is not None
+    assert task.stream_final_status == "completed"
+    assert task.error_code == ""
+    assert task.official_result_saved is True
+    assert task.reservation_final_action == "consumed"
+
+
+async def test_open_section_timeout_after_visible_content_releases_without_saving():
+    task = StreamingBackendTask.for_test(
+        provider=DelayedStreamingProvider(
+            [
+                (
+                    LLMProviderStreamEvent(
+                        event_type="text_delta",
+                        text_delta="<strengths>\n- 能写清楚发生了什么\n- 有一处心情表达\n</strengths>",
+                    ),
+                    0,
+                ),
+                (
+                    LLMProviderStreamEvent(
+                        event_type="text_delta",
+                        text_delta="<improvements>\n- partial",
+                    ),
+                    0,
+                ),
+                (
+                    LLMProviderStreamEvent(
+                        event_type="text_delta",
+                        text_delta=" still incomplete\n</improvements>",
+                    ),
+                    0.05,
+                ),
+                (LLMProviderStreamEvent(event_type="provider_done"), 0),
             ]
         ),
         section_timeout_seconds=0.01,

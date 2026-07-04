@@ -493,8 +493,6 @@ class StreamingBackendTask:
         section_remaining = self._section_remaining_seconds()
         if section_remaining is not None:
             timeouts.append(section_remaining)
-        elif self.first_provider_delta_at is not None and self.section_timeout_seconds > 0:
-            timeouts.append(self.section_timeout_seconds)
         continuation_remaining = self._backend_continuation_remaining_seconds()
         if continuation_remaining is not None:
             timeouts.append(continuation_remaining)
