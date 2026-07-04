@@ -908,8 +908,7 @@ async def _run_prewriting_job(
                 llm_call_log_id = log.id if log is not None else None
                 session.commit()
             with session_factory() as session:
-                job = session.get(PrewritingAIJob, job_id)
-                if job is None or job.status != "running" or job.locked_by != worker_id:
+                if heartbeat_job(session=session, job_id=job_id, worker_id=worker_id) is None:
                     return
                 essay = session.get(Essay, essay_id)
                 if essay is None:

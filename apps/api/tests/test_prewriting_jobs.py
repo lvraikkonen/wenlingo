@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import timedelta
+from datetime import timedelta, timezone
 from types import SimpleNamespace
 
 from sqlmodel import Session
@@ -21,6 +21,7 @@ from app.services.prewriting_jobs import (
     complete_job,
     create_or_get_prewriting_job,
     fail_job,
+    heartbeat_job,
     next_progress_snapshot,
 )
 from app.services.writing_castle_state import (
@@ -60,6 +61,12 @@ def _sse_data_payload(body: str) -> dict:
         if line.startswith("data: "):
             return json.loads(line.removeprefix("data: "))
     raise AssertionError(f"SSE body did not contain a data line: {body}")
+
+
+def _aware_utc(value):
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def test_create_or_get_prewriting_job_is_idempotent(session):
@@ -191,6 +198,87 @@ def test_stale_worker_cannot_fail_job_after_lease_reacquired(session):
     assert stale is None
     assert saved.status == "running"
     assert saved.locked_by == "worker-b"
+    assert saved.error_code == ""
+    assert saved.completed_at is None
+
+
+def test_same_worker_cannot_heartbeat_after_lease_expired(session):
+    job = create_or_get_prewriting_job(
+        session=session,
+        student_id="student-1",
+        essay_id="essay-1",
+        task_name="material_card_generation",
+        idempotency_key="job-key-1",
+    )
+    leased = acquire_job_lease(session=session, job_id=job.id, worker_id="worker-a")
+    expired_at = utcnow() - timedelta(seconds=1)
+    leased.lease_expires_at = expired_at
+    session.add(leased)
+    session.commit()
+
+    heartbeat = heartbeat_job(session=session, job_id=job.id, worker_id="worker-a")
+
+    saved = session.get(PrewritingAIJob, job.id)
+    assert heartbeat is None
+    assert saved.status == "running"
+    assert saved.locked_by == "worker-a"
+    assert _aware_utc(saved.lease_expires_at) == _aware_utc(expired_at)
+
+
+def test_same_worker_cannot_complete_after_lease_expired(session):
+    job = create_or_get_prewriting_job(
+        session=session,
+        student_id="student-1",
+        essay_id="essay-1",
+        task_name="material_card_generation",
+        idempotency_key="job-key-1",
+    )
+    leased = acquire_job_lease(session=session, job_id=job.id, worker_id="worker-a")
+    leased.lease_expires_at = utcnow() - timedelta(seconds=1)
+    session.add(leased)
+    session.commit()
+
+    completed = complete_job(
+        session=session,
+        job_id=job.id,
+        result_ref_type="essay",
+        result_ref_id="essay-1",
+        expected_worker_id="worker-a",
+    )
+
+    saved = session.get(PrewritingAIJob, job.id)
+    assert completed is None
+    assert saved.status == "running"
+    assert saved.locked_by == "worker-a"
+    assert saved.result_ref_id is None
+    assert saved.completed_at is None
+
+
+def test_same_worker_cannot_fail_after_lease_expired(session):
+    job = create_or_get_prewriting_job(
+        session=session,
+        student_id="student-1",
+        essay_id="essay-1",
+        task_name="outline_generation",
+        idempotency_key="job-key-1",
+    )
+    leased = acquire_job_lease(session=session, job_id=job.id, worker_id="worker-a")
+    leased.lease_expires_at = utcnow() - timedelta(seconds=1)
+    session.add(leased)
+    session.commit()
+
+    failed = fail_job(
+        session=session,
+        job_id=job.id,
+        error_code="STALE_PROVIDER_ERROR",
+        error_message="provider failed after lease expiry",
+        expected_worker_id="worker-a",
+    )
+
+    saved = session.get(PrewritingAIJob, job.id)
+    assert failed is None
+    assert saved.status == "running"
+    assert saved.locked_by == "worker-a"
     assert saved.error_code == ""
     assert saved.completed_at is None
 
@@ -457,11 +545,15 @@ async def test_background_material_job_extends_lease_while_provider_is_in_flight
     session.refresh(job)
     lease_at_provider_start = job.lease_expires_at
 
+    lease_extended = False
     for _ in range(20):
         await asyncio.sleep(0.01)
         session.refresh(job)
         if job.lease_expires_at and job.lease_expires_at > lease_at_provider_start:
+            lease_extended = True
             break
+    assert lease_extended is True
+
     provider_can_finish.set()
     await task
 

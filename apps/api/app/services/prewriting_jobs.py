@@ -49,6 +49,26 @@ def _ensure_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
+def _lease_is_active(job: PrewritingAIJob, now: datetime) -> bool:
+    return (
+        job.lease_expires_at is not None
+        and _ensure_utc(job.lease_expires_at) > _ensure_utc(now)
+    )
+
+
+def _worker_owns_active_lease(
+    *,
+    job: PrewritingAIJob,
+    worker_id: str,
+    now: datetime,
+) -> bool:
+    return (
+        job.status == "running"
+        and job.locked_by == worker_id
+        and _lease_is_active(job, now)
+    )
+
+
 def _snapshot(job: PrewritingAIJob) -> dict[str, Any]:
     return {
         "schema_version": PREWRITING_JOB_SCHEMA_VERSION,
@@ -164,6 +184,8 @@ def heartbeat_job(
     job = _get_job_for_update(session=session, job_id=job_id)
     if job is None or job.status != "running" or job.locked_by != worker_id:
         return None
+    if not _lease_is_active(job, current_time):
+        return None
     job.last_heartbeat_at = current_time
     job.lease_expires_at = current_time + lease_ttl
     _touch(job, current_time)
@@ -209,10 +231,13 @@ def complete_job(
     job = _get_job_for_update(session=session, job_id=job_id)
     if job is None:
         raise ValueError("prewriting job not found")
-    if expected_worker_id is not None and (
-        job.status != "running" or job.locked_by != expected_worker_id
-    ):
-        return None
+    if expected_worker_id is not None:
+        if not _worker_owns_active_lease(
+            job=job,
+            worker_id=expected_worker_id,
+            now=current_time,
+        ):
+            return None
     job.status = "completed"
     job.stage = "completed"
     job.progress_event_seq += 1
@@ -245,10 +270,13 @@ def fail_job(
     job = _get_job_for_update(session=session, job_id=job_id)
     if job is None:
         raise ValueError("prewriting job not found")
-    if expected_worker_id is not None and (
-        job.status != "running" or job.locked_by != expected_worker_id
-    ):
-        return None
+    if expected_worker_id is not None:
+        if not _worker_owns_active_lease(
+            job=job,
+            worker_id=expected_worker_id,
+            now=current_time,
+        ):
+            return None
     job.status = "failed"
     job.stage = "failed"
     job.progress_event_seq += 1
