@@ -1094,10 +1094,16 @@ async def submit_first_draft(
         submission=submission,
     )
     if submission.status == "created":
-        mark_submission_status(
+        submission = mark_submission_status(
             session=session,
             submission_id=submission.id,
             status="reserved",
+        )
+    if submission.status == "reserved":
+        submission = mark_submission_status(
+            session=session,
+            submission_id=submission.id,
+            status="streaming_started",
         )
     session.commit()
     try:

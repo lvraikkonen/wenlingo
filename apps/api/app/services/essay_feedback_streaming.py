@@ -76,6 +76,7 @@ ACTIVE_STREAMING_STATUSES = {
     "first_visible_content_sent",
     "backend_continuing_after_disconnect",
 }
+ACTIVE_PROVIDER_STATUSES = ACTIVE_STREAMING_STATUSES | {"saving_result"}
 TERMINAL_FAILURE_STATUSES = {"failed_released", "expired_released"}
 
 
@@ -935,8 +936,17 @@ def session_factory_from_request_session(
     return fallback
 
 
+def _submission_is_provider_running(submission: EssayFeedbackSubmission) -> bool:
+    if submission.status in ACTIVE_PROVIDER_STATUSES:
+        return True
+    return submission.status == "reserved" and (
+        submission.daily_limit_counter_id is not None
+        or submission.daily_limit_reservation_token is not None
+    )
+
+
 def active_submission_json_response(submission) -> dict[str, Any] | None:
-    if submission.status in ACTIVE_STREAMING_STATUSES:
+    if _submission_is_provider_running(submission):
         return {
             "status": "IN_PROGRESS",
             "submission_id": submission.id,
@@ -1141,7 +1151,7 @@ def _prepare_streaming_submission(
 
     if submission.status == "completed":
         raise StreamingSubmissionCompleted(submission.id, submission.result_fetch_url)
-    if submission.status in ACTIVE_STREAMING_STATUSES:
+    if _submission_is_provider_running(submission):
         raise StreamingAlreadyInProgress(submission.id, submission.result_fetch_url)
     if submission.status in TERMINAL_FAILURE_STATUSES:
         raise HTTPException(
@@ -1163,7 +1173,7 @@ def _prepare_streaming_submission(
     mark_submission_status(
         session=session,
         submission_id=submission.id,
-        status="reserved",
+        status="streaming_started",
     )
     session.commit()
     return submission
