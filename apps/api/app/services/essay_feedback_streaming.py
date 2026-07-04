@@ -105,10 +105,10 @@ class EssayFeedbackSectionParser:
 
             items = _parse_section_items(name, body, self.max_item_chars)
             self.seen.add(name)
-            self.sections[name] = items
+            self.sections[name] = list(items)
             self.next_index += 1
             if name in PREVIEW_SECTIONS:
-                emitted.append(FeedbackSectionPreview(section=name, items=items))
+                emitted.append(FeedbackSectionPreview(section=name, items=list(items)))
             self.buffer = stripped[match.end():]
 
     def build_feedback(self) -> EssayFeedback:

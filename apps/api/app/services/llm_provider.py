@@ -117,6 +117,7 @@ def _normalize_anthropic_usage(usage: Any) -> dict[str, Any] | None:
     for source_key, target_key in (
         ("input_tokens", "prompt_tokens"),
         ("output_tokens", "completion_tokens"),
+        ("total_tokens", "total_tokens"),
     ):
         if source_key in usage:
             token_count = _int_or_none(usage.get(source_key))
@@ -136,6 +137,46 @@ def _normalize_anthropic_usage(usage: Any) -> dict[str, Any] | None:
             normalized_usage["prompt_tokens"] + normalized_usage["completion_tokens"]
         )
     return normalized_usage
+
+
+def _anthropic_usage_from_chunk(chunk: dict[str, Any]) -> dict[str, Any] | None:
+    usage = chunk.get("usage")
+    if isinstance(usage, dict):
+        return _normalize_anthropic_usage(usage)
+    message = chunk.get("message")
+    if isinstance(message, dict):
+        return _normalize_anthropic_usage(message.get("usage"))
+    return None
+
+
+def _merge_anthropic_usage(
+    previous: dict[str, Any] | None,
+    current: dict[str, Any],
+) -> dict[str, Any]:
+    if previous is None:
+        return dict(current)
+
+    merged = dict(previous)
+    previous_raw = previous.get("provider_raw_usage")
+    current_raw = current.get("provider_raw_usage")
+    if isinstance(previous_raw, dict) and isinstance(current_raw, dict):
+        merged["provider_raw_usage"] = {**previous_raw, **current_raw}
+    elif isinstance(current_raw, dict):
+        merged["provider_raw_usage"] = dict(current_raw)
+
+    for key, value in current.items():
+        if key != "provider_raw_usage":
+            merged[key] = value
+
+    raw = merged.get("provider_raw_usage")
+    has_provider_total = isinstance(raw, dict) and "total_tokens" in raw
+    if (
+        not has_provider_total
+        and "prompt_tokens" in merged
+        and "completion_tokens" in merged
+    ):
+        merged["total_tokens"] = merged["prompt_tokens"] + merged["completion_tokens"]
+    return merged
 
 
 def _gemini_usage(usage: Any) -> dict[str, Any] | None:
@@ -224,7 +265,7 @@ def normalize_provider_stream_events(
                 )
             )
             return events
-        if chunk.get("type") in {"ping", "message_start"} and "usage" not in chunk:
+        if chunk.get("type") == "ping":
             continue
 
         text_delta = ""
@@ -234,7 +275,7 @@ def normalize_provider_stream_events(
             chunk_usage = _openai_compatible_usage(chunk.get("usage"))
         elif normalized_provider == "anthropic":
             text_delta = _anthropic_text_delta(chunk)
-            chunk_usage = _normalize_anthropic_usage(chunk.get("usage"))
+            chunk_usage = _anthropic_usage_from_chunk(chunk)
         elif normalized_provider == "gemini":
             text_delta = _gemini_text_delta(chunk)
             chunk_usage = _gemini_usage(chunk.get("usageMetadata"))
@@ -246,7 +287,10 @@ def normalize_provider_stream_events(
         if text_delta:
             events.append(LLMProviderStreamEvent(event_type="text_delta", text_delta=text_delta))
         if chunk_usage is not None:
-            final_usage = chunk_usage
+            if normalized_provider == "anthropic":
+                final_usage = _merge_anthropic_usage(final_usage, chunk_usage)
+            else:
+                final_usage = chunk_usage
 
     events.append(LLMProviderStreamEvent(event_type="usage_final", usage=final_usage))
     events.append(LLMProviderStreamEvent(event_type="provider_done"))
@@ -526,6 +570,8 @@ class HttpJsonLLMProvider:
             },
         ]
         final_usage: dict[str, Any] | None = None
+        provider_request_id: str | None = None
+        provider_generation_id: str | None = None
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             stream_context = client.stream(
                 "POST",
@@ -545,17 +591,25 @@ class HttpJsonLLMProvider:
                 stream_context = await stream_context
             async with stream_context as response:
                 response.raise_for_status()
+                provider_request_id = _header_value(
+                    response.headers,
+                    ("x-request-id", "openai-request-id"),
+                )
                 async for line in response.aiter_lines():
                     if not line.startswith("data:"):
                         continue
                     data = line.removeprefix("data:").strip()
-                    if not data or data == "[DONE]":
+                    if not data:
                         continue
+                    if data == "[DONE]":
+                        break
                     try:
                         chunk = json.loads(data)
                     except json.JSONDecodeError as exc:
                         yield LLMProviderStreamEvent(
                             event_type="provider_error",
+                            provider_request_id=provider_request_id,
+                            provider_generation_id=provider_generation_id,
                             error_code="PROVIDER_STREAM_INVALID_JSON",
                             error_message=str(exc),
                         )
@@ -565,11 +619,16 @@ class HttpJsonLLMProvider:
                     if isinstance(error, dict):
                         yield LLMProviderStreamEvent(
                             event_type="provider_error",
+                            provider_request_id=provider_request_id,
+                            provider_generation_id=provider_generation_id,
                             error_code=str(error.get("code") or "PROVIDER_ERROR"),
                             error_message=str(error.get("message") or "provider stream error"),
                         )
                         return
 
+                    chunk_id = chunk.get("id")
+                    if isinstance(chunk_id, str) and chunk_id:
+                        provider_generation_id = chunk_id
                     chunk_usage = _openai_compatible_usage(chunk.get("usage"))
                     if chunk_usage is not None:
                         final_usage = chunk_usage
@@ -578,7 +637,33 @@ class HttpJsonLLMProvider:
                         yield LLMProviderStreamEvent(
                             event_type="text_delta",
                             text_delta=text_delta,
+                            provider_request_id=provider_request_id,
+                            provider_generation_id=provider_generation_id,
                         )
 
-        yield LLMProviderStreamEvent(event_type="usage_final", usage=final_usage)
-        yield LLMProviderStreamEvent(event_type="provider_done")
+        yield LLMProviderStreamEvent(
+            event_type="usage_final",
+            usage=final_usage,
+            provider_request_id=provider_request_id,
+            provider_generation_id=provider_generation_id,
+        )
+        yield LLMProviderStreamEvent(
+            event_type="provider_done",
+            provider_request_id=provider_request_id,
+            provider_generation_id=provider_generation_id,
+        )
+
+
+def _header_value(headers: Any, names: tuple[str, ...]) -> str | None:
+    for name in names:
+        value = headers.get(name) if hasattr(headers, "get") else None
+        if isinstance(value, str) and value:
+            return value
+    if not isinstance(headers, dict):
+        return None
+    lower_headers = {str(key).lower(): value for key, value in headers.items()}
+    for name in names:
+        value = lower_headers.get(name.lower())
+        if isinstance(value, str) and value:
+            return value
+    return None

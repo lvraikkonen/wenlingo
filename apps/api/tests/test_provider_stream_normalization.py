@@ -28,6 +28,22 @@ def test_anthropic_cumulative_usage_is_not_summed():
     assert usage_events[-1].usage["completion_tokens"] == 7
 
 
+def test_anthropic_start_input_usage_merges_with_cumulative_output_usage():
+    events = normalize_provider_stream_events(
+        provider="anthropic",
+        chunks=[
+            {"type": "message_start", "message": {"usage": {"input_tokens": 10}}},
+            {"type": "message_delta", "usage": {"output_tokens": 3}},
+            {"type": "message_delta", "usage": {"output_tokens": 7}},
+        ],
+    )
+
+    usage = [event for event in events if event.event_type == "usage_final"][-1].usage
+    assert usage["prompt_tokens"] == 10
+    assert usage["completion_tokens"] == 7
+    assert usage["total_tokens"] == 17
+
+
 def test_gemini_final_usage_metadata_and_thoughts_tokens_are_captured():
     events = normalize_provider_stream_events(
         provider="gemini",

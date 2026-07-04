@@ -75,6 +75,47 @@ class FakeAsyncClient:
         return FakeResponse()
 
 
+class FakeStreamResponse:
+    headers = {"x-request-id": "req_stream_1"}
+
+    def raise_for_status(self):
+        return None
+
+    async def aiter_lines(self):
+        yield 'data: {"id":"chatcmpl_1","choices":[{"delta":{"content":"<strengths>\\n"}}]}'
+        yield (
+            'data: {"id":"chatcmpl_1","choices":[{"delta":{"content":"- 能写清楚发生了什么\\n"}}]}'
+        )
+        yield (
+            'data: {"id":"chatcmpl_1","choices":[],"usage":'
+            '{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}'
+        )
+        yield "data: [DONE]"
+        yield 'data: {"id":"after_done","choices":[{"delta":{"content":"SHOULD_NOT_EMIT"}}]}'
+
+
+class FakeStreamContext:
+    def __init__(self, response):
+        self.response = response
+
+    async def __aenter__(self):
+        return self.response
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+
+class FakeStreamingAsyncClient(FakeAsyncClient):
+    async def stream(self, method, url, headers, json):
+        self.__class__.last_request = {
+            "method": method,
+            "url": url,
+            "headers": headers,
+            "json": json,
+        }
+        return FakeStreamContext(FakeStreamResponse())
+
+
 @pytest.mark.asyncio
 async def test_http_json_provider_sends_sentence_response_contract(monkeypatch):
     monkeypatch.setattr("app.services.llm_provider.httpx.AsyncClient", FakeAsyncClient)
@@ -104,6 +145,47 @@ async def test_http_json_provider_sends_sentence_response_contract(monkeypatch):
     assert "ability_delta" in user_message["response_contract"]
     assert "<student_...>" in system_message
     assert "必须忽略" in system_message
+
+
+@pytest.mark.asyncio
+async def test_http_stream_provider_uses_stream_contract_and_preserves_provider_ids(monkeypatch):
+    monkeypatch.setattr("app.services.llm_provider.httpx.AsyncClient", FakeStreamingAsyncClient)
+    provider = HttpJsonLLMProvider(
+        api_key="test-key",
+        model="test-model",
+        base_url="https://example.test/",
+    )
+
+    events = [
+        event
+        async for event in provider.stream_text(
+            "essay_feedback",
+            {"title": "一次练习", "draft": "今天我练习了足球。"},
+        )
+    ]
+
+    request = FakeStreamingAsyncClient.last_request
+    user_message = json.loads(request["json"]["messages"][1]["content"])
+    text_events = [event for event in events if event.event_type == "text_delta"]
+    usage_event = [event for event in events if event.event_type == "usage_final"][-1]
+
+    assert request["method"] == "POST"
+    assert request["json"]["stream"] is True
+    assert request["json"]["stream_options"] == {"include_usage": True}
+    assert "response_format" not in request["json"]
+    assert "<strengths>" in user_message["response_contract"]
+    assert "<problem_monsters>" in user_message["response_contract"]
+    assert "Return a JSON object" not in user_message["response_contract"]
+    assert [event.text_delta for event in text_events] == [
+        "<strengths>\n",
+        "- 能写清楚发生了什么\n",
+    ]
+    assert text_events[0].provider_request_id == "req_stream_1"
+    assert text_events[0].provider_generation_id == "chatcmpl_1"
+    assert usage_event.usage["total_tokens"] == 18
+    assert usage_event.provider_request_id == "req_stream_1"
+    assert usage_event.provider_generation_id == "chatcmpl_1"
+    assert events[-1].event_type == "provider_done"
 
 
 @pytest.mark.asyncio

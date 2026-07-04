@@ -174,6 +174,21 @@ def test_problem_monsters_are_parsed_without_preview_frame():
     assert parser.sections["problem_monsters"] == ["细节缺口"]
 
 
+def test_mutating_preview_items_does_not_mutate_canonical_feedback():
+    parser = EssayFeedbackSectionParser()
+
+    previews = parser.feed("<strengths>\n- 能写清楚发生了什么\n- 有一处心情表达\n</strengths>")
+    previews[0].items[0] = "被外部修改了"
+    parser.feed("<improvements>\n- 第二段缺少动作\n</improvements>")
+    parser.feed("<problem_monsters>\n- 细节缺口\n</problem_monsters>")
+    parser.feed("<sentence_notes>\n- 把心情换成看到听到的细节\n</sentence_notes>")
+    parser.feed("<revision_tasks>\n- 给第二段加一个动作描写 | 第二段\n</revision_tasks>")
+
+    feedback = parser.build_feedback()
+
+    assert feedback.strengths[0] == "能写清楚发生了什么"
+
+
 def test_build_validated_feedback_from_sections_converts_revision_task():
     feedback = build_validated_feedback_from_sections(
         {
