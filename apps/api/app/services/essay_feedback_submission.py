@@ -3,9 +3,10 @@ from hashlib import sha256
 import json
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.domain.models import EssayFeedbackSubmission, utcnow
+from app.domain.models import DailyTaskLimitCounter, EssayFeedbackSubmission, utcnow
 from app.services.llm_usage import (
     consume_daily_task_reservation,
     release_daily_task_reservation,
@@ -71,6 +72,22 @@ def idempotency_scope_for(student_id: str, essay_id: str | None) -> str:
     return essay_id if essay_id else f"direct:{student_id}"
 
 
+def _submission_by_idempotency_key(
+    *,
+    session: Session,
+    idempotency_scope: str,
+    task_name: str,
+    client_submission_id: str,
+) -> EssayFeedbackSubmission | None:
+    return session.exec(
+        select(EssayFeedbackSubmission).where(
+            EssayFeedbackSubmission.idempotency_scope == idempotency_scope,
+            EssayFeedbackSubmission.task_name == task_name,
+            EssayFeedbackSubmission.client_submission_id == client_submission_id,
+        )
+    ).first()
+
+
 def create_or_get_submission(
     *,
     session: Session,
@@ -88,13 +105,12 @@ def create_or_get_submission(
         payload=payload,
     )
     scope = idempotency_scope_for(student_id, essay_id)
-    existing = session.exec(
-        select(EssayFeedbackSubmission).where(
-            EssayFeedbackSubmission.idempotency_scope == scope,
-            EssayFeedbackSubmission.task_name == task_name,
-            EssayFeedbackSubmission.client_submission_id == client_submission_id,
-        )
-    ).first()
+    existing = _submission_by_idempotency_key(
+        session=session,
+        idempotency_scope=scope,
+        task_name=task_name,
+        client_submission_id=client_submission_id,
+    )
     if existing is not None:
         if existing.payload_hash != payload_hash:
             raise IdempotencyPayloadMismatch
@@ -111,9 +127,24 @@ def create_or_get_submission(
         payload_hash=payload_hash,
         status="created",
     )
-    session.add(submission)
-    session.flush()
-    return submission
+    try:
+        with session.begin_nested():
+            session.add(submission)
+            session.flush()
+        return submission
+    except IntegrityError as exc:
+        with session.no_autoflush:
+            existing = _submission_by_idempotency_key(
+                session=session,
+                idempotency_scope=scope,
+                task_name=task_name,
+                client_submission_id=client_submission_id,
+            )
+        if existing is None:
+            raise
+        if existing.payload_hash != payload_hash:
+            raise IdempotencyPayloadMismatch from exc
+        return existing
 
 
 def _get_submission_for_update(
@@ -135,6 +166,26 @@ def _is_terminal(submission: EssayFeedbackSubmission) -> bool:
     return submission.completed_at is not None or submission.status in TERMINAL_STATUSES
 
 
+def _reservation_token_is_active(
+    *,
+    session: Session,
+    counter_id: str | None,
+    reservation_token: str | None,
+) -> bool:
+    if counter_id is None:
+        return True
+    if reservation_token is None:
+        return False
+    counter = session.exec(
+        select(DailyTaskLimitCounter)
+        .where(DailyTaskLimitCounter.id == counter_id)
+        .with_for_update()
+    ).first()
+    if counter is None:
+        return False
+    return reservation_token in dict(counter.active_reservations or {})
+
+
 def mark_submission_status(
     *,
     session: Session,
@@ -144,6 +195,8 @@ def mark_submission_status(
     error_code: str = "",
     error_message: str = "",
 ) -> EssayFeedbackSubmission:
+    if status in TERMINAL_STATUSES:
+        raise ValueError("terminal submission statuses must use finalizers")
     submission = _get_submission_for_update(session=session, submission_id=submission_id)
     if _is_terminal(submission):
         return submission
@@ -209,6 +262,12 @@ def finalize_submission_with_reservation(
         return submission
 
     if terminal_status == "completed" and saved_result:
+        if not _reservation_token_is_active(
+            session=session,
+            counter_id=submission.daily_limit_counter_id,
+            reservation_token=submission.daily_limit_reservation_token,
+        ):
+            raise ValueError("essay feedback submission reservation is no longer active")
         consume_daily_task_reservation(
             session=session,
             counter_id=submission.daily_limit_counter_id,
