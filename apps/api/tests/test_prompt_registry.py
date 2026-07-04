@@ -21,7 +21,7 @@ EXPECTED_KEYS = {
 
 EXPECTED_PROMPT_VERSIONS = {
     "sentence_upgrade_feedback": "v0.5b-2026-06-08",
-    "essay_feedback": "v0.5b-2026-06-08",
+    "essay_feedback": "v0.6e-2026-07-03",
     "essay_revision_comparison": "v0.6d-2026-06-30",
     "sentence_challenge_generation": "v0.5b-2026-06-08",
     "sentence_challenge_feedback": "v0.5b-2026-06-08",

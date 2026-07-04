@@ -13,7 +13,12 @@ class PromptSpec:
     system_prompt_key: str
     system_prompt: str
     response_contract: str
+    response_contract_stream: str | None = None
     build_payload: PayloadBuilder | None = None
+
+    @property
+    def response_contract_json(self) -> str:
+        return self.response_contract
 
 
 _PROMPTS: dict[str, PromptSpec] = {}

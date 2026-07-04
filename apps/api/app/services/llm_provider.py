@@ -1,5 +1,6 @@
-from collections.abc import Iterator, Mapping
+from collections.abc import AsyncIterator, Iterator, Mapping
 from dataclasses import dataclass
+import inspect
 import json
 from typing import Any, Protocol
 
@@ -34,6 +35,18 @@ class LLMProviderResponse(Mapping[str, Any]):
         return len(self.parsed_json)
 
 
+@dataclass(frozen=True)
+class LLMProviderStreamEvent:
+    event_type: str
+    text_delta: str = ""
+    usage: dict[str, Any] | None = None
+    provider_request_id: str | None = None
+    provider_generation_id: str | None = None
+    provider_reported_cost_usd: float | None = None
+    error_code: str = ""
+    error_message: str = ""
+
+
 def response_contract_for_task(task_name: str) -> str:
     try:
         return get_prompt(task_name).response_contract
@@ -46,6 +59,13 @@ class LLMProvider(Protocol):
     model_name: str
 
     async def complete_json(self, task_name: str, payload: dict[str, Any]) -> LLMProviderResponse:
+        ...
+
+    async def stream_text(
+        self,
+        task_name: str,
+        payload: dict[str, Any],
+    ) -> AsyncIterator[LLMProviderStreamEvent]:
         ...
 
 
@@ -87,6 +107,150 @@ def _openai_compatible_usage(usage: Any) -> dict[str, Any] | None:
             normalized_usage["reasoning_tokens"] = reasoning_tokens
 
     return normalized_usage
+
+
+def _normalize_anthropic_usage(usage: Any) -> dict[str, Any] | None:
+    if not isinstance(usage, dict):
+        return None
+
+    normalized_usage: dict[str, Any] = {"provider_raw_usage": dict(usage)}
+    for source_key, target_key in (
+        ("input_tokens", "prompt_tokens"),
+        ("output_tokens", "completion_tokens"),
+    ):
+        if source_key in usage:
+            token_count = _int_or_none(usage.get(source_key))
+            if token_count is not None:
+                normalized_usage[target_key] = token_count
+    if "cache_read_input_tokens" in usage:
+        cached_tokens = _int_or_none(usage.get("cache_read_input_tokens"))
+        if cached_tokens is not None:
+            normalized_usage["cached_input_tokens"] = cached_tokens
+            normalized_usage["cached_input_tokens_included_in_prompt_tokens"] = True
+    if (
+        "prompt_tokens" in normalized_usage
+        and "completion_tokens" in normalized_usage
+        and "total_tokens" not in normalized_usage
+    ):
+        normalized_usage["total_tokens"] = (
+            normalized_usage["prompt_tokens"] + normalized_usage["completion_tokens"]
+        )
+    return normalized_usage
+
+
+def _gemini_usage(usage: Any) -> dict[str, Any] | None:
+    if not isinstance(usage, dict):
+        return None
+
+    normalized_usage: dict[str, Any] = {"provider_raw_usage": dict(usage)}
+    for source_key, target_key in (
+        ("promptTokenCount", "prompt_tokens"),
+        ("candidatesTokenCount", "completion_tokens"),
+        ("totalTokenCount", "total_tokens"),
+        ("thoughtsTokenCount", "thoughts_tokens"),
+    ):
+        if source_key in usage:
+            token_count = _int_or_none(usage.get(source_key))
+            if token_count is not None:
+                normalized_usage[target_key] = token_count
+    return normalized_usage
+
+
+def _openai_text_delta(chunk: dict[str, Any]) -> str:
+    pieces: list[str] = []
+    choices = chunk.get("choices")
+    if not isinstance(choices, list):
+        return ""
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        delta = choice.get("delta")
+        if isinstance(delta, dict):
+            content = delta.get("content")
+            if isinstance(content, str):
+                pieces.append(content)
+    return "".join(pieces)
+
+
+def _anthropic_text_delta(chunk: dict[str, Any]) -> str:
+    if chunk.get("type") != "content_block_delta":
+        return ""
+    delta = chunk.get("delta")
+    if isinstance(delta, dict) and isinstance(delta.get("text"), str):
+        return delta["text"]
+    return ""
+
+
+def _gemini_text_delta(chunk: dict[str, Any]) -> str:
+    pieces: list[str] = []
+    candidates = chunk.get("candidates")
+    if not isinstance(candidates, list):
+        return ""
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        content = candidate.get("content")
+        if not isinstance(content, dict):
+            continue
+        parts = content.get("parts")
+        if not isinstance(parts, list):
+            continue
+        for part in parts:
+            if isinstance(part, dict) and isinstance(part.get("text"), str):
+                pieces.append(part["text"])
+    return "".join(pieces)
+
+
+def normalize_provider_stream_events(
+    *,
+    provider: str,
+    chunks: list[dict[str, Any]],
+) -> list[LLMProviderStreamEvent]:
+    normalized_provider = provider.lower()
+    events: list[LLMProviderStreamEvent] = []
+    final_usage: dict[str, Any] | None = None
+
+    for chunk in chunks:
+        if not isinstance(chunk, dict):
+            continue
+
+        error = chunk.get("error")
+        if isinstance(error, dict):
+            events.append(
+                LLMProviderStreamEvent(
+                    event_type="provider_error",
+                    error_code=str(error.get("code") or "PROVIDER_ERROR"),
+                    error_message=str(error.get("message") or "provider stream error"),
+                )
+            )
+            return events
+        if chunk.get("type") in {"ping", "message_start"} and "usage" not in chunk:
+            continue
+
+        text_delta = ""
+        chunk_usage: dict[str, Any] | None = None
+        if normalized_provider in {"openai", "http"}:
+            text_delta = _openai_text_delta(chunk)
+            chunk_usage = _openai_compatible_usage(chunk.get("usage"))
+        elif normalized_provider == "anthropic":
+            text_delta = _anthropic_text_delta(chunk)
+            chunk_usage = _normalize_anthropic_usage(chunk.get("usage"))
+        elif normalized_provider == "gemini":
+            text_delta = _gemini_text_delta(chunk)
+            chunk_usage = _gemini_usage(chunk.get("usageMetadata"))
+        else:
+            text_delta = str(chunk.get("text_delta") or chunk.get("text") or "")
+            raw_usage = chunk.get("usage")
+            chunk_usage = dict(raw_usage) if isinstance(raw_usage, dict) else None
+
+        if text_delta:
+            events.append(LLMProviderStreamEvent(event_type="text_delta", text_delta=text_delta))
+        if chunk_usage is not None:
+            final_usage = chunk_usage
+
+    events.append(LLMProviderStreamEvent(event_type="usage_final", usage=final_usage))
+    events.append(LLMProviderStreamEvent(event_type="provider_done"))
+    return events
 
 
 class MockLLMProvider:
@@ -234,6 +398,36 @@ class MockLLMProvider:
             )
         raise ValueError(f"Unknown LLM task: {task_name}")
 
+    async def stream_text(
+        self,
+        task_name: str,
+        payload: dict[str, Any],
+    ) -> AsyncIterator[LLMProviderStreamEvent]:
+        if task_name != "essay_feedback":
+            response = await self.complete_json(task_name, payload)
+            yield LLMProviderStreamEvent(
+                event_type="text_delta",
+                text_delta=json.dumps(response.parsed_json, ensure_ascii=False),
+            )
+            yield LLMProviderStreamEvent(event_type="usage_final", usage=response.usage)
+            yield LLMProviderStreamEvent(event_type="provider_done")
+            return
+
+        sections = [
+            "<strengths>\n- 能写清楚发生了什么\n- 有一处心情表达\n</strengths>\n",
+            "<improvements>\n- 第二段缺少动作细节\n</improvements>\n",
+            "<problem_monsters>\n- 细节缺口\n</problem_monsters>\n",
+            "<sentence_notes>\n- 把“我很开心”换成看到、听到、做到的细节。\n</sentence_notes>\n",
+            "<revision_tasks>\n- 给第二段加一个动作描写 | 第二段\n</revision_tasks>",
+        ]
+        for section in sections:
+            yield LLMProviderStreamEvent(event_type="text_delta", text_delta=section)
+        yield LLMProviderStreamEvent(
+            event_type="usage_final",
+            usage={"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+        )
+        yield LLMProviderStreamEvent(event_type="provider_done")
+
 
 class HttpJsonLLMProvider:
     def __init__(
@@ -304,3 +498,87 @@ class HttpJsonLLMProvider:
             model=self.model_name,
             usage=normalized_usage,
         )
+
+    async def stream_text(
+        self,
+        task_name: str,
+        payload: dict[str, Any],
+    ) -> AsyncIterator[LLMProviderStreamEvent]:
+        try:
+            prompt = get_prompt(task_name)
+            system_prompt = prompt.system_prompt
+            response_contract = prompt.response_contract_stream or prompt.response_contract
+        except KeyError:
+            raise ValueError(f"Unknown LLM task: {task_name}") from None
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "task_name": task_name,
+                        "payload": payload,
+                        "response_contract": response_contract,
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ]
+        final_usage: dict[str, Any] | None = None
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            stream_context = client.stream(
+                "POST",
+                f"{self.base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.model,
+                    "messages": messages,
+                    "stream": True,
+                    "stream_options": {"include_usage": True},
+                },
+            )
+            if inspect.isawaitable(stream_context):
+                stream_context = await stream_context
+            async with stream_context as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line.removeprefix("data:").strip()
+                    if not data or data == "[DONE]":
+                        continue
+                    try:
+                        chunk = json.loads(data)
+                    except json.JSONDecodeError as exc:
+                        yield LLMProviderStreamEvent(
+                            event_type="provider_error",
+                            error_code="PROVIDER_STREAM_INVALID_JSON",
+                            error_message=str(exc),
+                        )
+                        return
+
+                    error = chunk.get("error")
+                    if isinstance(error, dict):
+                        yield LLMProviderStreamEvent(
+                            event_type="provider_error",
+                            error_code=str(error.get("code") or "PROVIDER_ERROR"),
+                            error_message=str(error.get("message") or "provider stream error"),
+                        )
+                        return
+
+                    chunk_usage = _openai_compatible_usage(chunk.get("usage"))
+                    if chunk_usage is not None:
+                        final_usage = chunk_usage
+                    text_delta = _openai_text_delta(chunk)
+                    if text_delta:
+                        yield LLMProviderStreamEvent(
+                            event_type="text_delta",
+                            text_delta=text_delta,
+                        )
+
+        yield LLMProviderStreamEvent(event_type="usage_final", usage=final_usage)
+        yield LLMProviderStreamEvent(event_type="provider_done")
