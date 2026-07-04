@@ -203,11 +203,16 @@ def complete_job(
     result_ref_type: str,
     result_ref_id: str,
     llm_call_log_id: str | None = None,
-) -> PrewritingAIJob:
+    expected_worker_id: str | None = None,
+) -> PrewritingAIJob | None:
     current_time = utcnow()
     job = _get_job_for_update(session=session, job_id=job_id)
     if job is None:
         raise ValueError("prewriting job not found")
+    if expected_worker_id is not None and (
+        job.status != "running" or job.locked_by != expected_worker_id
+    ):
+        return None
     job.status = "completed"
     job.stage = "completed"
     job.progress_event_seq += 1
@@ -234,11 +239,16 @@ def fail_job(
     error_code: str,
     error_message: str,
     llm_call_log_id: str | None = None,
-) -> PrewritingAIJob:
+    expected_worker_id: str | None = None,
+) -> PrewritingAIJob | None:
     current_time = utcnow()
     job = _get_job_for_update(session=session, job_id=job_id)
     if job is None:
         raise ValueError("prewriting job not found")
+    if expected_worker_id is not None and (
+        job.status != "running" or job.locked_by != expected_worker_id
+    ):
+        return None
     job.status = "failed"
     job.stage = "failed"
     job.progress_event_seq += 1
@@ -253,6 +263,54 @@ def fail_job(
     session.add(job)
     session.commit()
     session.refresh(job)
+    return job
+
+
+def _recover_stale_job_row(
+    *,
+    job: PrewritingAIJob,
+    now: datetime,
+    max_attempts: int,
+) -> bool:
+    lease_is_current = (
+        job.lease_expires_at is not None
+        and _ensure_utc(job.lease_expires_at) > _ensure_utc(now)
+    )
+    if job.status != "running" or job.lease_expires_at is None or lease_is_current:
+        return False
+    if job.attempt_count >= max_attempts:
+        job.status = "failed"
+        job.stage = "failed"
+        job.progress_event_seq += 1
+        job.completed_at = now
+        job.error_code = "STALE_JOB_LEASE_EXPIRED"
+        job.error_message = "prewriting job lease expired"
+    else:
+        job.status = "queued"
+        job.stage = "queued"
+    job.locked_by = None
+    job.lease_expires_at = None
+    job.result_payload_json = {}
+    _touch(job, now)
+    return True
+
+
+def recover_stale_job(
+    *,
+    session: Session,
+    job_id: str,
+    now: datetime | None = None,
+    max_attempts: int = 2,
+) -> PrewritingAIJob | None:
+    current_time = now or utcnow()
+    job = _get_job_for_update(session=session, job_id=job_id)
+    if job is None:
+        return None
+    changed = _recover_stale_job_row(job=job, now=current_time, max_attempts=max_attempts)
+    if changed:
+        session.add(job)
+        session.commit()
+        session.refresh(job)
     return job
 
 
@@ -271,25 +329,8 @@ def recover_stale_jobs(
     ).all()
     recovered: list[PrewritingAIJob] = []
     for job in candidates:
-        lease_is_current = (
-            job.lease_expires_at is not None
-            and _ensure_utc(job.lease_expires_at) > _ensure_utc(current_time)
-        )
-        if job.lease_expires_at is None or lease_is_current:
+        if not _recover_stale_job_row(job=job, now=current_time, max_attempts=max_attempts):
             continue
-        if job.attempt_count >= max_attempts:
-            job.status = "failed"
-            job.stage = "failed"
-            job.completed_at = current_time
-            job.error_code = "STALE_JOB_LEASE_EXPIRED"
-            job.error_message = "prewriting job lease expired"
-        else:
-            job.status = "queued"
-            job.stage = "queued"
-        job.locked_by = None
-        job.lease_expires_at = None
-        job.result_payload_json = {}
-        _touch(job, current_time)
         session.add(job)
         recovered.append(job)
     session.commit()

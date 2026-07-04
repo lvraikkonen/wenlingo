@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import suppress
 from copy import deepcopy
 from typing import Any, Literal
 
@@ -67,6 +68,7 @@ from app.services.prewriting_jobs import (
     fail_job,
     heartbeat_job,
     next_progress_snapshot,
+    recover_stale_job,
 )
 from app.services.streaming_events import format_sse_event
 from app.services.writing_castle_state import (
@@ -120,6 +122,7 @@ CLOSED_PREWRITING_STATUSES = {
     REVISION_REQUESTED_STATUS,
     SETTLED_ESSAY_STATUS,
 }
+PREWRITING_PROVIDER_HEARTBEAT_INTERVAL_SECONDS = 30.0
 
 
 class ClassroomEssayCreate(BaseModel):
@@ -733,6 +736,7 @@ async def execute_outline_generation(
 
 
 def _prewriting_job_response(job: PrewritingAIJob) -> dict[str, Any]:
+    public_error_message = "prewriting job failed" if job.status == "failed" else ""
     return {
         "schema_version": job.schema_version,
         "job_id": job.id,
@@ -743,7 +747,7 @@ def _prewriting_job_response(job: PrewritingAIJob) -> dict[str, Any]:
         "result_ref_type": job.result_ref_type,
         "result_ref_id": job.result_ref_id,
         "error_code": job.error_code,
-        "error_message": job.error_message,
+        "error_message": public_error_message,
     }
 
 
@@ -781,6 +785,16 @@ def _require_prewriting_job_for_auth(
     return job
 
 
+def _recover_requested_prewriting_job(
+    *,
+    session: Session,
+    job_id: str,
+) -> PrewritingAIJob | None:
+    # Keep recovery scoped to the requested row so status/events reconnects do not
+    # unexpectedly touch unrelated prewriting work.
+    return recover_stale_job(session=session, job_id=job_id)
+
+
 async def _mark_prewriting_job_failed(
     *,
     session_factory: SessionFactory,
@@ -788,6 +802,7 @@ async def _mark_prewriting_job_failed(
     error_code: str,
     error_message: str,
     llm_call_log_id: str | None = None,
+    expected_worker_id: str | None = None,
 ) -> None:
     with session_factory() as session:
         fail_job(
@@ -796,7 +811,23 @@ async def _mark_prewriting_job_failed(
             error_code=error_code,
             error_message=error_message,
             llm_call_log_id=llm_call_log_id,
+            expected_worker_id=expected_worker_id,
         )
+
+
+async def _heartbeat_prewriting_job_while_provider_runs(
+    *,
+    session_factory: SessionFactory,
+    job_id: str,
+    worker_id: str,
+    interval_seconds: float,
+) -> None:
+    interval = max(interval_seconds, 0.1)
+    while True:
+        await asyncio.sleep(interval)
+        with session_factory() as session:
+            if heartbeat_job(session=session, job_id=job_id, worker_id=worker_id) is None:
+                return
 
 
 async def _run_prewriting_job(
@@ -808,6 +839,7 @@ async def _run_prewriting_job(
     worker_id: str,
     runner: AITaskRunner,
     settings: Settings,
+    heartbeat_interval_seconds: float = PREWRITING_PROVIDER_HEARTBEAT_INTERVAL_SECONDS,
 ) -> None:
     llm_call_log_id: str | None = None
     result_ref_id: str | None = None
@@ -841,24 +873,37 @@ async def _run_prewriting_job(
 
         if result_ref_id is None:
             with session_factory() as session:
-                if task_name == "material_card_generation":
-                    result = await material_card_generation(
-                        runner,
-                        inputs["answers"],
-                        session=session,
-                        student_id=inputs["student_id"],
-                        scaffold=inputs["scaffold"],
+                heartbeat_task = asyncio.create_task(
+                    _heartbeat_prewriting_job_while_provider_runs(
+                        session_factory=session_factory,
+                        job_id=job_id,
+                        worker_id=worker_id,
+                        interval_seconds=heartbeat_interval_seconds,
                     )
-                    complete_result = _material_card_generation_result_cards(result)
-                else:
-                    result = await outline_generation(
-                        runner,
-                        inputs["cards"],
-                        session=session,
-                        student_id=inputs["student_id"],
-                        scaffold=inputs["scaffold"],
-                    )
-                    complete_result = _outline_generation_result_sections(result)
+                )
+                try:
+                    if task_name == "material_card_generation":
+                        result = await material_card_generation(
+                            runner,
+                            inputs["answers"],
+                            session=session,
+                            student_id=inputs["student_id"],
+                            scaffold=inputs["scaffold"],
+                        )
+                        complete_result = _material_card_generation_result_cards(result)
+                    else:
+                        result = await outline_generation(
+                            runner,
+                            inputs["cards"],
+                            session=session,
+                            student_id=inputs["student_id"],
+                            scaffold=inputs["scaffold"],
+                        )
+                        complete_result = _outline_generation_result_sections(result)
+                finally:
+                    heartbeat_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await heartbeat_task
                 log = getattr(result, "log", None)
                 llm_call_log_id = log.id if log is not None else None
                 session.commit()
@@ -893,6 +938,7 @@ async def _run_prewriting_job(
                 result_ref_type=PREWRITING_JOB_RESULT_REF_TYPE,
                 result_ref_id=result_ref_id,
                 llm_call_log_id=llm_call_log_id,
+                expected_worker_id=worker_id,
             )
     except HTTPException as exc:
         await _mark_prewriting_job_failed(
@@ -901,6 +947,7 @@ async def _run_prewriting_job(
             error_code=f"HTTP_{exc.status_code}",
             error_message=str(exc.detail),
             llm_call_log_id=llm_call_log_id,
+            expected_worker_id=worker_id,
         )
     except Exception as exc:
         await _mark_prewriting_job_failed(
@@ -909,6 +956,7 @@ async def _run_prewriting_job(
             error_code="PREWRITING_JOB_FAILED",
             error_message=str(exc),
             llm_call_log_id=llm_call_log_id,
+            expected_worker_id=worker_id,
         )
 
 
@@ -1024,6 +1072,7 @@ async def get_prewriting_job(
         context=context,
         job_id=job_id,
     )
+    job = _recover_requested_prewriting_job(session=session, job_id=job.id) or job
     return _prewriting_job_response(job)
 
 
@@ -1051,7 +1100,7 @@ async def stream_prewriting_job_events(
             if await request.is_disconnected():
                 break
             with session_factory() as session:
-                job = session.get(PrewritingAIJob, job_id)
+                job = _recover_requested_prewriting_job(session=session, job_id=job_id)
                 if job is None:
                     break
                 snapshot = _prewriting_job_event_snapshot(job)
