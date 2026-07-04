@@ -20,12 +20,12 @@ class StreamEventBuilder:
     def event(self, event_name: str, data: dict) -> dict:
         self.seq += 1
         return {
+            **data,
             "schema_version": "v0.6e.1",
             "event_id": f"evt_{new_uuid()}",
             "seq": self.seq,
             "stream_id": self.stream_id,
             "submission_id": self.submission_id,
-            **data,
         }
 
     def frame(self, event_name: str, data: dict) -> WenLingoStreamFrame:

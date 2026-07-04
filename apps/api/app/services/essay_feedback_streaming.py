@@ -77,21 +77,22 @@ class EssayFeedbackSectionParser:
                 return emitted
             if self.next_index >= len(SECTION_ORDER):
                 if stripped:
-                    raise StreamSectionError("STREAM_FINAL_SCHEMA_INVALID", "content after final section")
+                    raise StreamSectionError("STREAM_SECTION_OUT_OF_ORDER", "content after final section")
                 return emitted
 
+            expected = SECTION_ORDER[self.next_index]
             opening_match = OPENING_TAG_PATTERN.match(stripped)
             if opening_match is not None:
                 opened_name = opening_match.group("name")
                 if opened_name in self.seen:
                     raise StreamSectionError("STREAM_SECTION_DUPLICATE", opened_name)
-                expected = SECTION_ORDER[self.next_index]
                 if opened_name != expected:
                     raise StreamSectionError("STREAM_SECTION_OUT_OF_ORDER", opened_name)
             else:
-                if "<" in stripped or "\n" in stripped:
-                    raise StreamSectionError("STREAM_SECTION_OUT_OF_ORDER", stripped[:40])
-                return emitted
+                expected_open = f"<{expected}>"
+                if expected_open.startswith(stripped):
+                    return emitted
+                raise StreamSectionError("STREAM_SECTION_OUT_OF_ORDER", stripped[:40])
 
             match = SECTION_PATTERN.match(stripped)
             if match is None:

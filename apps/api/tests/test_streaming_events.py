@@ -23,6 +23,29 @@ def test_stream_event_builder_can_wrap_queue_frames():
     assert frame.data["section"] == "strengths"
 
 
+def test_stream_event_builder_envelope_values_cannot_be_overridden():
+    builder = StreamEventBuilder(stream_id="stream-1", submission_id="submission-1")
+
+    event = builder.event(
+        "start",
+        {
+            "schema_version": "bad-version",
+            "event_id": "evt_bad",
+            "seq": 99,
+            "stream_id": "bad-stream",
+            "submission_id": "bad-submission",
+            "phase": "reserved",
+        },
+    )
+
+    assert event["schema_version"] == "v0.6e.1"
+    assert event["event_id"] != "evt_bad"
+    assert event["seq"] == 1
+    assert event["stream_id"] == "stream-1"
+    assert event["submission_id"] == "submission-1"
+    assert event["phase"] == "reserved"
+
+
 def test_format_sse_event_uses_event_name_and_json_data():
     payload = {
         "schema_version": "v0.6e.1",
