@@ -580,7 +580,7 @@ async def create_essay(
             submission_id=submission.id if submission is not None else None,
             error_code="ESSAY_FEEDBACK_SAVE_FAILED",
             error_message="essay feedback save failed",
-            llm_call_log_id=feedback_result.log.id if feedback_result.log else None,
+            llm_call_log_id=None,
         )
         raise
     if submission is not None:

@@ -4,6 +4,7 @@ import pytest
 from sqlmodel import select
 
 from app.api.deps import get_ai_task_runner, get_db_session
+from app.api.routes import essays as essays_routes
 from app.core.config import Settings, get_settings
 from app.domain.models import (
     DailyTaskLimitCounter,
@@ -257,6 +258,46 @@ def test_direct_draft_json_provider_error_releases_ledger_reservation(session, c
     assert counter.released_count == 1
     assert len(session.exec(select(EssayVersion)).all()) == 0
     assert len(session.exec(select(LLMCallLog)).all()) == 0
+
+
+def test_direct_draft_json_save_error_releases_without_rolled_back_log_id(
+    session,
+    client,
+    monkeypatch,
+):
+    client.app.dependency_overrides[get_settings] = lambda: Settings(
+        llm_provider="mock",
+        llm_daily_limit_enabled=True,
+    )
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    def fail_save(**kwargs):
+        raise RuntimeError("official save failed")
+
+    monkeypatch.setattr(essays_routes, "save_direct_draft_feedback_result", fail_save)
+
+    with pytest.raises(RuntimeError, match="official save failed"):
+        client.post(
+            f"/api/students/{student.id}/essays",
+            json={
+                "title": "我的一天",
+                "draft": "今天我去了公园。后来我观察了一棵树。最后我很开心。",
+                "entry": "existing_draft",
+                "client_submission_id": "json-save-error-release",
+            },
+        )
+
+    submission = session.exec(select(EssayFeedbackSubmission)).one()
+    assert submission.status == "failed_released"
+    assert submission.llm_call_log_id is None
+    assert submission.essay_version_id is None
+    counter = session.exec(select(DailyTaskLimitCounter)).one()
+    assert counter.consumed_count == 0
+    assert counter.reserved_count == 0
+    assert counter.released_count == 1
+    assert len(session.exec(select(LLMCallLog)).all()) == 0
+    assert len(session.exec(select(EssayVersion)).all()) == 0
 
 
 def test_direct_draft_json_daily_limit_exhaustion_returns_429_without_provider_call(
