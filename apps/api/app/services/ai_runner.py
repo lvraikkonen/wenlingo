@@ -628,6 +628,7 @@ async def run_ai_task(
     primary_provider: LLMProvider,
     fallback_provider: LLMProvider,
     daily_limit: int | None = None,
+    daily_limit_reservation_owner: str = "runner",
     prompt_version: str = "",
 ) -> AITaskResult[T]:
     route = resolve_task_route(settings, task_name, prompt_key)
@@ -635,8 +636,11 @@ async def run_ai_task(
     effective_prompt_version = prompt_version or route.prompt_key
     reservation_counter_id: str | None = None
     reservation_token: str | None = None
+    runner_owns_daily_limit_reservation = daily_limit_reservation_owner == "runner"
 
     if (
+        runner_owns_daily_limit_reservation
+        and
         session is not None
         and student_id is not None
         and settings.llm_daily_limit_enabled
@@ -721,7 +725,7 @@ async def run_ai_task(
             resolved_model=primary_response.model,
             payload=payload,
         )
-        if session is not None:
+        if runner_owns_daily_limit_reservation and session is not None:
             consume_daily_task_reservation(
                 session=session,
                 counter_id=reservation_counter_id,
@@ -761,7 +765,7 @@ async def run_ai_task(
             resolved_model=fallback_response.model,
             payload=payload,
         )
-        if session is not None:
+        if runner_owns_daily_limit_reservation and session is not None:
             consume_daily_task_reservation(
                 session=session,
                 counter_id=reservation_counter_id,
@@ -784,7 +788,7 @@ async def run_ai_task(
                 fallback_context,
             )
         except Exception:
-            if session is not None:
+            if runner_owns_daily_limit_reservation and session is not None:
                 fail_daily_task_reservation(
                     session=session,
                     counter_id=reservation_counter_id,
@@ -809,7 +813,7 @@ async def run_ai_task(
             resolved_model="local_fallback",
             payload=payload,
         )
-        if session is not None:
+        if runner_owns_daily_limit_reservation and session is not None:
             consume_daily_task_reservation(
                 session=session,
                 counter_id=reservation_counter_id,
@@ -821,7 +825,7 @@ async def run_ai_task(
             status=TaskFinalStatus.DETERMINISTIC_FALLBACK_USED,
         )
 
-    if session is not None:
+    if runner_owns_daily_limit_reservation and session is not None:
         fail_daily_task_reservation(
             session=session,
             counter_id=reservation_counter_id,

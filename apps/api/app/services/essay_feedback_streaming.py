@@ -1050,6 +1050,28 @@ def _reserve_submission_limit(
     session.flush()
 
 
+def reserve_submission_daily_limit_if_needed(
+    *,
+    session: Session,
+    settings: Settings,
+    student_id: str,
+    submission: EssayFeedbackSubmission,
+) -> None:
+    if not settings.llm_daily_limit_enabled:
+        return
+    if submission.daily_limit_counter_id is not None:
+        return
+    route = resolve_task_route(settings, "essay_feedback", "essay_feedback")
+    _reserve_submission_limit(
+        session=session,
+        settings=settings,
+        student_id=student_id,
+        submission_id=submission.id,
+        route_daily_limit=route.task.daily_limit,
+    )
+    session.refresh(submission)
+
+
 def _build_backend_task(
     *,
     request_session: Session,

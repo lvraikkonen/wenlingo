@@ -1,7 +1,12 @@
 from sqlmodel import select
 
 from app.core.config import Settings, get_settings
-from app.domain.models import EssayFeedbackSubmission, LLMCallLog
+from app.domain.models import (
+    DailyTaskLimitCounter,
+    EssayFeedbackSubmission,
+    EssayVersion,
+    LLMCallLog,
+)
 from app.services.essay_feedback_submission import (
     create_or_get_submission,
     mark_submission_status,
@@ -114,6 +119,36 @@ def test_json_fallback_active_streaming_started_returns_202_not_second_provider_
     assert response.json()["status"] == "IN_PROGRESS"
     assert response.json()["submission_id"] == submission.id
     assert len(session.exec(select(LLMCallLog)).all()) == 0
+
+
+def test_direct_draft_json_uses_submission_ledger_as_daily_limit_owner(session, client):
+    client.app.dependency_overrides[get_settings] = lambda: Settings(
+        llm_provider="mock",
+        llm_daily_limit_enabled=True,
+    )
+    family = create_authenticated_family(session)
+    student = family["student"]
+    payload = {
+        "title": "我的一天",
+        "draft": "今天我去了公园。后来我观察了一棵树。最后我很开心。",
+        "entry": "existing_draft",
+        "client_submission_id": "json-ledger-limit-owner",
+    }
+
+    first = client.post(f"/api/students/{student.id}/essays", json=payload)
+    second = client.post(f"/api/students/{student.id}/essays", json=payload)
+
+    assert first.status_code == 201
+    assert second.status_code == 200
+    assert second.json()["status"] == "COMPLETED"
+    counter = session.exec(select(DailyTaskLimitCounter)).one()
+    assert counter.consumed_count == 1
+    assert counter.reserved_count == 0
+    assert counter.active_reservations == {}
+    submission = session.exec(select(EssayFeedbackSubmission)).one()
+    assert submission.status == "completed"
+    assert submission.daily_limit_counter_id == counter.id
+    assert len(session.exec(select(LLMCallLog)).all()) == 1
 
 
 def test_active_streaming_reentry_does_not_emit_fake_completed_done(session, client):
@@ -229,6 +264,71 @@ def test_prewriting_stream_existing_first_draft_rejects_before_provider_call(ses
     assert first_draft.status_code == 201
     assert response.status_code == 409
     assert len(session.exec(select(EssayFeedbackSubmission)).all()) == submission_count
+    assert len(session.exec(select(LLMCallLog)).all()) == log_count
+
+
+def test_prewriting_json_same_completed_submission_replays_without_new_result(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+    payload = {
+        "draft": "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。",
+        "client_submission_id": "prewriting-json-replay",
+    }
+
+    first = client.post(f"/api/essays/{essay_id}/first-draft", json=payload)
+    version_count = len(session.exec(select(EssayVersion)).all())
+    log_count = len(session.exec(select(LLMCallLog)).all())
+    second = client.post(f"/api/essays/{essay_id}/first-draft", json=payload)
+
+    assert first.status_code == 201
+    assert second.status_code == 200
+    assert second.json()["status"] == "COMPLETED"
+    assert len(session.exec(select(EssayVersion)).all()) == version_count
+    assert len(session.exec(select(LLMCallLog)).all()) == log_count
+
+
+def test_prewriting_stream_same_completed_submission_replays_done_without_new_result(
+    session,
+    client,
+):
+    client.app.dependency_overrides[get_settings] = lambda: Settings(
+        llm_provider="mock",
+        essay_feedback_streaming_enabled=True,
+    )
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+    payload = {
+        "draft": "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。",
+        "client_submission_id": "prewriting-stream-replay",
+    }
+
+    first = client.post(
+        f"/api/essays/{essay_id}/first-draft/stream-feedback",
+        json=payload,
+    )
+    version_count = len(session.exec(select(EssayVersion)).all())
+    log_count = len(session.exec(select(LLMCallLog)).all())
+    second = client.post(
+        f"/api/essays/{essay_id}/first-draft/stream-feedback",
+        json=payload,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert "event: start" in second.text
+    assert "event: done" in second.text
+    assert '"stream_final_status":"completed"' in second.text
+    assert len(session.exec(select(EssayVersion)).all()) == version_count
     assert len(session.exec(select(LLMCallLog)).all()) == log_count
 
 

@@ -917,6 +917,7 @@ async def essay_feedback(
     session: Session | None = None,
     prompt_version: str = "",
     student_id: str | None = None,
+    daily_limit_reservation_owner: str = "runner",
 ) -> LLMTaskResult[EssayFeedback]:
     ghostwriting = convert_ghostwriting_request(draft)
     if ghostwriting.blocked:
@@ -937,6 +938,7 @@ async def essay_feedback(
         deterministic_fallback_factory=lambda _context: fallback_essay_feedback(),
         input_summary=f"作文题目：{title}；初稿长度：{len(draft)}",
         prompt_version=effective_prompt_version,
+        daily_limit_reservation_owner=daily_limit_reservation_owner,
     )
 
 

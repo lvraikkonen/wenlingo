@@ -48,11 +48,13 @@ from app.services.essay_feedback_persistence import save_direct_draft_feedback_r
 from app.services.essay_feedback_streaming import (
     active_submission_json_response,
     build_direct_draft_feedback_stream,
+    reserve_submission_daily_limit_if_needed,
 )
 from app.services.essay_feedback_submission import (
     IdempotencyPayloadMismatch,
     create_or_get_submission,
     finalize_submission_with_reservation,
+    mark_submission_status,
 )
 from app.services.essay_workflow import (
     ASSESSMENT_ESSAY_STATUS,
@@ -431,7 +433,20 @@ async def create_essay(
         if active_response is not None and active_response["status"] == "IN_PROGRESS":
             return JSONResponse(status_code=202, content=active_response)
         if active_response is not None:
-            return active_response
+            return JSONResponse(status_code=200, content=active_response)
+        reserve_submission_daily_limit_if_needed(
+            session=session,
+            settings=settings,
+            student_id=student_id,
+            submission=submission,
+        )
+        if submission.status == "created":
+            mark_submission_status(
+                session=session,
+                submission_id=submission.id,
+                status="reserved",
+            )
+        session.commit()
     try:
         feedback_result = await essay_feedback(
             runner,
@@ -440,6 +455,9 @@ async def create_essay(
             session=session,
             prompt_version=settings.llm_prompt_version,
             student_id=student_id,
+            daily_limit_reservation_owner=(
+                "submission_ledger" if submission is not None else "runner"
+            ),
         )
         feedback = feedback_result.output
     except IdempotencyPayloadMismatch as exc:
