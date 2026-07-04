@@ -91,6 +91,13 @@ class StreamSectionError(Exception):
         self.code = code
 
 
+class StreamTimeoutError(Exception):
+    def __init__(self, code: str, status: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.status = status
+
+
 class StreamingAlreadyInProgress(Exception):
     def __init__(self, submission_id: str, fetch_url: str = ""):
         super().__init__("essay feedback submission is already in progress")
@@ -267,6 +274,9 @@ class StreamingBackendTask:
         prompt_version: str = "",
         heartbeat_seconds: int = 12,
         first_provider_event_delay_seconds: float = 0,
+        first_event_timeout_seconds: float = 8,
+        section_timeout_seconds: float = 20,
+        backend_continuation_timeout_seconds: float = 60,
     ):
         self.provider = provider
         self.payload = payload
@@ -278,6 +288,9 @@ class StreamingBackendTask:
         self.prompt_version = prompt_version or get_prompt("essay_feedback").version
         self.heartbeat_seconds = heartbeat_seconds
         self.first_provider_event_delay_seconds = first_provider_event_delay_seconds
+        self.first_event_timeout_seconds = first_event_timeout_seconds
+        self.section_timeout_seconds = section_timeout_seconds
+        self.backend_continuation_timeout_seconds = backend_continuation_timeout_seconds
         self.parser = EssayFeedbackSectionParser()
         self.event_builder = StreamEventBuilder(
             stream_id=f"stream_{new_uuid()}",
@@ -306,6 +319,7 @@ class StreamingBackendTask:
         self.result_fetch_url = ""
         self._task_handle: asyncio.Task[None] | None = None
         self._terminal = asyncio.Event()
+        self._disconnect_event = asyncio.Event()
 
     @classmethod
     def for_test(
@@ -314,6 +328,9 @@ class StreamingBackendTask:
         provider: LLMProvider,
         first_provider_event_delay_seconds: float = 0,
         heartbeat_seconds: int = 12,
+        first_event_timeout_seconds: float = 8,
+        section_timeout_seconds: float = 20,
+        backend_continuation_timeout_seconds: float = 60,
     ) -> "StreamingBackendTask":
         return cls(
             provider=provider,
@@ -321,6 +338,9 @@ class StreamingBackendTask:
             submission_id=f"test-submission-{new_uuid()}",
             heartbeat_seconds=heartbeat_seconds,
             first_provider_event_delay_seconds=first_provider_event_delay_seconds,
+            first_event_timeout_seconds=first_event_timeout_seconds,
+            section_timeout_seconds=section_timeout_seconds,
+            backend_continuation_timeout_seconds=backend_continuation_timeout_seconds,
         )
 
     @property
@@ -346,6 +366,7 @@ class StreamingBackendTask:
 
     async def run_to_terminal(self) -> None:
         start_perf = perf_counter()
+        seen_provider_event = False
         try:
             self._mark_submission_status("streaming_started")
             await self.queue.put(
@@ -358,9 +379,16 @@ class StreamingBackendTask:
                     },
                 )
             )
-            if self.first_provider_event_delay_seconds > 0:
-                await asyncio.sleep(self.first_provider_event_delay_seconds)
-            async for provider_event in self.provider.stream_text("essay_feedback", self.payload):
+            provider_iterator = self._provider_events().__aiter__()
+            while True:
+                try:
+                    provider_event = await self._next_provider_event(
+                        provider_iterator,
+                        seen_provider_event=seen_provider_event,
+                    )
+                except StopAsyncIteration:
+                    break
+                seen_provider_event = True
                 self._capture_provider_ids(provider_event)
                 if provider_event.event_type == "text_delta":
                     await self.handle_text_delta(provider_event.text_delta)
@@ -400,6 +428,12 @@ class StreamingBackendTask:
                 error_code=exc.code,
                 error_message=str(exc),
             )
+        except StreamTimeoutError as exc:
+            await self._finalize_failure(
+                status=exc.status,
+                error_code=exc.code,
+                error_message=str(exc),
+            )
         except Exception as exc:
             await self._finalize_failure(
                 status=(
@@ -413,6 +447,92 @@ class StreamingBackendTask:
         finally:
             self._terminal.set()
             await self.queue.put(None)
+
+    async def _provider_events(self) -> AsyncIterator[LLMProviderStreamEvent]:
+        if self.first_provider_event_delay_seconds > 0:
+            await asyncio.sleep(self.first_provider_event_delay_seconds)
+        async for provider_event in self.provider.stream_text("essay_feedback", self.payload):
+            yield provider_event
+
+    async def _next_provider_event(
+        self,
+        provider_iterator: AsyncIterator[LLMProviderStreamEvent],
+        *,
+        seen_provider_event: bool,
+    ) -> LLMProviderStreamEvent:
+        provider_task = asyncio.create_task(provider_iterator.__anext__())
+        while True:
+            timeout = self._provider_wait_timeout(seen_provider_event=seen_provider_event)
+            wait_tasks: set[asyncio.Task] = {provider_task}
+            disconnect_task: asyncio.Task | None = None
+            if self.client_disconnected_at is None and self.first_visible_content_at is not None:
+                disconnect_task = asyncio.create_task(self._disconnect_event.wait())
+                wait_tasks.add(disconnect_task)
+            done, _pending = await asyncio.wait(
+                wait_tasks,
+                timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if provider_task in done:
+                if disconnect_task is not None and not disconnect_task.done():
+                    disconnect_task.cancel()
+                return provider_task.result()
+            if disconnect_task is not None and disconnect_task in done:
+                continue
+            if disconnect_task is not None and not disconnect_task.done():
+                disconnect_task.cancel()
+            provider_task.cancel()
+            raise self._timeout_error(seen_provider_event=seen_provider_event)
+
+    def _provider_wait_timeout(self, *, seen_provider_event: bool) -> float | None:
+        timeouts: list[float] = []
+        if not seen_provider_event and self.first_event_timeout_seconds > 0:
+            timeouts.append(self.first_event_timeout_seconds)
+        elif self.first_provider_delta_at is not None and self.section_timeout_seconds > 0:
+            timeouts.append(self.section_timeout_seconds)
+        continuation_remaining = self._backend_continuation_remaining_seconds()
+        if continuation_remaining is not None:
+            timeouts.append(continuation_remaining)
+        return min(timeouts) if timeouts else None
+
+    def _backend_continuation_remaining_seconds(self) -> float | None:
+        if (
+            self.client_disconnected_at is None
+            or self.first_visible_content_at is None
+            or self.backend_continuation_timeout_seconds <= 0
+        ):
+            return None
+        elapsed = (utcnow() - self.client_disconnected_at).total_seconds()
+        return max(self.backend_continuation_timeout_seconds - elapsed, 0.001)
+
+    def _timeout_error(self, *, seen_provider_event: bool) -> StreamTimeoutError:
+        continuation_remaining = self._backend_continuation_remaining_seconds()
+        if (
+            self.client_disconnected_at is not None
+            and self.first_visible_content_at is not None
+            and continuation_remaining is not None
+            and continuation_remaining <= 0.01
+        ):
+            return StreamTimeoutError(
+                "STREAM_BACKEND_CONTINUATION_TIMEOUT",
+                "client_disconnected_after_visible_content_aborted",
+                "backend continuation exceeded timeout after client disconnect",
+            )
+        if not seen_provider_event:
+            return StreamTimeoutError(
+                "STREAM_FIRST_EVENT_TIMEOUT",
+                "provider_failed_before_visible_content",
+                "provider did not emit a first event before timeout",
+            )
+        return StreamTimeoutError(
+            "STREAM_SECTION_TIMEOUT",
+            (
+                "provider_failed_after_visible_content"
+                if self.first_provider_delta_at is not None
+                else "provider_failed_before_visible_content"
+            ),
+            "provider stream stalled before the next section completed",
+        )
 
     async def handle_text_delta(self, text_delta: str) -> None:
         if not text_delta:
@@ -470,7 +590,12 @@ class StreamingBackendTask:
             feedback = self.parser.build_feedback()
         except StreamSectionError as exc:
             await self._finalize_failure(
-                status="final_schema_invalid",
+                status=(
+                    "provider_failed_after_visible_content"
+                    if self.first_visible_content_at is not None
+                    or self.first_provider_delta_at is not None
+                    else "provider_failed_before_visible_content"
+                ),
                 error_code=exc.code,
                 error_message=str(exc),
             )
@@ -529,6 +654,7 @@ class StreamingBackendTask:
 
     def mark_client_disconnected(self) -> None:
         self.client_disconnected_at = utcnow()
+        self._disconnect_event.set()
         if self.first_visible_content_at is not None:
             self._mark_submission_status("backend_continuing_after_disconnect")
 
@@ -810,6 +936,29 @@ async def _single_done_stream(
     yield format_sse_event(done.event_name, done.data)
 
 
+async def _single_in_progress_stream(
+    *,
+    submission_id: str,
+    fetch_url: str,
+) -> AsyncIterator[str]:
+    builder = StreamEventBuilder(stream_id=f"stream_{new_uuid()}", submission_id=submission_id)
+    start = builder.frame(
+        "start",
+        {"phase": "in_progress", "task_name": "essay_feedback", "stream_protocol": "sse"},
+    )
+    status = builder.frame(
+        "error",
+        {
+            "status": "IN_PROGRESS",
+            "stream_final_status": "streaming_in_progress",
+            "error_code": "STREAM_ALREADY_IN_PROGRESS",
+            "fetch_url": fetch_url,
+        },
+    )
+    yield format_sse_event(start.event_name, start.data)
+    yield format_sse_event(status.event_name, status.data)
+
+
 def _payload_dict(payload: Any) -> dict[str, Any]:
     if hasattr(payload, "model_dump"):
         return payload.model_dump()
@@ -882,6 +1031,11 @@ def _build_backend_task(
         pricing_status=route.pricing_status,
         prompt_version=settings.llm_prompt_version,
         heartbeat_seconds=settings.streaming_heartbeat_seconds,
+        first_event_timeout_seconds=settings.streaming_first_event_timeout_seconds,
+        section_timeout_seconds=settings.streaming_section_timeout_seconds,
+        backend_continuation_timeout_seconds=(
+            settings.streaming_backend_continuation_timeout_seconds
+        ),
     )
 
 
@@ -985,7 +1139,7 @@ def build_direct_draft_feedback_stream(
             fetch_url=completed.fetch_url,
         )
     except StreamingAlreadyInProgress as active:
-        return _single_done_stream(
+        return _single_in_progress_stream(
             submission_id=active.submission_id,
             fetch_url=active.fetch_url,
         )
@@ -1040,7 +1194,7 @@ def build_prewriting_first_draft_feedback_stream(
             fetch_url=completed.fetch_url,
         )
     except StreamingAlreadyInProgress as active:
-        return _single_done_stream(
+        return _single_in_progress_stream(
             submission_id=active.submission_id,
             fetch_url=active.fetch_url,
         )

@@ -9,6 +9,22 @@ from app.services.essay_feedback_submission import (
 from tests.conftest import create_authenticated_family
 
 
+def test_direct_draft_json_requires_client_submission_id(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    response = client.post(
+        f"/api/students/{student.id}/essays",
+        json={
+            "title": "我学会了骑车",
+            "draft": "刚开始我很害怕。后来我会了。我很开心。",
+            "entry": "existing_draft",
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_direct_draft_stream_returns_previews_and_done(session, client):
     client.app.dependency_overrides[get_settings] = lambda: Settings(
         llm_provider="mock",
@@ -98,3 +114,136 @@ def test_json_fallback_active_streaming_started_returns_202_not_second_provider_
     assert response.json()["status"] == "IN_PROGRESS"
     assert response.json()["submission_id"] == submission.id
     assert len(session.exec(select(LLMCallLog)).all()) == 0
+
+
+def test_active_streaming_reentry_does_not_emit_fake_completed_done(session, client):
+    client.app.dependency_overrides[get_settings] = lambda: Settings(
+        llm_provider="mock",
+        essay_feedback_streaming_enabled=True,
+    )
+    family = create_authenticated_family(session)
+    student = family["student"]
+    payload = {
+        "title": "我的一天",
+        "draft": "今天我去了公园。后来我观察了一棵树。最后我很开心。",
+        "entry": "existing_draft",
+        "client_submission_id": "active-stream-reentry",
+    }
+    submission = create_or_get_submission(
+        session=session,
+        student_id=student.id,
+        essay_id=None,
+        task_name="essay_feedback",
+        route_scope="direct_draft",
+        client_submission_id="active-stream-reentry",
+        payload=payload,
+    )
+    mark_submission_status(
+        session=session,
+        submission_id=submission.id,
+        status="streaming_started",
+    )
+    session.commit()
+
+    response = client.post(
+        f"/api/students/{student.id}/essays/stream-feedback",
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers["content-type"]
+    body = response.text
+    assert "event: start" in body
+    assert "event: done" not in body
+    assert '"stream_final_status":"completed"' not in body
+    assert '"status":"IN_PROGRESS"' in body
+
+
+def test_prewriting_first_draft_stream_returns_previews_and_done(session, client):
+    client.app.dependency_overrides[get_settings] = lambda: Settings(
+        llm_provider="mock",
+        essay_feedback_streaming_enabled=True,
+    )
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+
+    response = client.post(
+        f"/api/essays/{essay_id}/first-draft/stream-feedback",
+        json={
+            "draft": "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。",
+            "client_submission_id": "stream-prewriting-1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers["content-type"]
+    body = response.text
+    assert "event: start" in body
+    assert "event: feedback_section_preview" in body
+    assert "event: done" in body
+
+    submission = session.exec(select(EssayFeedbackSubmission)).one()
+    assert submission.status == "completed"
+    assert submission.client_submission_id == "stream-prewriting-1"
+    assert submission.route_scope == "prewriting_first_draft"
+    log = session.exec(select(LLMCallLog)).one()
+    assert log.streaming_enabled is True
+    assert log.stream_final_status == "completed"
+
+
+def test_prewriting_stream_existing_first_draft_rejects_before_provider_call(session, client):
+    client.app.dependency_overrides[get_settings] = lambda: Settings(
+        llm_provider="mock",
+        essay_feedback_streaming_enabled=True,
+    )
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+    first_draft = client.post(
+        f"/api/essays/{essay_id}/first-draft",
+        json={
+            "draft": "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。",
+            "client_submission_id": "prewriting-json-existing",
+        },
+    )
+    submission_count = len(session.exec(select(EssayFeedbackSubmission)).all())
+    log_count = len(session.exec(select(LLMCallLog)).all())
+
+    response = client.post(
+        f"/api/essays/{essay_id}/first-draft/stream-feedback",
+        json={
+            "draft": "我又写了一稿，但这个作文已经提交过初稿了。",
+            "client_submission_id": "prewriting-stream-blocked",
+        },
+    )
+
+    assert first_draft.status_code == 201
+    assert response.status_code == 409
+    assert len(session.exec(select(EssayFeedbackSubmission)).all()) == submission_count
+    assert len(session.exec(select(LLMCallLog)).all()) == log_count
+
+
+def test_prewriting_first_draft_json_requires_client_submission_id(session, client):
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+
+    response = client.post(
+        f"/api/essays/{essay_id}/first-draft",
+        json={"draft": "我学会了骑车。刚开始我很害怕，后来我慢慢练习，终于能自己骑了。我很开心。"},
+    )
+
+    assert response.status_code == 422

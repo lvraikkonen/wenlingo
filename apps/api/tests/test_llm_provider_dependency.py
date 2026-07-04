@@ -109,6 +109,7 @@ def test_essay_routes_use_runner_dependency_override(session, client):
             "title": "我学会了骑车",
             "draft": "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
             "entry": "existing_draft",
+            "client_submission_id": "provider-dependency-essay",
         },
     )
     assert start.status_code == 201

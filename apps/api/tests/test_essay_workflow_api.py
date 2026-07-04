@@ -122,6 +122,7 @@ def _start_essay(session, client, runner: RecordingEssayRunner | None = None):
             "title": "我学会了骑车",
             "draft": "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
             "entry": "existing_draft",
+            "client_submission_id": "essay-workflow-start",
         },
     )
     assert start.status_code == 201
@@ -191,6 +192,7 @@ def test_essay_from_existing_draft_feedback_and_revision(session, client):
             "title": "我学会了骑车",
             "draft": "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
             "entry": "existing_draft",
+            "client_submission_id": "essay-existing-draft-workflow",
         },
     )
     assert start.status_code == 201
@@ -264,11 +266,21 @@ def test_essay_create_rejects_overlong_title_and_draft(session, client):
 
     title_response = client.post(
         f"/api/students/{student.id}/essays",
-        json={"title": "题" * 101, "draft": "我学会了骑车。刚开始我很害怕。后来我会了。", "entry": "existing_draft"},
+        json={
+            "title": "题" * 101,
+            "draft": "我学会了骑车。刚开始我很害怕。后来我会了。",
+            "entry": "existing_draft",
+            "client_submission_id": "essay-overlong-title",
+        },
     )
     draft_response = client.post(
         f"/api/students/{student.id}/essays",
-        json={"title": "我学会了骑车", "draft": "文" * 3001, "entry": "existing_draft"},
+        json={
+            "title": "我学会了骑车",
+            "draft": "文" * 3001,
+            "entry": "existing_draft",
+            "client_submission_id": "essay-overlong-draft",
+        },
     )
 
     assert title_response.status_code == 422

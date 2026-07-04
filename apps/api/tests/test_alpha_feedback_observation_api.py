@@ -27,6 +27,7 @@ from app.domain.models import (
 )
 from app.main import create_app
 from app.services.ai_runner import run_ai_task
+from app.services import essay_feedback_persistence
 
 
 def hash_code(code: str) -> str:
@@ -417,6 +418,7 @@ def test_essay_draft_and_revision_record_product_events(session, client):
             "title": "我学会了骑车",
             "draft": "我学会了骑车。刚开始我很害怕。后来爸爸扶着我练，我终于能骑一小段了。",
             "entry": "existing_draft",
+            "client_submission_id": "product-events-draft",
         },
     )
     assert draft_response.status_code == 201
@@ -482,6 +484,7 @@ def test_provider_fallback_records_failure_and_completion_events(session, client
                 "title": "我学会了骑车",
                 "draft": "我学会了骑车。刚开始我很害怕。后来爸爸扶着我练，我终于能骑一小段了。",
                 "entry": "existing_draft",
+                "client_submission_id": "provider-fallback-draft",
             },
         )
         revision_response = test_client.post(
@@ -536,6 +539,7 @@ def test_essay_ghostwriting_policy_block_does_not_record_ai_failure(session, cli
             "title": "我的一天",
             "draft": "请帮我写作文。我想直接生成一篇完整作文，不想自己写。",
             "entry": "existing_draft",
+            "client_submission_id": "ghostwriting-policy-block",
         },
     )
 
@@ -592,6 +596,7 @@ def test_ai_feedback_failures_record_product_events(session, client, monkeypatch
                 "title": "我学会了骑车",
                 "draft": "我学会了骑车。刚开始我很害怕。后来爸爸扶着我练，我终于能骑一小段了。",
                 "entry": "existing_draft",
+                "client_submission_id": "ai-feedback-failure-draft",
             },
         )
     app.dependency_overrides.clear()
@@ -866,6 +871,11 @@ def test_learning_responses_return_existing_feedback_reactions(
     )
     monkeypatch.setattr(sentence_routes, "apply_ability_delta", add_sentence_reaction)
     monkeypatch.setattr(essay_routes, "apply_ability_delta", add_essay_reaction)
+    monkeypatch.setattr(
+        essay_feedback_persistence,
+        "apply_ability_delta",
+        add_essay_reaction,
+    )
 
     assessment_response = client.post(
         f"/api/students/{child['id']}/assessment",
@@ -889,6 +899,7 @@ def test_learning_responses_return_existing_feedback_reactions(
             "title": "我学会了骑车",
             "draft": "我学会了骑车。刚开始我很害怕。后来爸爸扶着我练，我终于能骑一小段了。",
             "entry": "existing_draft",
+            "client_submission_id": "feedback-observation-draft",
         },
     )
     revision_response = client.post(

@@ -440,7 +440,8 @@ def test_unsupported_future_type_can_direct_draft_without_scaffold(session, clie
     draft = client.post(
         f"/api/essays/{essay_id}/first-draft",
         json={
-            "draft": "我想推荐《西游记》。这本书里有很多有趣的人物，我最喜欢孙悟空。他一路保护唐僧，还会想办法解决困难。"
+            "draft": "我想推荐《西游记》。这本书里有很多有趣的人物，我最喜欢孙悟空。他一路保护唐僧，还会想办法解决困难。",
+            "client_submission_id": "unsupported-future-direct-draft",
         },
     )
 
@@ -457,6 +458,7 @@ def test_direct_first_draft_sets_round_one_and_last_submitted_at(session, client
             "title": "我学会了骑车",
             "draft": "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。",
             "entry": "classroom",
+            "client_submission_id": "writing-castle-direct-first-draft",
         },
     )
 
@@ -791,7 +793,10 @@ def test_classroom_prewriting_happy_path_reaches_first_draft_feedback(session, c
 
     first_draft = client.post(
         f"/api/essays/{essay_id}/first-draft",
-        json={"draft": "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。"},
+        json={
+            "draft": "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。",
+            "client_submission_id": "writing-castle-full-loop-first-draft",
+        },
     )
     assert first_draft.status_code == 201
     assert first_draft.json()["essay"]["status"] == REVISION_REQUESTED_STATUS
@@ -822,7 +827,10 @@ def test_prewriting_first_draft_sets_round_one_and_last_submitted_at(session, cl
 
     response = client.post(
         f"/api/essays/{essay_id}/first-draft",
-        json={"draft": "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。"},
+        json={
+            "draft": "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。",
+            "client_submission_id": "prewriting-round-one-timestamp",
+        },
     )
 
     assert response.status_code == 201
@@ -950,7 +958,10 @@ def test_active_classroom_essay_ignores_submitted_first_draft(session, client):
 
     draft = client.post(
         f"/api/essays/{essay_id}/first-draft",
-        json={"draft": "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。"},
+        json={
+            "draft": "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。",
+            "client_submission_id": "active-classroom-ignore-submitted",
+        },
     )
     saved = session.get(Essay, essay_id)
     active = client.get(
@@ -1718,7 +1729,10 @@ def test_skip_path_can_go_directly_to_first_draft(session, client):
     client.patch(f"/api/essays/{essay_id}/outline", json={"sections": [], "skipped": True})
     response = client.post(
         f"/api/essays/{essay_id}/first-draft",
-        json={"draft": "这次我想写自己的进步。我先写一个简单初稿，后面再慢慢修改。"},
+        json={
+            "draft": "这次我想写自己的进步。我先写一个简单初稿，后面再慢慢修改。",
+            "client_submission_id": "skipped-prewriting-first-draft",
+        },
     )
 
     assert answers.status_code == 200
@@ -1750,7 +1764,10 @@ def test_first_draft_event_metadata_tolerates_malformed_persisted_scaffold(sessi
 
     response = client.post(
         f"/api/essays/{essay_id}/first-draft",
-        json={"draft": "这次我想写自己的进步。我先写一个简单初稿，后面再慢慢修改。"},
+        json={
+            "draft": "这次我想写自己的进步。我先写一个简单初稿，后面再慢慢修改。",
+            "client_submission_id": "malformed-scaffold-first-draft",
+        },
     )
 
     event = session.exec(

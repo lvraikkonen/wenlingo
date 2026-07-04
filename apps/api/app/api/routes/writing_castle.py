@@ -159,7 +159,7 @@ class OutlineSave(BaseModel):
 
 class FirstDraftSubmit(BaseModel):
     draft: str = Field(min_length=20, max_length=3000)
-    client_submission_id: str = Field(default="", max_length=120)
+    client_submission_id: str = Field(min_length=1, max_length=120)
 
 
 def _is_ai_feedback_failure(log) -> bool:

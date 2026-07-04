@@ -75,7 +75,7 @@ class EssayCreate(BaseModel):
     title: str = Field(min_length=1, max_length=100)
     draft: str = Field(min_length=1, max_length=3000)
     entry: str
-    client_submission_id: str = Field(default="", max_length=120)
+    client_submission_id: str = Field(min_length=1, max_length=120)
 
 
 class EssayRevisionCreate(BaseModel):

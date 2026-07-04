@@ -703,6 +703,7 @@ def test_essay_revision_hides_cross_family_essay(client, session, monkeypatch):
             "title": "我学会了骑车",
             "draft": "我学会了骑车。刚开始我很害怕。后来爸爸扶着我练，我终于能骑一小段了。",
             "entry": "existing_draft",
+            "client_submission_id": "auth-boundary-other-child-essay",
         },
         cookies={"wenlingo_parent_session": "other-token"},
     )
