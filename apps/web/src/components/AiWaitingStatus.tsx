@@ -5,11 +5,19 @@ import { Loader2 } from "lucide-react";
 
 export function AiWaitingStatus({
   messages,
-}: {
-  messages: readonly string[];
-}) {
+  serverMessage = null,
+}: AiWaitingStatusProps) {
+  if (serverMessage) {
+    return <AiWaitingStatusFrame message={serverMessage} />;
+  }
+
   return <AiWaitingStatusSequence key={messages.join("\u0000")} messages={messages} />;
 }
+
+export type AiWaitingStatusProps = {
+  messages: readonly string[];
+  serverMessage?: string | null;
+};
 
 function AiWaitingStatusSequence({
   messages,
@@ -31,12 +39,18 @@ function AiWaitingStatusSequence({
   }, [messages]);
 
   return (
+    <AiWaitingStatusFrame message={messages[messageIndex] ?? ""} />
+  );
+}
+
+function AiWaitingStatusFrame({ message }: { message: string }) {
+  return (
     <div
       className="flex min-h-14 items-center gap-3 rounded-lg bg-[var(--wen-bg)] px-4 py-3 text-sm font-semibold text-[var(--wen-orange)]"
       role="status"
     >
       <Loader2 aria-hidden="true" className="h-4 w-4 shrink-0 animate-spin" />
-      <span className="min-w-0">{messages[messageIndex]}</span>
+      <span className="min-w-0">{message}</span>
     </div>
   );
 }

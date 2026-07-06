@@ -9,6 +9,7 @@ import {
   createSentenceChallenge,
   createSentenceTraining,
   fetchChildEssayArchive,
+  fetchEssayFeedbackResult,
   fetchEssayArchiveDetail,
   fetchParentEssayArchive,
   fetchParentEssayArchiveDetail,
@@ -485,6 +486,7 @@ describe("api client", () => {
     } satisfies Parameters<typeof saveOutline>[1];
     const firstDraftPayload = {
       draft: "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+      client_submission_id: "client-1",
     };
 
     await getActiveClassroomWritingCastleEssay("student-1");
@@ -749,6 +751,75 @@ describe("api client", () => {
       "/api/students/student-1/essays/stream-feedback",
       expect.objectContaining({
         signal: controller.signal,
+      }),
+    );
+  });
+
+  test("fetchEssayFeedbackResult treats the result URL as opaque", async () => {
+    const result = {
+      essay: { id: "essay-1" },
+      first_draft: {
+        id: "draft-1",
+        essay_id: "essay-1",
+        version_label: "first_draft",
+      },
+      feedback: {
+        strengths: ["细节清楚"],
+        improvements: [],
+        problem_monsters: [],
+        sentence_notes: [],
+        revision_tasks: [],
+      },
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(result));
+
+    await expect(
+      fetchEssayFeedbackResult(
+        "/api/essays/essay-1/feedback-result?version_id=draft-1",
+      ),
+    ).resolves.toEqual(result);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/essays/essay-1/feedback-result?version_id=draft-1",
+      expect.objectContaining({
+        credentials: "include",
+        cache: "no-store",
+      }),
+    );
+  });
+
+  test("fetchEssayFeedbackResult does not prefix absolute result URLs with the API base", async () => {
+    vi.resetModules();
+    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "https://api.wenlingo.test");
+    const { fetchEssayFeedbackResult: fetchOpaqueResult } = await import(
+      "../src/lib/api"
+    );
+    const result = {
+      essay: { id: "essay-1" },
+      first_draft: {
+        id: "draft-1",
+        essay_id: "essay-1",
+        version_label: "first_draft",
+      },
+      feedback: {
+        strengths: ["细节清楚"],
+        improvements: [],
+        problem_monsters: [],
+        sentence_notes: [],
+        revision_tasks: [],
+      },
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(result));
+
+    await fetchOpaqueResult(
+      "https://results.wenlingo.test/api/essays/essay-1/feedback-result?version_id=draft-1",
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://results.wenlingo.test/api/essays/essay-1/feedback-result?version_id=draft-1",
+      expect.objectContaining({
+        credentials: "include",
+        cache: "no-store",
       }),
     );
   });

@@ -72,12 +72,14 @@ const apiMocks = vi.hoisted(() => ({
   completeSentenceChallenge: vi.fn(),
   createSentenceTraining: vi.fn(),
   createEssay: vi.fn(),
+  fetchEssayFeedbackResult: vi.fn(),
   fetchChildEssayArchive: vi.fn(),
   fetchEssayArchiveDetail: vi.fn(),
   fetchParentEssayArchive: vi.fn(),
   fetchParentEssayArchiveDetail: vi.fn(),
   hideChildEssay: vi.fn(),
   restoreParentEssay: vi.fn(),
+  streamEssayFeedback: vi.fn(),
   submitEssayRevision: vi.fn(),
   getAlphaChildren: vi.fn(),
   getDashboard: vi.fn(),
@@ -108,12 +110,14 @@ vi.mock("../src/lib/api", () => ({
   completeSentenceChallenge: apiMocks.completeSentenceChallenge,
   createSentenceTraining: apiMocks.createSentenceTraining,
   createEssay: apiMocks.createEssay,
+  fetchEssayFeedbackResult: apiMocks.fetchEssayFeedbackResult,
   fetchChildEssayArchive: apiMocks.fetchChildEssayArchive,
   fetchEssayArchiveDetail: apiMocks.fetchEssayArchiveDetail,
   fetchParentEssayArchive: apiMocks.fetchParentEssayArchive,
   fetchParentEssayArchiveDetail: apiMocks.fetchParentEssayArchiveDetail,
   hideChildEssay: apiMocks.hideChildEssay,
   restoreParentEssay: apiMocks.restoreParentEssay,
+  streamEssayFeedback: apiMocks.streamEssayFeedback,
   submitEssayRevision: apiMocks.submitEssayRevision,
   getAlphaChildren: apiMocks.getAlphaChildren,
   getDashboard: apiMocks.getDashboard,
@@ -238,6 +242,21 @@ beforeEach(() => {
     coach_message: "今天先完成推荐任务，再看看哪里变强了。",
   });
   apiMocks.createEssay.mockResolvedValue({
+    essay: { id: "essay-1" },
+    first_draft: {
+      id: "draft-1",
+      essay_id: "essay-1",
+      version_label: "first_draft",
+    },
+    feedback: {
+      strengths: ["能写清楚发生了什么"],
+      improvements: [],
+      problem_monsters: [],
+      sentence_notes: [],
+      revision_tasks: [{ instruction: "给第二段加一个动作描写", target: "第二段" }],
+    },
+  });
+  apiMocks.fetchEssayFeedbackResult.mockResolvedValue({
     essay: { id: "essay-1" },
     first_draft: {
       id: "draft-1",

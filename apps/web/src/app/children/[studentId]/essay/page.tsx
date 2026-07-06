@@ -17,12 +17,15 @@ import {
 } from "../../../../components/writing-castle/WritingCastleModeShell";
 import {
   createEssay,
+  fetchEssayFeedbackResult,
   fetchEssayArchiveDetail,
+  streamEssayFeedback,
   submitEssayRevision,
   type EssayResponse,
   type EssayRevisionResponse,
   type Settlement,
 } from "../../../../lib/api";
+import { reduceStreamEvent, type StreamReducerState } from "../../../../lib/sse";
 import type { WritingCastleEssay } from "../../../../lib/types";
 import { useAssessmentRecommendation } from "../../../../lib/useAssessmentRecommendation";
 
@@ -40,10 +43,47 @@ function getCurrentTimeMs() {
   return Date.now();
 }
 
+function createClientSubmissionId() {
+  return `client-${getCurrentTimeMs()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function isEssayFeedbackStreamingEnabled() {
+  return process.env.NEXT_PUBLIC_ESSAY_FEEDBACK_STREAMING_ENABLED === "true";
+}
+
+function emptyFeedback(): EssayResponse["feedback"] {
+  return {
+    strengths: [],
+    improvements: [],
+    problem_monsters: [],
+    sentence_notes: [],
+    revision_tasks: [],
+  };
+}
+
+function previewFeedbackFromStream(
+  streamState: StreamReducerState,
+): EssayResponse["feedback"] {
+  const sections = streamState.sections;
+  return {
+    ...emptyFeedback(),
+    strengths: sections.strengths ?? [],
+    improvements: sections.improvements ?? [],
+    problem_monsters: sections.problem_monsters ?? [],
+    sentence_notes: sections.sentence_notes ?? [],
+    revision_tasks: (sections.revision_tasks ?? []).map((instruction) => ({
+      instruction,
+      target: "",
+    })),
+  };
+}
+
 function EssayPageContent({ studentId }: { studentId: string }) {
   const activeStudentId = useRef<string | null>(studentId);
   const archiveSelectionRequestId = useRef(0);
   const feedbackRequestId = useRef(0);
+  const feedbackAbortControllerRef = useRef<AbortController | null>(null);
+  const prewritingFeedbackEpochRef = useRef(0);
   const revisionRequestId = useRef(0);
   const isRevisionSubmitting = useRef(false);
   const revisionSubmitKeyRef = useRef<string | null>(null);
@@ -61,6 +101,7 @@ function EssayPageContent({ studentId }: { studentId: string }) {
   const [title, setTitle] = useState("");
   const [draft, setDraft] = useState("");
   const [mode, setMode] = useState<WritingCastleMode>("classroom");
+  const [prewritingFeedbackEpoch, setPrewritingFeedbackEpoch] = useState(0);
   const [aiTopicEssay, setAiTopicEssay] = useState<WritingCastleEssay | null>(
     null,
   );
@@ -97,11 +138,48 @@ function EssayPageContent({ studentId }: { studentId: string }) {
   const [isRevisionPending, setIsRevisionPending] = useState(false);
   const [error, setError] = useState("");
 
+  function abortFeedbackStream() {
+    feedbackAbortControllerRef.current?.abort();
+    feedbackAbortControllerRef.current = null;
+  }
+
+  function advancePrewritingFeedbackEpoch() {
+    const nextEpoch = prewritingFeedbackEpochRef.current + 1;
+    prewritingFeedbackEpochRef.current = nextEpoch;
+    setPrewritingFeedbackEpoch(nextEpoch);
+  }
+
+  function handleModeChange(nextMode: WritingCastleMode) {
+    if (nextMode === mode) {
+      return;
+    }
+    feedbackRequestId.current += 1;
+    advancePrewritingFeedbackEpoch();
+    abortFeedbackStream();
+    if (isFeedbackPending) {
+      setEssayId(null);
+      setFirstDraftId(null);
+      setBaseVersionId(null);
+      setCurrentRoundIndex(null);
+      setFirstDraftReaction(null);
+      setFeedback(null);
+      setSelectedTasks([]);
+      setComparison(null);
+      setSettlement(null);
+      setRevisionResultId(null);
+      setRevisionResultReaction(null);
+    }
+    setIsFeedbackPending(false);
+    setError("");
+    setMode(nextMode);
+  }
+
   useEffect(() => {
     activeStudentId.current = studentId;
 
     return () => {
       activeStudentId.current = null;
+      abortFeedbackStream();
     };
   }, [studentId]);
 
@@ -161,6 +239,30 @@ function EssayPageContent({ studentId }: { studentId: string }) {
     }
   }
 
+  function applyFeedbackResult(result: EssayResponse, submittedTitle = title, submittedDraft = draft) {
+    setEssayId(result.essay.id);
+    setFirstDraftId(result.first_draft?.id ?? null);
+    setBaseVersionId(result.first_draft?.id ?? null);
+    setCurrentRoundIndex(2);
+    clearRevisionSubmitAttempt();
+    setFirstDraftReaction(result.first_draft?.reaction ?? null);
+    setFeedback(result.feedback);
+    setSelectedTasks(
+      result.feedback.revision_tasks.map((task) => task.instruction),
+    );
+    setRevisionStartedAt(getCurrentTimeMs());
+    setRevision("");
+    loadedDirectInput.current = { title: submittedTitle, draft: submittedDraft };
+    loadedRevision.current = "";
+    setHasUnsubmittedRevisionInput(false);
+    setHasUnsubmittedDirectInput(false);
+    setComparison(null);
+    setSettlement(null);
+    setRevisionResultId(null);
+    setRevisionResultReaction(null);
+    setError("");
+  }
+
   async function handleFeedbackSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const requestId = feedbackRequestId.current + 1;
@@ -169,16 +271,89 @@ function EssayPageContent({ studentId }: { studentId: string }) {
     isRevisionSubmitting.current = false;
     setIsRevisionPending(false);
     clearRevisionSubmitAttempt();
+    advancePrewritingFeedbackEpoch();
+    abortFeedbackStream();
     setIsFeedbackPending(true);
     setError("");
     const requestStudentId = studentId;
+    const submittedTitle = title;
+    const submittedDraft = draft;
+    const clientSubmissionId = createClientSubmissionId();
 
     try {
-      const result = await createEssay(studentId, {
-        title,
-        draft,
-        entry: "existing_draft",
-      });
+      let result: EssayResponse | null = null;
+
+      if (isEssayFeedbackStreamingEnabled()) {
+        let streamState: StreamReducerState | undefined;
+        let sawPreview = false;
+        const abortController = new AbortController();
+        feedbackAbortControllerRef.current = abortController;
+        const isCurrentFeedbackRequest = () =>
+          activeStudentId.current === requestStudentId &&
+          feedbackRequestId.current === requestId &&
+          !abortController.signal.aborted;
+
+        try {
+          await streamEssayFeedback(
+            studentId,
+            {
+              title: submittedTitle,
+              draft: submittedDraft,
+              entry: "existing_draft",
+              client_submission_id: clientSubmissionId,
+            },
+            (frame) => {
+              if (!isCurrentFeedbackRequest()) {
+                return;
+              }
+              streamState = reduceStreamEvent(streamState, frame);
+              if (frame.event === "feedback_section_preview" && streamState) {
+                sawPreview = true;
+                const previewFeedback = previewFeedbackFromStream(streamState);
+                setFeedback(previewFeedback);
+                setSelectedTasks(
+                  previewFeedback.revision_tasks.map((task) => task.instruction),
+                );
+                setComparison(null);
+                setSettlement(null);
+                setRevisionResultId(null);
+                setRevisionResultReaction(null);
+              }
+            },
+            { signal: abortController.signal },
+          );
+        } catch (error) {
+          if (!isCurrentFeedbackRequest()) {
+            return;
+          }
+          if (sawPreview) {
+            throw error;
+          }
+          result = await createEssay(studentId, {
+            title: submittedTitle,
+            draft: submittedDraft,
+            entry: "existing_draft",
+            client_submission_id: clientSubmissionId,
+          });
+        }
+
+        if (!result) {
+          if (!isCurrentFeedbackRequest()) {
+            return;
+          }
+          if (!streamState?.fetchUrl) {
+            throw new Error("stream completed without a feedback result URL");
+          }
+          result = await fetchEssayFeedbackResult(streamState.fetchUrl);
+        }
+      } else {
+        result = await createEssay(studentId, {
+          title: submittedTitle,
+          draft: submittedDraft,
+          entry: "existing_draft",
+          client_submission_id: clientSubmissionId,
+        });
+      }
 
       if (
         activeStudentId.current !== requestStudentId ||
@@ -186,26 +361,7 @@ function EssayPageContent({ studentId }: { studentId: string }) {
       ) {
         return;
       }
-      setEssayId(result.essay.id);
-      setFirstDraftId(result.first_draft?.id ?? null);
-      setBaseVersionId(result.first_draft?.id ?? null);
-      setCurrentRoundIndex(2);
-      clearRevisionSubmitAttempt();
-      setFirstDraftReaction(result.first_draft?.reaction ?? null);
-      setFeedback(result.feedback);
-      setSelectedTasks(
-        result.feedback.revision_tasks.map((task) => task.instruction),
-      );
-      setRevisionStartedAt(getCurrentTimeMs());
-      setRevision("");
-      loadedDirectInput.current = { title, draft };
-      loadedRevision.current = "";
-      setHasUnsubmittedRevisionInput(false);
-      setHasUnsubmittedDirectInput(false);
-      setComparison(null);
-      setSettlement(null);
-      setRevisionResultId(null);
-      setRevisionResultReaction(null);
+      applyFeedbackResult(result, submittedTitle, submittedDraft);
     } catch {
       if (
         activeStudentId.current !== requestStudentId ||
@@ -219,33 +375,22 @@ function EssayPageContent({ studentId }: { studentId: string }) {
         activeStudentId.current === requestStudentId &&
         feedbackRequestId.current === requestId
       ) {
+        if (feedbackAbortControllerRef.current?.signal.aborted === false) {
+          feedbackAbortControllerRef.current = null;
+        }
         setIsFeedbackPending(false);
       }
     }
   }
 
-  function handlePrewritingFeedback(result: EssayResponse) {
-    setEssayId(result.essay.id);
-    setFirstDraftId(result.first_draft?.id ?? null);
-    setBaseVersionId(result.first_draft?.id ?? null);
-    setCurrentRoundIndex(2);
-    clearRevisionSubmitAttempt();
-    setFirstDraftReaction(result.first_draft?.reaction ?? null);
-    setFeedback(result.feedback);
-    setSelectedTasks(
-      result.feedback.revision_tasks.map((task) => task.instruction),
-    );
-    setRevisionStartedAt(getCurrentTimeMs());
-    setRevision("");
-    loadedDirectInput.current = { title, draft };
-    loadedRevision.current = "";
-    setHasUnsubmittedRevisionInput(false);
-    setHasUnsubmittedDirectInput(false);
-    setComparison(null);
-    setSettlement(null);
-    setRevisionResultId(null);
-    setRevisionResultReaction(null);
-    setError("");
+  function handlePrewritingFeedback(
+    result: EssayResponse,
+    feedbackEpoch = prewritingFeedbackEpochRef.current,
+  ) {
+    if (feedbackEpoch !== prewritingFeedbackEpochRef.current) {
+      return;
+    }
+    applyFeedbackResult(result);
   }
 
   async function handleRevisionSubmit(event: FormEvent<HTMLFormElement>) {
@@ -343,6 +488,8 @@ function EssayPageContent({ studentId }: { studentId: string }) {
 
     setError("");
     feedbackRequestId.current += 1;
+    advancePrewritingFeedbackEpoch();
+    abortFeedbackStream();
     setIsFeedbackPending(false);
     revisionRequestId.current += 1;
     isRevisionSubmitting.current = false;
@@ -405,6 +552,8 @@ function EssayPageContent({ studentId }: { studentId: string }) {
 
   function resetForNewEssay() {
     feedbackRequestId.current += 1;
+    advancePrewritingFeedbackEpoch();
+    abortFeedbackStream();
     revisionRequestId.current += 1;
     isRevisionSubmitting.current = false;
     setTitle("");
@@ -499,12 +648,13 @@ function EssayPageContent({ studentId }: { studentId: string }) {
           />
         ) : null}
 
-        <WritingCastleModeShell mode={mode} onModeChange={setMode} />
+        <WritingCastleModeShell mode={mode} onModeChange={handleModeChange} />
 
         {mode === "classroom" && !feedback ? (
           <ClassroomPrewritingWizard
             studentId={studentId}
             onFeedback={handlePrewritingFeedback}
+            feedbackEpoch={prewritingFeedbackEpoch}
           />
         ) : null}
 
@@ -522,6 +672,7 @@ function EssayPageContent({ studentId }: { studentId: string }) {
             skipActiveResume
             onEssayChange={setAiTopicEssay}
             onFeedback={handlePrewritingFeedback}
+            feedbackEpoch={prewritingFeedbackEpoch}
           />
         ) : null}
 
@@ -576,18 +727,9 @@ function EssayPageContent({ studentId }: { studentId: string }) {
             className="space-y-4"
           >
             <h2 className="text-xl font-bold">作文点评</h2>
-            <div className="mt-4 space-y-2">
-              {feedback.strengths.map((strength) => (
-                <p key={strength} className="flex items-start gap-2">
-                  <CheckCircle2
-                    size={18}
-                    aria-hidden="true"
-                    className="mt-1 text-[var(--wen-leaf)]"
-                  />
-                  <span>{strength}</span>
-                </p>
-              ))}
-            </div>
+            <FeedbackTextSection title="写得好的地方" items={feedback.strengths} />
+            <FeedbackTextSection title="可以改进的地方" items={feedback.improvements} />
+            <FeedbackTextSection title="句子小提示" items={feedback.sentence_notes} />
             <h3 className="mt-6 font-semibold">修改小任务</h3>
             <div className="mt-3 space-y-3">
               {feedback.revision_tasks.map((task) => (
@@ -720,5 +862,35 @@ function EssayPageContent({ studentId }: { studentId: string }) {
       </div>
       </main>
     </>
+  );
+}
+
+function FeedbackTextSection({
+  title,
+  items,
+}: {
+  title: string;
+  items?: string[];
+}) {
+  if (!items?.length) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-2">
+      <h3 className="font-semibold">{title}</h3>
+      <div className="space-y-2">
+        {items.map((item) => (
+          <p key={item} className="flex items-start gap-2">
+            <CheckCircle2
+              size={18}
+              aria-hidden="true"
+              className="mt-1 text-[var(--wen-leaf)]"
+            />
+            <span>{item}</span>
+          </p>
+        ))}
+      </div>
+    </section>
   );
 }

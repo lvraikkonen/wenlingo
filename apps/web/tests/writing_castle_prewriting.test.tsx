@@ -29,10 +29,16 @@ const apiMocks = vi.hoisted(() => ({
   generateMaterialQuestions: vi.fn(),
   saveMaterialAnswers: vi.fn(),
   generateMaterialCards: vi.fn(),
+  createMaterialCardsJob: vi.fn(),
   saveMaterialCards: vi.fn(),
   generateOutline: vi.fn(),
+  createOutlineJob: vi.fn(),
   saveOutline: vi.fn(),
   submitPrewritingFirstDraft: vi.fn(),
+  streamPrewritingFirstDraftFeedback: vi.fn(),
+  getPrewritingJob: vi.fn(),
+  openPrewritingJobEvents: vi.fn(),
+  fetchEssayFeedbackResult: vi.fn(),
   createEssay: vi.fn(),
   fetchChildEssayArchive: vi.fn(),
   fetchEssayArchiveDetail: vi.fn(),
@@ -109,6 +115,68 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function fakePrewritingJobEvents(
+  events: Array<{
+    event: "progress" | "completed" | "failed";
+    data: Record<string, unknown>;
+  }>,
+): EventSource {
+  const listeners = new Map<string, EventListener>();
+  let closed = false;
+  const source = {
+    addEventListener: (eventName: string, listener: EventListener) => {
+      listeners.set(eventName, listener);
+    },
+    removeEventListener: (eventName: string) => {
+      listeners.delete(eventName);
+    },
+    close: () => {
+      closed = true;
+    },
+    onerror: null,
+  } as unknown as EventSource;
+
+  queueMicrotask(() => {
+    for (const event of events) {
+      if (closed) {
+        return;
+      }
+      listeners.get(event.event)?.(
+        new MessageEvent(event.event, {
+          data: JSON.stringify(event.data),
+        }),
+      );
+    }
+  });
+
+  return source;
+}
+
+function controlledPrewritingJobEvents() {
+  const listeners = new Map<string, EventListener>();
+  const source = {
+    addEventListener: (eventName: string, listener: EventListener) => {
+      listeners.set(eventName, listener);
+    },
+    removeEventListener: (eventName: string) => {
+      listeners.delete(eventName);
+    },
+    close: vi.fn(),
+    onerror: null,
+  } as unknown as EventSource;
+
+  return {
+    source,
+    emit: (eventName: "progress" | "completed" | "failed", data: Record<string, unknown>) => {
+      listeners.get(eventName)?.(
+        new MessageEvent(eventName, {
+          data: JSON.stringify(data),
+        }),
+      );
+    },
+  };
+}
+
 vi.mock("../src/lib/api", () => ({
   getActiveClassroomWritingCastleEssay:
     apiMocks.getActiveClassroomWritingCastleEssay,
@@ -119,10 +187,16 @@ vi.mock("../src/lib/api", () => ({
   generateMaterialQuestions: apiMocks.generateMaterialQuestions,
   saveMaterialAnswers: apiMocks.saveMaterialAnswers,
   generateMaterialCards: apiMocks.generateMaterialCards,
+  createMaterialCardsJob: apiMocks.createMaterialCardsJob,
   saveMaterialCards: apiMocks.saveMaterialCards,
   generateOutline: apiMocks.generateOutline,
+  createOutlineJob: apiMocks.createOutlineJob,
   saveOutline: apiMocks.saveOutline,
   submitPrewritingFirstDraft: apiMocks.submitPrewritingFirstDraft,
+  streamPrewritingFirstDraftFeedback: apiMocks.streamPrewritingFirstDraftFeedback,
+  getPrewritingJob: apiMocks.getPrewritingJob,
+  openPrewritingJobEvents: apiMocks.openPrewritingJobEvents,
+  fetchEssayFeedbackResult: apiMocks.fetchEssayFeedbackResult,
   createEssay: apiMocks.createEssay,
   fetchChildEssayArchive: apiMocks.fetchChildEssayArchive,
   fetchEssayArchiveDetail: apiMocks.fetchEssayArchiveDetail,
@@ -133,6 +207,8 @@ vi.mock("../src/lib/api", () => ({
 }));
 
 beforeEach(() => {
+  delete process.env.NEXT_PUBLIC_ESSAY_FEEDBACK_STREAMING_ENABLED;
+  delete process.env.NEXT_PUBLIC_PREWRITING_PROGRESS_JOBS_ENABLED;
   apiMocks.getActiveClassroomWritingCastleEssay.mockResolvedValue({
     essay: null,
   });
@@ -265,6 +341,18 @@ beforeEach(() => {
   apiMocks.saveMaterialCards.mockResolvedValue({
     essay: essayState({ status: "materials_ready" }),
   });
+  apiMocks.createMaterialCardsJob.mockResolvedValue({
+    schema_version: "v1",
+    job_id: "job-material-1",
+    task_name: "material_card_generation",
+    status: "queued",
+    stage: "queued",
+    seq: 1,
+    result_ref_type: "",
+    result_ref_id: null,
+    error_code: "",
+    error_message: "",
+  });
   apiMocks.generateOutline.mockResolvedValue({
     essay: essayState({
       outline: {
@@ -313,7 +401,66 @@ beforeEach(() => {
   apiMocks.saveOutline.mockResolvedValue({
     essay: essayState({ status: "outline_ready" }),
   });
+  apiMocks.createOutlineJob.mockResolvedValue({
+    schema_version: "v1",
+    job_id: "job-outline-1",
+    task_name: "outline_generation",
+    status: "queued",
+    stage: "queued",
+    seq: 1,
+    result_ref_type: "",
+    result_ref_id: null,
+    error_code: "",
+    error_message: "",
+  });
+  apiMocks.getPrewritingJob.mockResolvedValue({
+    schema_version: "v1",
+    job_id: "job-material-1",
+    task_name: "material_card_generation",
+    status: "completed",
+    stage: "completed",
+    seq: 2,
+    result_ref_type: "essay",
+    result_ref_id: "essay-1",
+    error_code: "",
+    error_message: "",
+  });
+  apiMocks.openPrewritingJobEvents.mockImplementation((jobId: string) =>
+    fakePrewritingJobEvents([
+      {
+        event: "completed",
+        data: {
+          schema_version: "v0.6e.1",
+          job_id: jobId,
+          task_name: "material_card_generation",
+          status: "completed",
+          stage: "completed",
+          seq: 2,
+          result_ref_type: "essay",
+          result_ref_id: "essay-1",
+        },
+      },
+    ]),
+  );
   apiMocks.submitPrewritingFirstDraft.mockResolvedValue({
+    essay: { id: "essay-1" },
+    first_draft: {
+      id: "draft-1",
+      essay_id: "essay-1",
+      version_label: "first_draft",
+      reaction: null,
+    },
+    feedback: {
+      strengths: ["能写清楚发生了什么", "有一处心情表达"],
+      improvements: ["第二段缺少动作细节"],
+      problem_monsters: ["细节缺口"],
+      sentence_notes: ["把很开心换成动作。"],
+      revision_tasks: [
+        { instruction: "给第二段加一个动作描写", target: "第二段" },
+      ],
+    },
+  });
+  apiMocks.fetchEssayFeedbackResult.mockResolvedValue({
     essay: { id: "essay-1" },
     first_draft: {
       id: "draft-1",
@@ -394,6 +541,8 @@ afterEach(() => {
   vi.useRealTimers();
   cleanup();
   vi.resetAllMocks();
+  delete process.env.NEXT_PUBLIC_ESSAY_FEEDBACK_STREAMING_ENABLED;
+  delete process.env.NEXT_PUBLIC_PREWRITING_PROGRESS_JOBS_ENABLED;
 });
 
 async function startClassroomWizard(topic = "我学会了骑车") {
@@ -818,6 +967,7 @@ test("classroom writing castle path reaches first draft feedback", async () => {
   expect(apiMocks.submitPrewritingFirstDraft).toHaveBeenCalledWith("essay-1", {
     draft:
       "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。",
+    client_submission_id: expect.any(String),
   });
 });
 
@@ -1237,6 +1387,240 @@ test("material card generation continues when saved answers can be recovered", a
   expect(screen.getByLabelText("事件")).toHaveValue("我学会了骑车。");
   expect(apiMocks.generateMaterialCards).toHaveBeenCalledWith("essay-1");
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+test("material card jobs show server progress and wait for canonical essay state", async () => {
+  process.env.NEXT_PUBLIC_PREWRITING_PROGRESS_JOBS_ENABLED = "true";
+  const canonicalEssay = essayState({
+    status: "materials_ready",
+    material_card: {
+      ...essayState().material_card,
+      cards: [
+        {
+          id: "card-event",
+          category: "event",
+          text: "我学会了骑车，这是完整保存后的素材卡。",
+          source_answer_ids: ["answer-q-event"],
+          order: 1,
+          deleted: false,
+          child_edited: false,
+          placeholder: false,
+        },
+      ],
+      step_state: {
+        questions_status: "answered",
+        cards_status: "generated",
+      },
+    },
+  });
+  const staleEssay = essayState({
+    status: "materials_ready",
+    material_card: {
+      ...essayState().material_card,
+      cards: [],
+      step_state: {
+        questions_status: "answered",
+        cards_status: "not_started",
+      },
+    },
+  });
+  let resolveCanonical: (value: ActiveWritingCastleEssayResponse) => void =
+    () => {};
+  const canonicalState = new Promise<ActiveWritingCastleEssayResponse>(
+    (resolve) => {
+      resolveCanonical = resolve;
+    },
+  );
+  apiMocks.getActiveClassroomWritingCastleEssay
+    .mockResolvedValueOnce({ essay: null })
+    .mockResolvedValueOnce({ essay: staleEssay })
+    .mockReturnValueOnce(canonicalState);
+  apiMocks.getPrewritingJob.mockClear();
+  const jobEvents = controlledPrewritingJobEvents();
+  apiMocks.openPrewritingJobEvents.mockReturnValueOnce(jobEvents.source);
+
+  await startClassroomWizard();
+  await selectNarrativeScaffold();
+  await continueToQuestions();
+  await userEvent.type(
+    screen.getByLabelText("你想写哪件真实发生的事？"),
+    "我学会了骑车。",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "整理素材卡" }));
+
+  expect(await screen.findByRole("status")).toHaveTextContent(
+    "素材卡排队中",
+  );
+  await act(async () => {
+    jobEvents.emit("progress", {
+      schema_version: "v0.6e.1",
+      job_id: "job-material-1",
+      task_name: "material_card_generation",
+      status: "running",
+      stage: "primary_started",
+      seq: 2,
+      result_ref_type: "",
+      result_ref_id: null,
+    });
+  });
+  expect(await screen.findByText("AI 正在整理素材卡……")).toBeInTheDocument();
+  await act(async () => {
+    jobEvents.emit("progress", {
+      schema_version: "v0.6e.1",
+      job_id: "job-material-1",
+      task_name: "material_card_generation",
+      status: "running",
+      stage: "primary_slow",
+      seq: 3,
+      result_ref_type: "",
+      result_ref_id: null,
+    });
+  });
+  expect(await screen.findByText("素材卡生成有点慢，正在继续等……")).toBeInTheDocument();
+  await act(async () => {
+    jobEvents.emit("progress", {
+      schema_version: "v0.6e.1",
+      job_id: "job-material-1",
+      task_name: "material_card_generation",
+      status: "running",
+      stage: "fallback_started",
+      seq: 4,
+      result_ref_type: "",
+      result_ref_id: null,
+    });
+  });
+  expect(await screen.findByText("正在切换备用方式整理素材卡……")).toBeInTheDocument();
+  expect(
+    screen.queryByText("第 3 步 / 共 4 步：整理素材卡"),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByDisplayValue("我学会了骑车，这是完整保存后的素材卡。"),
+  ).not.toBeInTheDocument();
+
+  await act(async () => {
+    jobEvents.emit("completed", {
+      schema_version: "v0.6e.1",
+      job_id: "job-material-1",
+      task_name: "material_card_generation",
+      status: "completed",
+      stage: "completed",
+      seq: 5,
+      result_ref_type: "essay",
+      result_ref_id: "essay-1",
+    });
+  });
+
+  await act(async () => {
+    resolveCanonical({ essay: canonicalEssay });
+    await canonicalState;
+  });
+
+  expect(
+    await screen.findByText("第 3 步 / 共 4 步：整理素材卡"),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByLabelText("事件"),
+  ).toHaveValue("我学会了骑车，这是完整保存后的素材卡。");
+  expect(apiMocks.createMaterialCardsJob).toHaveBeenCalledWith("essay-1", {
+    idempotency_key: expect.any(String),
+  });
+  expect(apiMocks.openPrewritingJobEvents).toHaveBeenCalledWith("job-material-1");
+  expect(apiMocks.getPrewritingJob).not.toHaveBeenCalled();
+  expect(apiMocks.generateMaterialCards).not.toHaveBeenCalled();
+});
+
+test("first draft streaming previews are replaced by canonical feedback", async () => {
+  process.env.NEXT_PUBLIC_ESSAY_FEEDBACK_STREAMING_ENABLED = "true";
+  const canonicalFeedback = {
+    essay: { id: "essay-1" },
+    first_draft: {
+      id: "draft-stream",
+      essay_id: "essay-1",
+      version_label: "first_draft" as const,
+      reaction: null,
+    },
+    feedback: {
+      strengths: ["最终课内初稿优点"],
+      improvements: ["最终课内初稿建议"],
+      problem_monsters: [],
+      sentence_notes: ["最终课内句子提示"],
+      revision_tasks: [
+        { instruction: "最终课内修改任务", target: "第二段" },
+      ],
+    },
+  };
+  let resolveCanonical: (value: typeof canonicalFeedback) => void = () => {};
+  const canonicalFetch = new Promise<typeof canonicalFeedback>((resolve) => {
+    resolveCanonical = resolve;
+  });
+  apiMocks.fetchEssayFeedbackResult.mockReturnValueOnce(canonicalFetch);
+  apiMocks.streamPrewritingFirstDraftFeedback.mockImplementationOnce(
+    async (
+      _essayId: string,
+      _payload: unknown,
+      onFrame: (frame: { event: string; data: Record<string, unknown> }) => void,
+    ) => {
+      onFrame({ event: "start", data: { seq: 1 } });
+      onFrame({
+        event: "feedback_section_preview",
+        data: {
+          seq: 2,
+          section: "strengths",
+          items: ["课内初稿预览优点"],
+        },
+      });
+      onFrame({
+        event: "feedback_section_preview",
+        data: {
+          seq: 3,
+          section: "revision_tasks",
+          items: ["课内初稿预览任务"],
+        },
+      });
+      onFrame({
+        event: "done",
+        data: { seq: 4, result: { fetch_url: "/opaque/prewriting-feedback" } },
+      });
+    },
+  );
+
+  await startClassroomWizard();
+  await selectNarrativeScaffold();
+  await continueToOutline();
+  await userEvent.click(screen.getByRole("button", { name: "确认提纲，开始写" }));
+  await userEvent.type(
+    screen.getByLabelText("初稿"),
+    "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。",
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "提交初稿给 AI 教练" }),
+  );
+
+  expect(await screen.findByText("课内初稿预览优点")).toBeInTheDocument();
+  expect(await screen.findByText("课内初稿预览任务")).toBeInTheDocument();
+  expect(screen.queryByText("最终课内初稿优点")).not.toBeInTheDocument();
+
+  await act(async () => {
+    resolveCanonical(canonicalFeedback);
+    await canonicalFetch;
+  });
+
+  expect(await screen.findByText("最终课内初稿优点")).toBeInTheDocument();
+  expect(screen.getByText("最终课内修改任务")).toBeInTheDocument();
+  expect(apiMocks.streamPrewritingFirstDraftFeedback).toHaveBeenCalledWith(
+    "essay-1",
+    expect.objectContaining({
+      draft:
+        "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。",
+      client_submission_id: expect.any(String),
+    }),
+    expect.any(Function),
+    expect.any(Object),
+  );
+  expect(apiMocks.submitPrewritingFirstDraft).not.toHaveBeenCalled();
+  expect(apiMocks.fetchEssayFeedbackResult).toHaveBeenCalledWith(
+    "/opaque/prewriting-feedback",
+  );
 });
 
 test("direct writing from cards saves current cards before draft", async () => {

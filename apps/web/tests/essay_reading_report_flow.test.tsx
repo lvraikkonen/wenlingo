@@ -1,5 +1,12 @@
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Suspense } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -9,9 +16,11 @@ import { ReportPageContent } from "../src/app/parent/[studentId]/report/page";
 
 const apiMocks = vi.hoisted(() => ({
   createEssay: vi.fn(),
+  fetchEssayFeedbackResult: vi.fn(),
   fetchChildEssayArchive: vi.fn(),
   fetchEssayArchiveDetail: vi.fn(),
   hideChildEssay: vi.fn(),
+  streamEssayFeedback: vi.fn(),
   submitEssayRevision: vi.fn(),
   createReadingSession: vi.fn(),
   createReport: vi.fn(),
@@ -30,16 +39,20 @@ const essayFeedbackResponse = {
 
 vi.mock("../src/lib/api", () => ({
   createEssay: apiMocks.createEssay,
+  fetchEssayFeedbackResult: apiMocks.fetchEssayFeedbackResult,
   fetchChildEssayArchive: apiMocks.fetchChildEssayArchive,
   fetchEssayArchiveDetail: apiMocks.fetchEssayArchiveDetail,
   hideChildEssay: apiMocks.hideChildEssay,
+  streamEssayFeedback: apiMocks.streamEssayFeedback,
   submitEssayRevision: apiMocks.submitEssayRevision,
   createReadingSession: apiMocks.createReadingSession,
   createReport: apiMocks.createReport,
 }));
 
 beforeEach(() => {
+  delete process.env.NEXT_PUBLIC_ESSAY_FEEDBACK_STREAMING_ENABLED;
   apiMocks.createEssay.mockResolvedValue(essayFeedbackResponse);
+  apiMocks.fetchEssayFeedbackResult.mockResolvedValue(essayFeedbackResponse);
   apiMocks.submitEssayRevision.mockResolvedValue({
     revision: {
       id: "revision-1",
@@ -78,6 +91,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  delete process.env.NEXT_PUBLIC_ESSAY_FEEDBACK_STREAMING_ENABLED;
 });
 
 function expectReturnToChildrenLink() {
@@ -132,6 +146,7 @@ test("essay page supports draft feedback and revision settlement", async () => {
     title: "我学会了骑车",
     draft: "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
     entry: "existing_draft",
+    client_submission_id: expect.any(String),
   });
 
   await userEvent.type(
@@ -168,6 +183,264 @@ test("essay page supports draft feedback and revision settlement", async () => {
   await waitFor(() => {
     expect(apiMocks.createEssay).toHaveBeenCalledTimes(2);
     expect(screen.getByLabelText("下一稿")).toHaveValue("");
+  });
+});
+
+test("essay page streams direct draft previews before canonical feedback replaces them", async () => {
+  process.env.NEXT_PUBLIC_ESSAY_FEEDBACK_STREAMING_ENABLED = "true";
+  const canonicalFeedback = {
+    essay: { id: "e-stream" },
+    first_draft: {
+      id: "draft-stream",
+      essay_id: "e-stream",
+      version_label: "first_draft" as const,
+      reaction: null,
+    },
+    feedback: {
+      strengths: ["最终稿优点来自保存结果"],
+      improvements: ["最终稿建议来自保存结果"],
+      problem_monsters: [],
+      sentence_notes: ["最终句子提示"],
+      revision_tasks: [
+        { instruction: "最终修改任务", target: "第二段" },
+      ],
+    },
+  };
+  let resolveCanonical: (value: typeof canonicalFeedback) => void = () => {};
+  const canonicalFetch = new Promise<typeof canonicalFeedback>((resolve) => {
+    resolveCanonical = resolve;
+  });
+  apiMocks.fetchEssayFeedbackResult.mockReturnValueOnce(canonicalFetch);
+  apiMocks.streamEssayFeedback.mockImplementationOnce(
+    async (
+      _studentId: string,
+      _payload: unknown,
+      onFrame: (frame: { event: string; data: Record<string, unknown> }) => void,
+    ) => {
+      onFrame({ event: "start", data: { seq: 1 } });
+      onFrame({
+        event: "feedback_section_preview",
+        data: {
+          seq: 2,
+          section: "strengths",
+          items: ["能写清楚发生了什么"],
+        },
+      });
+      onFrame({
+        event: "feedback_section_preview",
+        data: {
+          seq: 3,
+          section: "revision_tasks",
+          items: ["给第二段加一个动作描写"],
+        },
+      });
+      onFrame({
+        event: "done",
+        data: { seq: 4, result: { fetch_url: "/opaque/essay-feedback/e-stream" } },
+      });
+    },
+  );
+
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    );
+  });
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "直接写初稿" }),
+  );
+  await userEvent.type(
+    await screen.findByLabelText("作文题目"),
+    "我学会了骑车",
+  );
+  await userEvent.type(
+    screen.getByLabelText("初稿"),
+    "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "获得点评" }));
+
+  expect(await screen.findByText("能写清楚发生了什么")).toBeInTheDocument();
+  expect(await screen.findByText("给第二段加一个动作描写")).toBeInTheDocument();
+  expect(screen.queryByText("最终稿优点来自保存结果")).not.toBeInTheDocument();
+
+  await act(async () => {
+    resolveCanonical(canonicalFeedback);
+    await canonicalFetch;
+  });
+
+  expect(await screen.findByText("最终稿优点来自保存结果")).toBeInTheDocument();
+  expect(await screen.findByText("最终稿建议来自保存结果")).toBeInTheDocument();
+  expect(await screen.findByText("最终句子提示")).toBeInTheDocument();
+  expect(screen.getByText("最终修改任务")).toBeInTheDocument();
+  const feedbackSection = screen.getByLabelText("作文点评");
+  const orderedHeadings = [
+    "写得好的地方",
+    "可以改进的地方",
+    "句子小提示",
+    "修改小任务",
+  ].map((heading) => within(feedbackSection).getByText(heading));
+  expect(
+    orderedHeadings.every((heading, index) => {
+      const nextHeading = orderedHeadings[index + 1];
+      return (
+        !nextHeading ||
+        Boolean(
+          heading.compareDocumentPosition(nextHeading) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        )
+      );
+    }),
+  ).toBe(true);
+  await waitFor(() => {
+    expect(screen.queryByText("能写清楚发生了什么")).not.toBeInTheDocument();
+    expect(screen.queryByText("给第二段加一个动作描写")).not.toBeInTheDocument();
+  });
+  expect(apiMocks.streamEssayFeedback).toHaveBeenCalledWith(
+    "s1",
+    expect.objectContaining({
+      title: "我学会了骑车",
+      draft: "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+      entry: "existing_draft",
+      client_submission_id: expect.any(String),
+    }),
+    expect.any(Function),
+    expect.any(Object),
+  );
+  expect(apiMocks.fetchEssayFeedbackResult).toHaveBeenCalledWith(
+    "/opaque/essay-feedback/e-stream",
+  );
+  expect(apiMocks.createEssay).not.toHaveBeenCalled();
+});
+
+test("essay page ignores stale streaming previews after reset", async () => {
+  process.env.NEXT_PUBLIC_ESSAY_FEEDBACK_STREAMING_ENABLED = "true";
+  let emitFrame: ((frame: { event: string; data: Record<string, unknown> }) => void) | null =
+    null;
+  let resolveStream: () => void = () => undefined;
+  const streamRequest = new Promise<void>((resolve) => {
+    resolveStream = resolve;
+  });
+  apiMocks.streamEssayFeedback.mockImplementationOnce(
+    async (
+      _studentId: string,
+      _payload: unknown,
+      onFrame: (frame: { event: string; data: Record<string, unknown> }) => void,
+    ) => {
+      emitFrame = onFrame;
+      onFrame({ event: "start", data: { seq: 1 } });
+      onFrame({
+        event: "feedback_section_preview",
+        data: {
+          seq: 2,
+          section: "strengths",
+          items: ["当前预览点评"],
+        },
+      });
+      await streamRequest;
+    },
+  );
+
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    );
+  });
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "直接写初稿" }),
+  );
+  await userEvent.type(screen.getByLabelText("作文题目"), "我学会了骑车");
+  await userEvent.type(screen.getByLabelText("初稿"), "我学会了骑车。");
+  await userEvent.click(screen.getByRole("button", { name: "获得点评" }));
+
+  expect(await screen.findByText("当前预览点评")).toBeInTheDocument();
+  await userEvent.click(screen.getAllByRole("button", { name: "写新的作文" })[0]);
+  expect(screen.queryByText("当前预览点评")).not.toBeInTheDocument();
+
+  await act(async () => {
+    emitFrame?.({
+      event: "feedback_section_preview",
+      data: {
+        seq: 3,
+        section: "strengths",
+        items: ["过期点评不应该出现"],
+      },
+    });
+  });
+
+  expect(screen.queryByText("过期点评不应该出现")).not.toBeInTheDocument();
+  await act(async () => {
+    resolveStream();
+    await streamRequest;
+  });
+});
+
+test("essay page ignores stale streaming previews after switching modes", async () => {
+  process.env.NEXT_PUBLIC_ESSAY_FEEDBACK_STREAMING_ENABLED = "true";
+  let emitFrame: ((frame: { event: string; data: Record<string, unknown> }) => void) | null =
+    null;
+  let resolveStream: () => void = () => undefined;
+  const streamRequest = new Promise<void>((resolve) => {
+    resolveStream = resolve;
+  });
+  apiMocks.streamEssayFeedback.mockImplementationOnce(
+    async (
+      _studentId: string,
+      _payload: unknown,
+      onFrame: (frame: { event: string; data: Record<string, unknown> }) => void,
+    ) => {
+      emitFrame = onFrame;
+      onFrame({ event: "start", data: { seq: 1 } });
+      onFrame({
+        event: "feedback_section_preview",
+        data: {
+          seq: 2,
+          section: "strengths",
+          items: ["切换前的预览点评"],
+        },
+      });
+      await streamRequest;
+    },
+  );
+
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    );
+  });
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "直接写初稿" }),
+  );
+  await userEvent.type(screen.getByLabelText("作文题目"), "我学会了骑车");
+  await userEvent.type(screen.getByLabelText("初稿"), "我学会了骑车。");
+  await userEvent.click(screen.getByRole("button", { name: "获得点评" }));
+  expect(await screen.findByText("切换前的预览点评")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "课内同步作文" }));
+  expect(screen.queryByText("切换前的预览点评")).not.toBeInTheDocument();
+
+  await act(async () => {
+    emitFrame?.({
+      event: "feedback_section_preview",
+      data: {
+        seq: 3,
+        section: "strengths",
+        items: ["切换模式后的过期点评"],
+      },
+    });
+  });
+
+  expect(screen.queryByText("切换模式后的过期点评")).not.toBeInTheDocument();
+  await act(async () => {
+    resolveStream();
+    await streamRequest;
   });
 });
 

@@ -71,6 +71,20 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function requestOpaqueJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, {
+    ...init,
+    credentials: "include",
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new ApiRequestError(response.status);
+  }
+
+  return response.json() as Promise<T>;
+}
+
 export type EssayFeedbackStreamFrame = SseFrame;
 
 export type EssayFeedbackStreamPayload = {
@@ -413,13 +427,22 @@ export function completeSentenceChallenge(
 
 export function createEssay(
   studentId: string,
-  payload: { title: string; draft: string; entry: "existing_draft" | "topic" },
+  payload: {
+    title: string;
+    draft: string;
+    entry: "existing_draft" | "topic";
+    client_submission_id: string;
+  },
 ): Promise<EssayResponse> {
   return requestJson<EssayResponse>(`/api/students/${studentId}/essays`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+export function fetchEssayFeedbackResult(fetchUrl: string): Promise<EssayResponse> {
+  return requestOpaqueJson<EssayResponse>(fetchUrl);
 }
 
 export function createClassroomWritingCastleEssay(
@@ -596,7 +619,7 @@ export function saveOutline(
 
 export function submitPrewritingFirstDraft(
   essayId: string,
-  payload: { draft: string },
+  payload: { draft: string; client_submission_id: string },
 ): Promise<EssayResponse> {
   return requestJson<EssayResponse>(`/api/essays/${essayId}/first-draft`, {
     method: "POST",
