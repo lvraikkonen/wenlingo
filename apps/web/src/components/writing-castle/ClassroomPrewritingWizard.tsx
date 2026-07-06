@@ -332,6 +332,7 @@ export function ClassroomPrewritingWizard({
   const pendingLabel = pendingMessages[pendingMessageIndex] ?? "";
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       prewritingJobCancelRef.current?.();

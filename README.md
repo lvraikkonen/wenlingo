@@ -136,6 +136,15 @@ Common variables that are easy to miss during Alpha QA:
 - `SENTENCE_CHALLENGE_DAILY_LIMIT_PER_STUDENT` and
   `SENTENCE_FEEDBACK_DAILY_LIMIT_PER_STUDENT` control V0.5b sentence limits
   once daily limits are enabled.
+- V0.6e streaming and prewriting reliability are controlled by API flags
+  `ESSAY_FEEDBACK_STREAMING_ENABLED`, `PREWRITING_PROGRESS_JOBS_ENABLED`,
+  `STREAMING_FIRST_EVENT_TIMEOUT_SECONDS`,
+  `STREAMING_SECTION_TIMEOUT_SECONDS`, and
+  `STREAMING_BACKEND_CONTINUATION_TIMEOUT_SECONDS`, plus web build flags
+  `NEXT_PUBLIC_ESSAY_FEEDBACK_STREAMING_ENABLED` and
+  `NEXT_PUBLIC_PREWRITING_PROGRESS_JOBS_ENABLED`. Keep both feature flags
+  `false` until rollout; the JSON feedback, material-card, and outline routes
+  remain the fallback path when the flags are disabled.
 
 ## Railway Alpha Deployment
 

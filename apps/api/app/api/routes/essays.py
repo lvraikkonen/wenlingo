@@ -177,6 +177,30 @@ def _latest_continue_revision_payload(session: Session, essay_id: str) -> dict[s
     return _continue_revision_payload_from_version(latest)
 
 
+def _first_draft_result_payload(session: Session, essay: Essay) -> dict[str, Any]:
+    first_draft = session.exec(
+        select(EssayVersion).where(
+            EssayVersion.essay_id == essay.id,
+            EssayVersion.version_label == get_version_label_for_round(1),
+        )
+    ).first()
+    if first_draft is None:
+        raise HTTPException(status_code=404, detail="first draft not found")
+    feedback = first_draft.ai_feedback if isinstance(first_draft.ai_feedback, dict) else {}
+    first_draft_payload = first_draft.model_dump()
+    first_draft_payload["reaction"] = feedback_reaction_value(
+        session,
+        essay.student_id,
+        "essay_draft",
+        first_draft.id,
+    )
+    return {
+        "essay": essay.model_dump(),
+        "first_draft": first_draft_payload,
+        "feedback": feedback,
+    }
+
+
 def _base_version_stale_response(session: Session, essay: Essay) -> JSONResponse:
     return JSONResponse(
         status_code=409,
@@ -597,6 +621,17 @@ async def create_essay(
         )
     session.commit()
     return response_payload
+
+
+@router.get("/api/essays/{essay_id}")
+def get_essay_feedback_result(
+    essay_id: str,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    context: ParentContext | None = Depends(require_auth_mode_state_change),
+):
+    essay = require_essay_for_auth_mode(session, settings, context, essay_id)
+    return _first_draft_result_payload(session, essay)
 
 
 @router.post("/api/students/{student_id}/essays/stream-feedback")

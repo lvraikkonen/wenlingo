@@ -614,13 +614,16 @@ class StreamingBackendTask:
         except asyncio.TimeoutError:
             return self.event_builder.frame("heartbeat", {"phase": "waiting"})
         if frame is None:
+            result = {
+                "essay_id": self.save_context.essay_id if self.save_context else "",
+                "first_draft_version_id": self.essay_version_id or "",
+                "fetch_url": self.result_fetch_url,
+            }
             return self.event_builder.frame(
                 "error" if self.error_code else "done",
                 {
                     "stream_final_status": self.stream_final_status,
-                    "essay_id": self.save_context.essay_id if self.save_context else "",
-                    "first_draft_version_id": self.essay_version_id or "",
-                    "fetch_url": self.result_fetch_url,
+                    "result": result,
                     "error_code": self.error_code,
                 },
             )
@@ -713,9 +716,11 @@ class StreamingBackendTask:
                 "done",
                 {
                     "stream_final_status": self.stream_final_status,
-                    "essay_id": self.save_context.essay_id if self.save_context else "",
-                    "first_draft_version_id": self.essay_version_id or "",
-                    "fetch_url": self.result_fetch_url,
+                    "result": {
+                        "essay_id": self.save_context.essay_id if self.save_context else "",
+                        "first_draft_version_id": self.essay_version_id or "",
+                        "fetch_url": self.result_fetch_url,
+                    },
                 },
             )
         )
@@ -1004,9 +1009,11 @@ async def _single_done_stream(
         "done",
         {
             "stream_final_status": "completed",
-            "essay_id": "",
-            "first_draft_version_id": "",
-            "fetch_url": fetch_url,
+            "result": {
+                "essay_id": "",
+                "first_draft_version_id": "",
+                "fetch_url": fetch_url,
+            },
         },
     )
     yield format_sse_event(start.event_name, start.data)

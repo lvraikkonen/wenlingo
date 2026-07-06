@@ -1,4 +1,5 @@
 from datetime import timedelta
+import json
 
 import pytest
 from sqlmodel import select
@@ -67,6 +68,21 @@ class RaisingRunner:
         raise RuntimeError("provider exploded")
 
 
+def _done_fetch_url(stream_body: str) -> str:
+    for frame in stream_body.split("\n\n"):
+        if "event: done" not in frame:
+            continue
+        data_line = next(
+            (line for line in frame.splitlines() if line.startswith("data: ")),
+            "",
+        )
+        if not data_line:
+            continue
+        payload = json.loads(data_line.removeprefix("data: "))
+        return payload["result"]["fetch_url"]
+    raise AssertionError("stream did not include a done fetch_url")
+
+
 def test_direct_draft_json_requires_client_submission_id(session, client):
     family = create_authenticated_family(session)
     student = family["student"]
@@ -114,6 +130,34 @@ def test_direct_draft_stream_returns_previews_and_done(session, client):
     log = session.exec(select(LLMCallLog)).one()
     assert log.streaming_enabled is True
     assert log.stream_final_status == "completed"
+
+
+def test_direct_draft_stream_done_fetch_url_returns_canonical_feedback(session, client):
+    client.app.dependency_overrides[get_settings] = lambda: Settings(
+        llm_provider="mock",
+        essay_feedback_streaming_enabled=True,
+    )
+    family = create_authenticated_family(session)
+    student = family["student"]
+
+    response = client.post(
+        f"/api/students/{student.id}/essays/stream-feedback",
+        json={
+            "title": "我学会了骑车",
+            "draft": "刚开始我很害怕。后来我会了。我很开心。",
+            "entry": "existing_draft",
+            "client_submission_id": "stream-direct-fetch-result",
+        },
+    )
+
+    assert response.status_code == 200
+    result = client.get(_done_fetch_url(response.text))
+
+    assert result.status_code == 200
+    payload = result.json()
+    assert payload["essay"]["id"]
+    assert payload["first_draft"]["id"]
+    assert payload["feedback"]["revision_tasks"]
 
 
 def test_direct_draft_stream_uses_session_factory_not_request_session_dependency(
@@ -525,6 +569,40 @@ def test_prewriting_first_draft_stream_returns_previews_and_done(session, client
     log = session.exec(select(LLMCallLog)).one()
     assert log.streaming_enabled is True
     assert log.stream_final_status == "completed"
+
+
+def test_prewriting_first_draft_stream_done_fetch_url_returns_canonical_feedback(
+    session,
+    client,
+):
+    client.app.dependency_overrides[get_settings] = lambda: Settings(
+        llm_provider="mock",
+        essay_feedback_streaming_enabled=True,
+    )
+    family = create_authenticated_family(session)
+    student = family["student"]
+    start = client.post(
+        f"/api/students/{student.id}/writing-castle/classroom",
+        json={"topic_text": "我学会了骑车"},
+    )
+    essay_id = start.json()["essay"]["id"]
+
+    response = client.post(
+        f"/api/essays/{essay_id}/first-draft/stream-feedback",
+        json={
+            "draft": "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。",
+            "client_submission_id": "stream-prewriting-fetch-result",
+        },
+    )
+
+    assert response.status_code == 200
+    result = client.get(_done_fetch_url(response.text))
+
+    assert result.status_code == 200
+    payload = result.json()
+    assert payload["essay"]["id"] == essay_id
+    assert payload["first_draft"]["essay_id"] == essay_id
+    assert payload["feedback"]["revision_tasks"]
 
 
 def test_prewriting_stream_existing_first_draft_rejects_before_provider_call(session, client):
