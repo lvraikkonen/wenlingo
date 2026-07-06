@@ -553,6 +553,22 @@ export type AdminAlphaAIUsageRow = {
   estimated_cost: number;
   pricing_status: string;
   avg_latency_ms: number;
+  streaming_enabled_count: number;
+  stream_completed_count: number;
+  client_disconnect_count: number;
+  provider_failed_before_visible_content_count: number;
+  provider_failed_after_visible_content_count: number;
+  usage_available_count: number;
+  usage_missing_count: number;
+  calls_with_usage_applicable: number;
+  usage_available_rate: number;
+  first_provider_delta_p50_ms: number;
+  first_visible_content_p50_ms: number;
+  provider_stream_duration_p50_ms: number;
+  live_llm_success_count: number;
+  timeout_count: number;
+  schema_validation_success_count: number;
+  source_reference_success_count: number;
 };
 
 export type AdminAlphaAIUsageResponse = {

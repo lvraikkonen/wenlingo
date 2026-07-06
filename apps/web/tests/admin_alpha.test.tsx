@@ -110,6 +110,22 @@ const usageResponse = {
       estimated_cost: 0.0015,
       pricing_status: "pricing_configured",
       avg_latency_ms: 42,
+      streaming_enabled_count: 1,
+      stream_completed_count: 1,
+      client_disconnect_count: 0,
+      provider_failed_before_visible_content_count: 0,
+      provider_failed_after_visible_content_count: 0,
+      usage_available_count: 1,
+      usage_missing_count: 0,
+      calls_with_usage_applicable: 1,
+      usage_available_rate: 1,
+      first_provider_delta_p50_ms: 80,
+      first_visible_content_p50_ms: 120,
+      provider_stream_duration_p50_ms: 900,
+      live_llm_success_count: 1,
+      timeout_count: 1,
+      schema_validation_success_count: 1,
+      source_reference_success_count: 1,
     },
   ],
 };
@@ -246,6 +262,11 @@ test("admin renders grouped sections and ai usage aggregates", async () => {
   expect(within(usageTable).getByRole("columnheader", { name: "Model" })).toBeInTheDocument();
   expect(within(usageTable).getByRole("columnheader", { name: "Status" })).toBeInTheDocument();
   expect(within(usageTable).getByRole("columnheader", { name: "Fallback" })).toBeInTheDocument();
+  expect(screen.getByText("Usage available")).toBeInTheDocument();
+  expect(screen.getByText("First visible")).toBeInTheDocument();
+  expect(screen.getByText("Fallback rate")).toBeInTheDocument();
+  expect(screen.getByText("Live LLM")).toBeInTheDocument();
+  expect(screen.getByText("Timeouts")).toBeInTheDocument();
   expect(within(usageTable).getByRole("columnheader", { name: "Cost" })).toBeInTheDocument();
   expect(within(usageTable).getByRole("columnheader", { name: "Avg latency" })).toBeInTheDocument();
   expect(within(usageTable).getByText("test-provider")).toBeInTheDocument();
@@ -253,6 +274,14 @@ test("admin renders grouped sections and ai usage aggregates", async () => {
   expect(within(usageTable).getByText("23")).toBeInTheDocument();
   expect(within(usageTable).getByText("$0.001500")).toBeInTheDocument();
   expect(within(usageTable).getByText("42ms")).toBeInTheDocument();
+  const usageCells = within(
+    within(usageTable).getByText("test-provider").closest("tr")!,
+  ).getAllByRole("cell");
+  expect(usageCells[8]).toHaveTextContent("100% (1/1)");
+  expect(usageCells[9]).toHaveTextContent("120ms");
+  expect(usageCells[10]).toHaveTextContent("0%");
+  expect(usageCells[11]).toHaveTextContent("1");
+  expect(usageCells[12]).toHaveTextContent("1");
 });
 
 test("admin renders unconfigured pricing instead of zero cost", async () => {
@@ -277,6 +306,22 @@ test("admin renders unconfigured pricing instead of zero cost", async () => {
         estimated_cost: 0,
         pricing_status: "pricing_unconfigured",
         avg_latency_ms: 12,
+        streaming_enabled_count: 0,
+        stream_completed_count: 0,
+        client_disconnect_count: 0,
+        provider_failed_before_visible_content_count: 0,
+        provider_failed_after_visible_content_count: 0,
+        usage_available_count: 0,
+        usage_missing_count: 0,
+        calls_with_usage_applicable: 0,
+        usage_available_rate: 0,
+        first_provider_delta_p50_ms: 0,
+        first_visible_content_p50_ms: 0,
+        provider_stream_duration_p50_ms: 0,
+        live_llm_success_count: 1,
+        timeout_count: 0,
+        schema_validation_success_count: 1,
+        source_reference_success_count: 1,
       },
     ],
   });

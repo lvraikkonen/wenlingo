@@ -42,6 +42,17 @@ function formatPhoneStatus(row: AdminAlphaOverviewRow): string {
   return row.phone_bound ? "Phone bound" : "Phone not bound";
 }
 
+function formatPercent(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
+
+function formatFallbackRate(row: AdminAlphaAIUsageRow): string {
+  if (row.call_count === 0) {
+    return "0%";
+  }
+  return formatPercent(row.deterministic_fallback_count / row.call_count);
+}
+
 function canRevokeInvite(row: AdminAlphaOverviewRow): boolean {
   return row.invite_status === "issued" && !row.parent_id;
 }
@@ -830,6 +841,11 @@ export default function AdminAlphaPage() {
                         <th className="px-3 py-2">Calls</th>
                         <th className="px-3 py-2">Success</th>
                         <th className="px-3 py-2">Fallback</th>
+                        <th className="px-3 py-2">Usage available</th>
+                        <th className="px-3 py-2">First visible</th>
+                        <th className="px-3 py-2">Fallback rate</th>
+                        <th className="px-3 py-2">Live LLM</th>
+                        <th className="px-3 py-2">Timeouts</th>
                         <th className="px-3 py-2">Failures</th>
                         <th className="px-3 py-2">Limit hits</th>
                         <th className="px-3 py-2">Tokens</th>
@@ -854,6 +870,21 @@ export default function AdminAlphaPage() {
                             {row.fallback_success_count} / local{" "}
                             {row.deterministic_fallback_count}
                           </td>
+                          <td className="px-3 py-2">
+                            {formatPercent(row.usage_available_rate)} (
+                            {row.usage_available_count}/
+                            {row.calls_with_usage_applicable})
+                          </td>
+                          <td className="px-3 py-2">
+                            {row.first_visible_content_p50_ms}ms
+                          </td>
+                          <td className="px-3 py-2">
+                            {formatFallbackRate(row)}
+                          </td>
+                          <td className="px-3 py-2">
+                            {row.live_llm_success_count}
+                          </td>
+                          <td className="px-3 py-2">{row.timeout_count}</td>
                           <td className="px-3 py-2">{row.failure_count}</td>
                           <td className="px-3 py-2">
                             {row.daily_limit_hit_count}
