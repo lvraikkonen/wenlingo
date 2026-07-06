@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
+  ApiRequestError,
   completeSentenceChallenge,
+  createMaterialCardsJob,
   createAssessment,
   createClassroomWritingCastleEssay,
+  createOutlineJob,
   createSentenceChallenge,
   createSentenceTraining,
   fetchChildEssayArchive,
@@ -17,7 +20,9 @@ import {
   getAdminAlphaAIUsage,
   getActiveClassroomWritingCastleEssay,
   getDashboard,
+  getPrewritingJob,
   hideChildEssay,
+  prewritingJobEventsUrl,
   restoreParentEssay,
   retryEssayRevisionAttempt,
   saveMaterialAnswers,
@@ -25,6 +30,8 @@ import {
   saveOutline,
   saveTopicFocus,
   selectWritingCastleScaffold,
+  streamEssayFeedback,
+  streamPrewritingFirstDraftFeedback,
   submitEssayRevision,
   submitPrewritingFirstDraft,
 } from "../src/lib/api";
@@ -53,6 +60,21 @@ function jsonResponse(body: unknown) {
   return {
     ok: true,
     json: async () => body,
+  };
+}
+
+function streamResponse(chunks: string[]) {
+  return {
+    ok: true,
+    body: new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        for (const chunk of chunks) {
+          controller.enqueue(encoder.encode(chunk));
+        }
+        controller.close();
+      },
+    }),
   };
 }
 
@@ -567,6 +589,221 @@ describe("api client", () => {
         cache: "no-store",
       }),
     ]);
+  });
+
+  test("streamEssayFeedback posts payload and emits parsed SSE frames", async () => {
+    fetchMock.mockResolvedValueOnce(
+      streamResponse([
+        'event: start\ndata: {"seq":1}\n\n',
+        'event: done\ndata: {"seq":2,"result":{"fetch_url":"/api/essays/essay-1/archive-detail"}}\n\n',
+      ]),
+    );
+    const payload = {
+      title: "我学会了骑车",
+      draft: "我学会了骑车。",
+      entry: "existing_draft",
+      client_submission_id: "client-1",
+    } satisfies Parameters<typeof streamEssayFeedback>[1];
+    const frames: unknown[] = [];
+
+    await streamEssayFeedback("student-1", payload, (frame) => {
+      frames.push(frame);
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/students/student-1/essays/stream-feedback",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        credentials: "include",
+        cache: "no-store",
+      }),
+    );
+    expect(frames).toEqual([
+      { event: "start", data: { seq: 1 } },
+      {
+        event: "done",
+        data: {
+          seq: 2,
+          result: { fetch_url: "/api/essays/essay-1/archive-detail" },
+        },
+      },
+    ]);
+  });
+
+  test("streamPrewritingFirstDraftFeedback buffers split SSE frames", async () => {
+    fetchMock.mockResolvedValueOnce(
+      streamResponse([
+        'event: feedback_section_preview\ndata: {"seq":1,',
+        '"section":"strengths","items":["细节清楚"]}\n\n',
+      ]),
+    );
+    const payload = {
+      draft: "我学会了骑车。",
+      client_submission_id: "client-1",
+    } satisfies Parameters<typeof streamPrewritingFirstDraftFeedback>[1];
+    const frames: unknown[] = [];
+
+    await streamPrewritingFirstDraftFeedback("essay-1", payload, (frame) => {
+      frames.push(frame);
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/essays/essay-1/first-draft/stream-feedback",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        credentials: "include",
+        cache: "no-store",
+      }),
+    );
+    expect(frames).toEqual([
+      {
+        event: "feedback_section_preview",
+        data: { seq: 1, section: "strengths", items: ["细节清楚"] },
+      },
+    ]);
+  });
+
+  test("streamEssayFeedback emits a final complete frame without a trailing blank line", async () => {
+    fetchMock.mockResolvedValueOnce(
+      streamResponse(['event: done\ndata: {"seq":1,"result":{"fetch_url":"/api/essays/essay-1"}}']),
+    );
+    const frames: unknown[] = [];
+
+    await streamEssayFeedback(
+      "student-1",
+      {
+        title: "我学会了骑车",
+        draft: "我学会了骑车。",
+        entry: "existing_draft",
+        client_submission_id: "client-1",
+      },
+      (frame) => {
+        frames.push(frame);
+      },
+    );
+
+    expect(frames).toEqual([
+      {
+        event: "done",
+        data: { seq: 1, result: { fetch_url: "/api/essays/essay-1" } },
+      },
+    ]);
+  });
+
+  test("streamEssayFeedback surfaces non-ok and missing-body stream responses", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+    });
+
+    await expect(
+      streamEssayFeedback(
+        "student-1",
+        {
+          draft: "我学会了骑车。",
+          entry: "existing_draft",
+          client_submission_id: "client-1",
+        },
+        () => undefined,
+      ),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      body: null,
+    });
+
+    await expect(
+      streamEssayFeedback(
+        "student-1",
+        {
+          draft: "我学会了骑车。",
+          entry: "existing_draft",
+          client_submission_id: "client-1",
+        },
+        () => undefined,
+      ),
+    ).rejects.toThrow("Streaming response did not include a readable body.");
+  });
+
+  test("streamEssayFeedback passes through an AbortSignal", async () => {
+    fetchMock.mockResolvedValueOnce(streamResponse([]));
+    const controller = new AbortController();
+
+    await streamEssayFeedback(
+      "student-1",
+      {
+        draft: "我学会了骑车。",
+        entry: "existing_draft",
+        client_submission_id: "client-1",
+      },
+      () => undefined,
+      { signal: controller.signal },
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/students/student-1/essays/stream-feedback",
+      expect.objectContaining({
+        signal: controller.signal,
+      }),
+    );
+  });
+
+  test("prewriting job helpers call job endpoints", async () => {
+    const jobResponse = {
+      schema_version: "v1",
+      job_id: "job-1",
+      task_name: "material_cards",
+      status: "queued",
+      stage: "queued",
+      seq: 1,
+      result_ref_type: "material_cards",
+      result_ref_id: null,
+      error_code: "",
+      error_message: "",
+    };
+    fetchMock.mockResolvedValue(jsonResponse(jobResponse));
+    const payload = { idempotency_key: "job-key-1" };
+
+    await createMaterialCardsJob("essay-1", payload);
+    await createOutlineJob("essay-1", payload);
+    await getPrewritingJob("job-1");
+
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/essays/essay-1/material-cards/jobs",
+      "/api/essays/essay-1/outline/jobs",
+      "/api/prewriting/jobs/job-1",
+    ]);
+    expect(fetchMock.mock.calls.map((call) => call[1])).toEqual([
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        credentials: "include",
+        cache: "no-store",
+      }),
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        credentials: "include",
+        cache: "no-store",
+      }),
+      expect.objectContaining({
+        credentials: "include",
+        cache: "no-store",
+      }),
+    ]);
+  });
+
+  test("prewritingJobEventsUrl returns same-origin events endpoint", () => {
+    expect(prewritingJobEventsUrl("job-1")).toBe(
+      "/api/prewriting/jobs/job-1/events",
+    );
   });
 
   test("essay archive helpers call child and parent archive endpoints", async () => {

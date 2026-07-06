@@ -37,6 +37,7 @@ import type {
   WritingCastleTopicAnalysisResponse,
   WritingOutlineSection,
 } from "./types";
+import { parseSseFrames, type SseFrame } from "./sse";
 
 const rawApiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ?? "";
@@ -68,6 +69,165 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+export type EssayFeedbackStreamFrame = SseFrame;
+
+export type EssayFeedbackStreamPayload = {
+  title?: string;
+  draft: string;
+  entry?: "existing_draft" | "topic";
+  client_submission_id: string;
+};
+
+type PrewritingFirstDraftFeedbackStreamPayload = {
+  draft: string;
+  client_submission_id: string;
+};
+
+async function streamPostJson(
+  path: string,
+  payload: unknown,
+  onFrame: (frame: EssayFeedbackStreamFrame) => void,
+  options?: { signal?: AbortSignal },
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    credentials: "include",
+    cache: "no-store",
+    signal: options?.signal,
+  });
+
+  if (!response.ok) {
+    throw new ApiRequestError(response.status);
+  }
+
+  if (!response.body) {
+    throw new Error("Streaming response did not include a readable body.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const drainCompleteFrames = () => {
+    buffer = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    let frameEnd = buffer.indexOf("\n\n");
+
+    while (frameEnd !== -1) {
+      const frameChunk = buffer.slice(0, frameEnd + 2);
+      buffer = buffer.slice(frameEnd + 2);
+      for (const frame of parseSseFrames(frameChunk)) {
+        onFrame(frame);
+      }
+      frameEnd = buffer.indexOf("\n\n");
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    drainCompleteFrames();
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim().length > 0 && !buffer.includes("\n\n")) {
+    buffer += "\n\n";
+  }
+  drainCompleteFrames();
+}
+
+export function streamEssayFeedback(
+  studentId: string,
+  payload: EssayFeedbackStreamPayload,
+  onFrame: (frame: EssayFeedbackStreamFrame) => void,
+  options?: { signal?: AbortSignal },
+): Promise<void> {
+  return streamPostJson(
+    `/api/students/${studentId}/essays/stream-feedback`,
+    payload,
+    onFrame,
+    options,
+  );
+}
+
+export function streamPrewritingFirstDraftFeedback(
+  essayId: string,
+  payload: PrewritingFirstDraftFeedbackStreamPayload,
+  onFrame: (frame: EssayFeedbackStreamFrame) => void,
+  options?: { signal?: AbortSignal },
+): Promise<void> {
+  return streamPostJson(
+    `/api/essays/${essayId}/first-draft/stream-feedback`,
+    payload,
+    onFrame,
+    options,
+  );
+}
+
+export type PrewritingJobResponse = {
+  schema_version: string;
+  job_id: string;
+  task_name: string;
+  status: string;
+  stage: string;
+  seq: number;
+  result_ref_type: string;
+  result_ref_id: string | null;
+  error_code: string;
+  error_message: string;
+};
+
+export type PrewritingJobCreatePayload = { idempotency_key: string };
+
+export function createMaterialCardsJob(
+  essayId: string,
+  payload: PrewritingJobCreatePayload,
+): Promise<PrewritingJobResponse> {
+  return requestJson<PrewritingJobResponse>(
+    `/api/essays/${essayId}/material-cards/jobs`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function createOutlineJob(
+  essayId: string,
+  payload: PrewritingJobCreatePayload,
+): Promise<PrewritingJobResponse> {
+  return requestJson<PrewritingJobResponse>(
+    `/api/essays/${essayId}/outline/jobs`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function getPrewritingJob(
+  jobId: string,
+): Promise<PrewritingJobResponse> {
+  return requestJson<PrewritingJobResponse>(`/api/prewriting/jobs/${jobId}`);
+}
+
+export function prewritingJobEventsUrl(jobId: string): string {
+  return `${API_BASE_URL}/api/prewriting/jobs/${jobId}/events`;
+}
+
+export function openPrewritingJobEvents(jobId: string): EventSource {
+  return new EventSource(prewritingJobEventsUrl(jobId), {
+    withCredentials: true,
+  });
 }
 
 export function getDashboard(studentId: string): Promise<DashboardResponse> {
