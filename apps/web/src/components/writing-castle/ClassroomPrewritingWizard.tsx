@@ -969,7 +969,7 @@ export function ClassroomPrewritingWizard({
         }
         return submitPrewritingFirstDraft(essay.id, {
           draft,
-          client_submission_id: clientSubmissionId,
+          client_submission_id: createClientSubmissionId(),
         });
       }
       if (!isCurrentDraftFeedbackRequest()) {

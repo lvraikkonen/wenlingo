@@ -315,6 +315,60 @@ test("essay page streams direct draft previews before canonical feedback replace
   expect(apiMocks.createEssay).not.toHaveBeenCalled();
 });
 
+test("essay page streaming error before preview falls back with a fresh submission id", async () => {
+  process.env.NEXT_PUBLIC_ESSAY_FEEDBACK_STREAMING_ENABLED = "true";
+  apiMocks.streamEssayFeedback.mockRejectedValueOnce(
+    new Error("stream failed before preview"),
+  );
+
+  await act(async () => {
+    render(
+      <Suspense fallback={null}>
+        <EssayPage params={Promise.resolve({ studentId: "s1" })} />
+      </Suspense>,
+    );
+  });
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "直接写初稿" }),
+  );
+  await userEvent.type(
+    await screen.findByLabelText("作文题目"),
+    "我学会了骑车",
+  );
+  await userEvent.type(
+    screen.getByLabelText("初稿"),
+    "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "获得点评" }));
+
+  expect(await screen.findByText("给第二段加一个动作描写")).toBeInTheDocument();
+  expect(apiMocks.streamEssayFeedback).toHaveBeenCalledWith(
+    "s1",
+    expect.objectContaining({
+      client_submission_id: expect.any(String),
+    }),
+    expect.any(Function),
+    expect.any(Object),
+  );
+  expect(apiMocks.createEssay).toHaveBeenCalledWith("s1", {
+    title: "我学会了骑车",
+    draft: "我学会了骑车。刚开始我很害怕。后来我会了。我很开心。",
+    entry: "existing_draft",
+    client_submission_id: expect.any(String),
+  });
+  const streamPayload = apiMocks.streamEssayFeedback.mock.calls[0]?.[1] as {
+    client_submission_id: string;
+  };
+  const fallbackPayload = apiMocks.createEssay.mock.calls[0]?.[1] as {
+    client_submission_id: string;
+  };
+  expect(fallbackPayload.client_submission_id).not.toBe(
+    streamPayload.client_submission_id,
+  );
+  expect(apiMocks.fetchEssayFeedbackResult).not.toHaveBeenCalled();
+});
+
 test("essay page ignores stale streaming previews after reset", async () => {
   process.env.NEXT_PUBLIC_ESSAY_FEEDBACK_STREAMING_ENABLED = "true";
   let emitFrame: ((frame: { event: string; data: Record<string, unknown> }) => void) | null =

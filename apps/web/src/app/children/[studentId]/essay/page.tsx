@@ -333,7 +333,7 @@ function EssayPageContent({ studentId }: { studentId: string }) {
             title: submittedTitle,
             draft: submittedDraft,
             entry: "existing_draft",
-            client_submission_id: clientSubmissionId,
+            client_submission_id: createClientSubmissionId(),
           });
         }
 

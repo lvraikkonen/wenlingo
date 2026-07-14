@@ -1655,6 +1655,15 @@ test("first draft streaming error before preview falls back to JSON feedback", a
       "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。",
     client_submission_id: expect.any(String),
   });
+  const streamPayload = apiMocks.streamPrewritingFirstDraftFeedback.mock.calls[0]?.[1] as {
+    client_submission_id: string;
+  };
+  const fallbackPayload = apiMocks.submitPrewritingFirstDraft.mock.calls[0]?.[1] as {
+    client_submission_id: string;
+  };
+  expect(fallbackPayload.client_submission_id).not.toBe(
+    streamPayload.client_submission_id,
+  );
   expect(apiMocks.fetchEssayFeedbackResult).not.toHaveBeenCalled();
 });
 
