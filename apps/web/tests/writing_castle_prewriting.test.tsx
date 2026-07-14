@@ -1623,6 +1623,41 @@ test("first draft streaming previews are replaced by canonical feedback", async 
   );
 });
 
+test("first draft streaming error before preview falls back to JSON feedback", async () => {
+  process.env.NEXT_PUBLIC_ESSAY_FEEDBACK_STREAMING_ENABLED = "true";
+  apiMocks.streamPrewritingFirstDraftFeedback.mockRejectedValueOnce(
+    new Error("stream failed before preview"),
+  );
+
+  await startClassroomWizard();
+  await selectNarrativeScaffold();
+  await continueToOutline();
+  await userEvent.click(screen.getByRole("button", { name: "确认提纲，开始写" }));
+  await userEvent.type(
+    screen.getByLabelText("初稿"),
+    "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。",
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "提交初稿给 AI 教练" }),
+  );
+
+  expect(await screen.findByText("修改小任务")).toBeInTheDocument();
+  expect(apiMocks.streamPrewritingFirstDraftFeedback).toHaveBeenCalledWith(
+    "essay-1",
+    expect.objectContaining({
+      client_submission_id: expect.any(String),
+    }),
+    expect.any(Function),
+    expect.any(Object),
+  );
+  expect(apiMocks.submitPrewritingFirstDraft).toHaveBeenCalledWith("essay-1", {
+    draft:
+      "我学会了骑车。刚开始我很害怕，手紧紧抓着车把。后来我慢慢练习，终于能自己骑了。我很开心。",
+    client_submission_id: expect.any(String),
+  });
+  expect(apiMocks.fetchEssayFeedbackResult).not.toHaveBeenCalled();
+});
+
 test("direct writing from cards saves current cards before draft", async () => {
   await startClassroomWizard();
   await selectNarrativeScaffold();

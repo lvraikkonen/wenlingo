@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   ApiRequestError,
+  StreamResponseError,
   completeSentenceChallenge,
   createMaterialCardsJob,
   createAssessment,
@@ -665,6 +666,46 @@ describe("api client", () => {
       {
         event: "feedback_section_preview",
         data: { seq: 1, section: "strengths", items: ["细节清楚"] },
+      },
+    ]);
+  });
+
+  test("streamPrewritingFirstDraftFeedback rejects backend error frames", async () => {
+    fetchMock.mockResolvedValueOnce(
+      streamResponse([
+        'event: start\ndata: {"seq":1}\n\n',
+        'event: error\ndata: {"seq":2,"error_code":"STREAM_SECTION_OUT_OF_ORDER","stream_final_status":"provider_failed_before_visible_content","message":"{\\n"}\n\n',
+      ]),
+    );
+    const frames: unknown[] = [];
+
+    await expect(
+      streamPrewritingFirstDraftFeedback(
+        "essay-1",
+        {
+          draft: "我学会了骑车。",
+          client_submission_id: "client-1",
+        },
+        (frame) => {
+          frames.push(frame);
+        },
+      ),
+    ).rejects.toMatchObject({
+      name: "StreamResponseError",
+      code: "STREAM_SECTION_OUT_OF_ORDER",
+      finalStatus: "provider_failed_before_visible_content",
+    } satisfies Partial<StreamResponseError>);
+
+    expect(frames).toEqual([
+      { event: "start", data: { seq: 1 } },
+      {
+        event: "error",
+        data: {
+          seq: 2,
+          error_code: "STREAM_SECTION_OUT_OF_ORDER",
+          stream_final_status: "provider_failed_before_visible_content",
+          message: "{\n",
+        },
       },
     ]);
   });

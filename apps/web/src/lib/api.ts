@@ -53,6 +53,30 @@ export class ApiRequestError extends Error {
   }
 }
 
+export class StreamResponseError extends Error {
+  code: string;
+  finalStatus: string;
+
+  constructor(frame: EssayFeedbackStreamFrame) {
+    const code =
+      typeof frame.data.error_code === "string"
+        ? frame.data.error_code
+        : "STREAM_ERROR";
+    const message =
+      typeof frame.data.message === "string" && frame.data.message.length > 0
+        ? frame.data.message
+        : code;
+
+    super(message);
+    this.name = "StreamResponseError";
+    this.code = code;
+    this.finalStatus =
+      typeof frame.data.stream_final_status === "string"
+        ? frame.data.stream_final_status
+        : "";
+  }
+}
+
 export function isUnauthorizedError(error: unknown): boolean {
   return error instanceof ApiRequestError && error.status === 401;
 }
@@ -135,6 +159,9 @@ async function streamPostJson(
       buffer = buffer.slice(frameEnd + 2);
       for (const frame of parseSseFrames(frameChunk)) {
         onFrame(frame);
+        if (frame.event === "error") {
+          throw new StreamResponseError(frame);
+        }
       }
       frameEnd = buffer.indexOf("\n\n");
     }
